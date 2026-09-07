@@ -1,9 +1,8 @@
 /* =========================================================
    AI ANNOTATION STUDIO
-   Browser-only professional annotation application
+   CORRECTED VERSION
+   Browser / GitHub Pages
    No Supabase
-   No database
-   No API key
 ========================================================= */
 
 import {
@@ -12,25 +11,23 @@ import {
 
 
 /* =========================================================
-   CONFIGURATION
+   CONFIG
 ========================================================= */
 
 const CONFIG = {
 
-    /*
-     * General object detection model.
-     *
-     * Transformers.js supports object detection directly
-     * inside the browser.
-     */
     detectionModel:
         "Xenova/detr-resnet-50",
 
     /*
-     * Panoptic segmentation model.
+     * Keep segmentation disabled by default until a
+     * compatible segmentation model is selected.
+     *
+     * The application still supports the segmentation
+     * editor/data structure.
      */
     segmentationModel:
-        "Xenova/detr-resnet-50-panoptic",
+        null,
 
     defaultThreshold: 0.50,
 
@@ -44,7 +41,7 @@ const CONFIG = {
 
 
 /* =========================================================
-   APPLICATION STATE
+   STATE
 ========================================================= */
 
 const state = {
@@ -52,6 +49,8 @@ const state = {
     image: null,
 
     imageUrl: null,
+
+    imageBlob: null,
 
     imageName: null,
 
@@ -71,11 +70,9 @@ const state = {
 
     selectedId: null,
 
-    history: [],
+    undoStack: [],
 
     redoStack: [],
-
-    undoStack: [],
 
     zoom: 1,
 
@@ -99,7 +96,7 @@ const state = {
 
 
 /* =========================================================
-   DOM
+   DOM HELPERS
 ========================================================= */
 
 const $ = selector =>
@@ -117,7 +114,7 @@ const ctx =
 
 
 /* =========================================================
-   INITIALIZATION
+   START
 ========================================================= */
 
 document.addEventListener(
@@ -150,6 +147,8 @@ function initialize() {
 
     updateHistoryPage();
 
+    updateCursor();
+
     setAIStatus("Ready");
 
 }
@@ -172,21 +171,31 @@ function setupNavigation() {
 
                 $$(".nav-item")
                     .forEach(item =>
-                        item.classList.remove("active")
+                        item.classList.remove(
+                            "active"
+                        )
                     );
 
-                button.classList.add("active");
+                button.classList.add(
+                    "active"
+                );
 
                 $$(".page")
                     .forEach(item =>
-                        item.classList.remove("active-page")
+                        item.classList.remove(
+                            "active-page"
+                        )
                     );
 
                 const target =
                     $(`#${page}Page`);
 
                 if (target) {
-                    target.classList.add("active-page");
+
+                    target.classList.add(
+                        "active-page"
+                    );
+
                 }
 
                 const titles = {
@@ -215,16 +224,17 @@ function setupNavigation() {
 
                 if (titles[page]) {
 
-                    $("#pageTitle").textContent =
+                    $("#pageTitle")
+                        .textContent =
                         titles[page][0];
 
-                    $("#pageSubtitle").textContent =
+                    $("#pageSubtitle")
+                        .textContent =
                         titles[page][1];
 
                 }
 
             }
-
         );
 
     });
@@ -247,7 +257,7 @@ function setupUpload() {
 }
 
 
-function handleImageUpload(event) {
+async function handleImageUpload(event) {
 
     const file =
         event.target.files?.[0];
@@ -259,30 +269,57 @@ function handleImageUpload(event) {
     if (!file.type.startsWith("image/")) {
 
         showToast(
-            "Please select an image file."
+            "Please select a JPG, PNG or WEBP image."
         );
 
         return;
+
     }
 
-    state.imageName =
-        file.name;
 
-    state.imageUrl =
-        URL.createObjectURL(file);
+    try {
 
-    const image =
-        new Image();
+        state.imageBlob =
+            file;
 
-    image.onload = () => {
+        state.imageName =
+            file.name;
 
-        state.image = image;
+        /*
+         * IMPORTANT:
+         *
+         * We keep the Blob and create a URL from it.
+         * Transformers.js receives the URL instead
+         * of the HTMLImageElement.
+         */
+
+        if (state.imageUrl) {
+
+            URL.revokeObjectURL(
+                state.imageUrl
+            );
+
+        }
+
+        state.imageUrl =
+            URL.createObjectURL(file);
+
+
+        const image =
+            await loadImage(
+                state.imageUrl
+            );
+
+
+        state.image =
+            image;
 
         state.imageWidth =
             image.naturalWidth;
 
         state.imageHeight =
             image.naturalHeight;
+
 
         state.annotations = [];
 
@@ -292,23 +329,29 @@ function handleImageUpload(event) {
 
         state.redoStack = [];
 
+
         canvas.width =
             state.imageWidth;
 
         canvas.height =
             state.imageHeight;
 
-        $("#imageName").textContent =
+
+        $("#imageName")
+            .textContent =
             state.imageName;
 
-        $("#annotateBtn").disabled =
+        $("#annotateBtn")
+            .disabled =
             false;
 
-        $("#emptyState").style.display =
+        $("#emptyState")
+            .style.display =
             "none";
 
         canvas.style.display =
             "block";
+
 
         calculateFitZoom();
 
@@ -320,28 +363,65 @@ function handleImageUpload(event) {
 
         updateQuality([]);
 
+
+        $("#processingStatus")
+            .textContent =
+            "Image ready. Choose annotation type and click AUTO ANNOTATE.";
+
+
         showToast(
             "Image loaded successfully."
         );
 
-    };
+    } catch (error) {
 
-    image.onerror = () => {
+        console.error(error);
 
         showToast(
-            "Could not load image."
+            "Could not load the image."
         );
 
-    };
-
-    image.src =
-        state.imageUrl;
+    }
 
 }
 
 
 /* =========================================================
-   ANNOTATION TYPE
+   IMAGE LOADER
+========================================================= */
+
+function loadImage(
+    source
+) {
+
+    return new Promise(
+        (resolve, reject) => {
+
+            const image =
+                new Image();
+
+            image.onload =
+                () => resolve(image);
+
+            image.onerror =
+                () =>
+                    reject(
+                        new Error(
+                            "Image could not be decoded."
+                        )
+                    );
+
+            image.src =
+                source;
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   ANNOTATION TYPES
 ========================================================= */
 
 function setupAnnotationTypes() {
@@ -355,19 +435,37 @@ function setupAnnotationTypes() {
 
                     $$(".annotation-type")
                         .forEach(b =>
-                            b.classList.remove("active")
+                            b.classList.remove(
+                                "active"
+                            )
                         );
 
-                    button.classList.add("active");
+                    button.classList.add(
+                        "active"
+                    );
 
                     state.annotationType =
                         button.dataset.type;
 
-                    render();
 
-                    showToast(
-                        `${button.textContent.trim().split("\n")[0]} selected`
-                    );
+                    if (
+                        state.annotationType ===
+                        "segmentation"
+                    ) {
+
+                        if (
+                            !CONFIG.segmentationModel
+                        ) {
+
+                            showToast(
+                                "Segmentation AI model is not configured yet. The editor is ready for a compatible segmentation model."
+                            );
+
+                        }
+
+                    }
+
+                    render();
 
                 }
             );
@@ -392,10 +490,14 @@ function setupTools() {
 
                     $$(".tool-button")
                         .forEach(b =>
-                            b.classList.remove("active")
+                            b.classList.remove(
+                                "active"
+                            )
                         );
 
-                    button.classList.add("active");
+                    button.classList.add(
+                        "active"
+                    );
 
                     state.activeTool =
                         button.dataset.tool;
@@ -412,17 +514,30 @@ function setupTools() {
 
 function updateCursor() {
 
-    if (state.activeTool === "pan") {
+    if (!canvas) {
+        return;
+    }
+
+    if (
+        state.activeTool ===
+        "pan"
+    ) {
 
         canvas.style.cursor =
             "grab";
 
-    } else if (state.activeTool === "draw") {
+    } else if (
+        state.activeTool ===
+        "draw"
+    ) {
 
         canvas.style.cursor =
             "crosshair";
 
-    } else if (state.activeTool === "erase") {
+    } else if (
+        state.activeTool ===
+        "erase"
+    ) {
 
         canvas.style.cursor =
             "not-allowed";
@@ -449,7 +564,9 @@ function setupControls() {
             event => {
 
                 state.threshold =
-                    Number(event.target.value) / 100;
+                    Number(
+                        event.target.value
+                    ) / 100;
 
                 $("#thresholdValue")
                     .textContent =
@@ -516,18 +633,20 @@ function setupControls() {
     $("#zoomIn")
         .addEventListener(
             "click",
-            () => setZoom(
-                state.zoom + 0.1
-            )
+            () =>
+                setZoom(
+                    state.zoom + .1
+                )
         );
 
 
     $("#zoomOut")
         .addEventListener(
             "click",
-            () => setZoom(
-                state.zoom - 0.1
-            )
+            () =>
+                setZoom(
+                    state.zoom - .1
+                )
         );
 
 
@@ -563,8 +682,12 @@ function setupControls() {
         .addEventListener(
             "click",
             () => {
+
                 $("#annotationModal")
-                    .classList.add("hidden");
+                    .classList.add(
+                        "hidden"
+                    );
+
             }
         );
 
@@ -572,18 +695,29 @@ function setupControls() {
 
 
 /* =========================================================
-   AI ENGINE
+   AI MODEL
 ========================================================= */
 
 async function loadDetector() {
 
     if (state.detector) {
+
         return state.detector;
+
     }
 
+
     setAIStatus(
-        "Loading detection model..."
+        "Downloading AI model..."
     );
+
+
+    /*
+     * IMPORTANT:
+     *
+     * This model is downloaded once and then
+     * normally cached by the browser.
+     */
 
     state.detector =
         await pipeline(
@@ -594,27 +728,49 @@ async function loadDetector() {
             }
         );
 
+
     state.detectorReady =
         true;
+
 
     setAIStatus(
         "Detection ready"
     );
+
 
     return state.detector;
 
 }
 
 
+/* =========================================================
+   SEGMENTATION MODEL
+========================================================= */
+
 async function loadSegmenter() {
 
-    if (state.segmenter) {
-        return state.segmenter;
+    if (
+        !CONFIG.segmentationModel
+    ) {
+
+        throw new Error(
+            "No compatible segmentation model has been configured."
+        );
+
     }
 
+
+    if (state.segmenter) {
+
+        return state.segmenter;
+
+    }
+
+
     setAIStatus(
-        "Loading segmentation model..."
+        "Downloading segmentation model..."
     );
+
 
     state.segmenter =
         await pipeline(
@@ -625,12 +781,15 @@ async function loadSegmenter() {
             }
         );
 
+
     state.segmenterReady =
         true;
+
 
     setAIStatus(
         "Segmentation ready"
     );
+
 
     return state.segmenter;
 
@@ -650,83 +809,179 @@ async function runAIAnnotation() {
         );
 
         return;
+
     }
 
+
     if (state.isProcessing) {
+
         return;
+
     }
+
 
     state.isProcessing =
         true;
 
-    $("#annotateBtn").disabled =
+    $("#annotateBtn")
+        .disabled =
         true;
 
-    setProcessing(
-        "Loading AI model..."
-    );
 
     try {
 
         saveUndoState();
 
-        let results = [];
+
+        let results;
+
+
+        /* ===============================================
+           BOX
+        =============================================== */
 
         if (
-            state.annotationType === "bbox" ||
-            state.annotationType === "polygon"
+            state.annotationType ===
+            "bbox"
         ) {
+
+            setProcessing(
+                "Loading object detection AI..."
+            );
+
 
             const detector =
                 await loadDetector();
 
+
             setProcessing(
-                "AI is analysing image..."
+                "AI is analysing the image..."
             );
+
+
+            /*
+             * FIX:
+             *
+             * DO NOT send state.image here.
+             *
+             * Send state.imageUrl instead.
+             */
 
             results =
                 await detector(
-                    state.image,
+                    state.imageUrl,
                     {
                         threshold:
-                            state.threshold,
-                        percentage: false
+                            state.threshold
                     }
                 );
+
 
             state.annotations =
                 convertDetections(
                     results
                 );
 
-            if (
-                state.annotationType === "polygon"
-            ) {
+        }
 
-                state.annotations =
-                    state.annotations.map(
-                        convertBoxToPolygon
-                    );
 
-            }
+        /* ===============================================
+           POLYGON
+        =============================================== */
 
-        } else {
-
-            const segmenter =
-                await loadSegmenter();
+        else if (
+            state.annotationType ===
+            "polygon"
+        ) {
 
             setProcessing(
-                "AI is generating segmentation..."
+                "AI is detecting objects for polygon annotation..."
             );
 
+
+            const detector =
+                await loadDetector();
+
+
             results =
-                await segmenter(
-                    state.image,
+                await detector(
+                    state.imageUrl,
                     {
                         threshold:
                             state.threshold
                     }
                 );
+
+
+            const boxes =
+                convertDetections(
+                    results
+                );
+
+
+            /*
+             * Temporary editable polygon.
+             *
+             * Each detection box becomes an editable
+             * four-point polygon.
+             *
+             * A true segmentation-based polygon
+             * should replace this in the next AI upgrade.
+             */
+
+            state.annotations =
+                boxes.map(
+                    convertBoxToPolygon
+                );
+
+        }
+
+
+        /* ===============================================
+           SEGMENTATION
+        =============================================== */
+
+        else if (
+            state.annotationType ===
+            "segmentation"
+        ) {
+
+            /*
+             * We deliberately don't fake segmentation.
+             *
+             * The previous code attempted to use an
+             * incompatible model here.
+             */
+
+            if (
+                !CONFIG.segmentationModel
+            ) {
+
+                throw new Error(
+                    "Segmentation model is not configured. Use 2D Box or Polygon for now, or configure a compatible image-segmentation model."
+                );
+
+            }
+
+
+            const segmenter =
+                await loadSegmenter();
+
+
+            setProcessing(
+                "AI is generating segmentation masks..."
+            );
+
+
+            results =
+                await segmenter(
+                    state.imageUrl,
+                    {
+                        threshold:
+                            state.threshold
+                    }
+                );
+
 
             state.annotations =
                 await convertSegments(
@@ -736,7 +991,13 @@ async function runAIAnnotation() {
         }
 
 
-        if (state.applyRules) {
+        /* ===============================================
+           RULES
+        =============================================== */
+
+        if (
+            state.applyRules
+        ) {
 
             state.annotations =
                 applyAnnotationRules(
@@ -749,8 +1010,13 @@ async function runAIAnnotation() {
         state.annotations =
             state.annotations.map(
                 annotation => ({
+
                     ...annotation,
-                    source: "ai"
+
+                    source:
+                        annotation.source ||
+                        "ai"
+
                 })
             );
 
@@ -759,44 +1025,81 @@ async function runAIAnnotation() {
             state.annotations[0]?.id ||
             null;
 
+
         render();
 
         renderObjects();
+
+        updateCanvasInfo();
 
         updateQuality(
             state.annotations
         );
 
+
         saveTrainingSnapshot();
 
         saveHistory();
-
-        updateCanvasInfo();
 
         updateTrainingPage();
 
         updateHistoryPage();
 
 
-        $("#processingStatus")
-            .textContent =
-            `${state.annotations.length} annotations created.`;
+        setProcessing(
+            `${state.annotations.length} annotations created. Review them before export.`
+        );
 
 
         showModal(
-            `${state.annotations.length} objects were automatically annotated. Review and correct them before exporting.`
+            `${state.annotations.length} annotation(s) created successfully.`
         );
+
 
     } catch (error) {
 
-        console.error(error);
-
-        setProcessing(
-            "AI failed. Check browser console."
+        console.error(
+            "AI ANNOTATION ERROR:",
+            error
         );
 
+
+        let message =
+            error?.message ||
+            "Unknown AI error.";
+
+
+        if (
+            message.includes(
+                "Unsupported input type"
+            )
+        ) {
+
+            message =
+                "The AI rejected the image input. The corrected version now sends the uploaded image URL instead of the browser Image object.";
+
+        }
+
+
+        if (
+            message.includes(
+                "404"
+            )
+        ) {
+
+            message +=
+                " A model or dependency URL may not exist.";
+
+        }
+
+
+        setProcessing(
+            "AI annotation failed."
+        );
+
+
         showToast(
-            `AI error: ${error.message}`
+            message
         );
 
     } finally {
@@ -804,7 +1107,8 @@ async function runAIAnnotation() {
         state.isProcessing =
             false;
 
-        $("#annotateBtn").disabled =
+        $("#annotateBtn")
+            .disabled =
             false;
 
         setAIStatus(
@@ -817,67 +1121,123 @@ async function runAIAnnotation() {
 
 
 /* =========================================================
-   DETECTION CONVERSION
+   DETECTION → BOX
 ========================================================= */
 
-function convertDetections(results) {
+function convertDetections(
+    results
+) {
 
-    return results.map(
-        item => {
+    if (!Array.isArray(results)) {
 
-            const box =
-                item.box;
+        console.warn(
+            "Unexpected detector output:",
+            results
+        );
 
-            return {
+        return [];
 
-                id:
-                    createId(),
+    }
 
-                type:
-                    "bbox",
 
-                label:
-                    normalizeLabel(
-                        item.label
-                    ),
+    return results
+        .filter(
+            item =>
+                item &&
+                item.box
+        )
+        .map(
+            item => {
 
-                confidence:
+                const box =
+                    item.box;
+
+
+                const xmin =
                     Number(
-                        item.score || 0
-                    ),
+                        box.xmin
+                    );
 
-                x:
-                    box.xmin,
+                const ymin =
+                    Number(
+                        box.ymin
+                    );
 
-                y:
-                    box.ymin,
+                const xmax =
+                    Number(
+                        box.xmax
+                    );
 
-                width:
-                    box.xmax -
-                    box.xmin,
+                const ymax =
+                    Number(
+                        box.ymax
+                    );
 
-                height:
-                    box.ymax -
-                    box.ymin,
 
-                points:
-                    null,
+                return {
 
-                mask:
-                    null,
+                    id:
+                        createId(),
 
-                source:
-                    "ai"
+                    type:
+                        "bbox",
 
-            };
+                    label:
+                        normalizeLabel(
+                            item.label
+                        ),
 
-        }
-    );
+                    confidence:
+                        Number(
+                            item.score ||
+                            0
+                        ),
+
+                    x:
+                        xmin,
+
+                    y:
+                        ymin,
+
+                    width:
+                        Math.max(
+                            0,
+                            xmax - xmin
+                        ),
+
+                    height:
+                        Math.max(
+                            0,
+                            ymax - ymin
+                        ),
+
+                    points:
+                        null,
+
+                    mask:
+                        null,
+
+                    source:
+                        "ai",
+
+                    review:
+                        false
+
+                };
+
+            }
+        );
 
 }
 
 
-function convertBoxToPolygon(annotation) {
+/* =========================================================
+   BOX → POLYGON
+========================================================= */
+
+function convertBoxToPolygon(
+    annotation
+) {
 
     return {
 
@@ -889,8 +1249,11 @@ function convertBoxToPolygon(annotation) {
         points: [
 
             {
-                x: annotation.x,
-                y: annotation.y
+                x:
+                    annotation.x,
+
+                y:
+                    annotation.y
             },
 
             {
@@ -913,7 +1276,8 @@ function convertBoxToPolygon(annotation) {
             },
 
             {
-                x: annotation.x,
+                x:
+                    annotation.x,
 
                 y:
                     annotation.y +
@@ -931,23 +1295,49 @@ function convertBoxToPolygon(annotation) {
    SEGMENTATION
 ========================================================= */
 
-async function convertSegments(results) {
+async function convertSegments(
+    results
+) {
+
+    if (!Array.isArray(results)) {
+
+        return [];
+
+    }
+
 
     const annotations = [];
+
 
     for (
         const item of results
     ) {
 
-        /*
-         * RawImage is converted into a usable
-         * canvas mask.
-         */
+        let mask = null;
 
-        const mask =
-            await rawImageToMask(
-                item.mask
-            );
+
+        if (item.mask) {
+
+            try {
+
+                mask =
+                    await rawImageToDataURL(
+                        item.mask
+                    );
+
+            } catch (
+                error
+            ) {
+
+                console.warn(
+                    "Could not convert mask:",
+                    error
+                );
+
+            }
+
+        }
+
 
         annotations.push({
 
@@ -964,11 +1354,15 @@ async function convertSegments(results) {
 
             confidence:
                 Number(
-                    item.score || 0
+                    item.score ||
+                    0
                 ),
 
-            x: 0,
-            y: 0,
+            x:
+                0,
+
+            y:
+                0,
 
             width:
                 state.imageWidth,
@@ -982,80 +1376,92 @@ async function convertSegments(results) {
             mask,
 
             source:
-                "ai"
+                "ai",
+
+            review:
+                false
 
         });
 
     }
+
 
     return annotations;
 
 }
 
 
-async function rawImageToMask(rawImage) {
+/* =========================================================
+   MASK → DATA URL
+========================================================= */
 
-    try {
+async function rawImageToDataURL(
+    rawImage
+) {
 
-        const blob =
-            await rawImage.toBlob();
-
-        const url =
-            URL.createObjectURL(blob);
-
-        const img =
-            new Image();
-
-        await new Promise(
-            (resolve, reject) => {
-
-                img.onload =
-                    resolve;
-
-                img.onerror =
-                    reject;
-
-                img.src =
-                    url;
-
-            }
-        );
-
-        const temp =
-            document.createElement(
-                "canvas"
-            );
-
-        temp.width =
-            state.imageWidth;
-
-        temp.height =
-            state.imageHeight;
-
-        const tctx =
-            temp.getContext("2d");
-
-        tctx.drawImage(
-            img,
-            0,
-            0,
-            temp.width,
-            temp.height
-        );
-
-        URL.revokeObjectURL(
-            url
-        );
-
-        return temp.toDataURL(
-            "image/png"
-        );
-
-    } catch {
+    if (!rawImage) {
 
         return null;
 
     }
+
+
+    /*
+     * Transformers.js RawImage normally provides
+     * toBlob(). If available, use it.
+     */
+
+    if (
+        typeof rawImage.toBlob ===
+        "function"
+    ) {
+
+        const blob =
+            await rawImage.toBlob();
+
+
+        return await blobToDataURL(
+            blob
+        );
+
+    }
+
+
+    /*
+     * Some versions expose image data differently.
+     * Return null rather than crashing the whole job.
+     */
+
+    return null;
+
+}
+
+
+function blobToDataURL(
+    blob
+) {
+
+    return new Promise(
+        (resolve, reject) => {
+
+            const reader =
+                new FileReader();
+
+            reader.onload =
+                () =>
+                    resolve(
+                        reader.result
+                    );
+
+            reader.onerror =
+                reject;
+
+            reader.readAsDataURL(
+                blob
+            );
+
+        }
+    );
 
 }
 
@@ -1073,6 +1479,7 @@ function applyAnnotationRules(
             CONFIG.storageKeys.rules
         ) || "";
 
+
     if (!rules.trim()) {
 
         return annotations;
@@ -1080,35 +1487,37 @@ function applyAnnotationRules(
     }
 
 
-    return annotations.filter(
+    return annotations.map(
         annotation => {
 
+            const updated =
+                {
+                    ...annotation
+                };
+
+
+            updated.review =
+                false;
+
+
             /*
-             * Basic automatic validation.
-             *
-             * Customer-specific rules can be expanded here.
+             * Very small annotations
+             * automatically receive review.
              */
 
             if (
-                annotation.type === "bbox"
+                updated.type ===
+                "bbox"
             ) {
 
                 if (
-                    annotation.width <= 2 ||
-                    annotation.height <= 2
+                    updated.width <
+                    3 ||
+                    updated.height <
+                    3
                 ) {
 
-                    annotation.review =
-                        true;
-
-                }
-
-                if (
-                    annotation.x < 0 ||
-                    annotation.y < 0
-                ) {
-
-                    annotation.review =
+                    updated.review =
                         true;
 
                 }
@@ -1117,16 +1526,45 @@ function applyAnnotationRules(
 
 
             if (
-                annotation.confidence <
+                updated.confidence <
                 state.threshold
             ) {
 
-                annotation.review =
+                updated.review =
                     true;
 
             }
 
-            return true;
+
+            /*
+             * Keep annotation inside image.
+             */
+
+            if (
+                updated.type ===
+                "bbox"
+            ) {
+
+                if (
+                    updated.x < 0 ||
+                    updated.y < 0 ||
+                    updated.x +
+                    updated.width >
+                    state.imageWidth ||
+                    updated.y +
+                    updated.height >
+                    state.imageHeight
+                ) {
+
+                    updated.review =
+                        true;
+
+                }
+
+            }
+
+
+            return updated;
 
         }
     );
@@ -1135,7 +1573,7 @@ function applyAnnotationRules(
 
 
 /* =========================================================
-   CANVAS
+   CANVAS EVENTS
 ========================================================= */
 
 function setupCanvas() {
@@ -1168,33 +1606,44 @@ function setupCanvas() {
 }
 
 
-function canvasMouseDown(event) {
+function canvasMouseDown(
+    event
+) {
 
     if (!state.image) {
+
         return;
+
     }
 
-    const p =
-        getCanvasPoint(event);
+
+    const point =
+        getCanvasPoint(
+            event
+        );
+
 
     state.mouse.down =
         true;
 
     state.mouse.startX =
-        p.x;
+        point.x;
 
     state.mouse.startY =
-        p.y;
+        point.y;
 
 
     if (
-        state.activeTool === "draw"
+        state.activeTool ===
+        "draw"
     ) {
 
         saveUndoState();
 
+
         if (
-            state.annotationType === "bbox"
+            state.annotationType ===
+            "bbox"
         ) {
 
             const annotation = {
@@ -1212,10 +1661,10 @@ function canvasMouseDown(event) {
                     1,
 
                 x:
-                    p.x,
+                    point.x,
 
                 y:
-                    p.y,
+                    point.y,
 
                 width:
                     0,
@@ -1223,56 +1672,129 @@ function canvasMouseDown(event) {
                 height:
                     0,
 
+                points:
+                    null,
+
+                mask:
+                    null,
+
                 source:
-                    "human"
+                    "human",
+
+                review:
+                    false
 
             };
+
 
             state.annotations.push(
                 annotation
             );
+
 
             state.selectedId =
                 annotation.id;
 
         }
 
-    } else {
+
+        return;
+
+    }
+
+
+    if (
+        state.activeTool ===
+        "erase"
+    ) {
 
         const hit =
             findAnnotationAt(
-                p.x,
-                p.y
+                point.x,
+                point.y
             );
+
 
         if (hit) {
 
+            saveUndoState();
+
+
+            state.annotations =
+                state.annotations.filter(
+                    item =>
+                        item.id !==
+                        hit.id
+                );
+
+
             state.selectedId =
-                hit.id;
+                null;
+
+
+            render();
 
             renderObjects();
 
+            updateCanvasInfo();
+
         }
+
+
+        return;
+
+    }
+
+
+    const hit =
+        findAnnotationAt(
+            point.x,
+            point.y
+        );
+
+
+    if (hit) {
+
+        state.selectedId =
+            hit.id;
+
+        renderObjects();
+
+        render();
 
     }
 
 }
 
 
-function canvasMouseMove(event) {
-
-    if (!state.mouse.down) {
-        return;
-    }
+function canvasMouseMove(
+    event
+) {
 
     if (
-        state.activeTool !== "draw"
+        !state.mouse.down
     ) {
+
         return;
+
     }
 
-    const p =
-        getCanvasPoint(event);
+
+    if (
+        state.activeTool !==
+        "draw"
+    ) {
+
+        return;
+
+    }
+
+
+    const point =
+        getCanvasPoint(
+            event
+        );
+
 
     const annotation =
         state.annotations.find(
@@ -1281,23 +1803,45 @@ function canvasMouseMove(event) {
                 state.selectedId
         );
 
+
     if (!annotation) {
+
         return;
+
     }
+
 
     if (
-        annotation.type === "bbox"
+        annotation.type ===
+        "bbox"
     ) {
 
+        annotation.x =
+            Math.min(
+                state.mouse.startX,
+                point.x
+            );
+
+        annotation.y =
+            Math.min(
+                state.mouse.startY,
+                point.y
+            );
+
         annotation.width =
-            p.x -
-            state.mouse.startX;
+            Math.abs(
+                point.x -
+                state.mouse.startX
+            );
 
         annotation.height =
-            p.y -
-            state.mouse.startY;
+            Math.abs(
+                point.y -
+                state.mouse.startY
+            );
 
     }
+
 
     render();
 
@@ -1309,6 +1853,7 @@ function canvasMouseUp() {
     state.mouse.down =
         false;
 
+
     renderObjects();
 
     updateCanvasInfo();
@@ -1316,26 +1861,40 @@ function canvasMouseUp() {
 }
 
 
-function canvasDoubleClick(event) {
+/* =========================================================
+   DOUBLE CLICK EDIT
+========================================================= */
 
-    const p =
-        getCanvasPoint(event);
+function canvasDoubleClick(
+    event
+) {
+
+    const point =
+        getCanvasPoint(
+            event
+        );
+
 
     const hit =
         findAnnotationAt(
-            p.x,
-            p.y
+            point.x,
+            point.y
         );
 
+
     if (!hit) {
+
         return;
+
     }
+
 
     const newLabel =
         prompt(
             "Change object class:",
             hit.label
         );
+
 
     if (
         newLabel &&
@@ -1344,11 +1903,18 @@ function canvasDoubleClick(event) {
 
         saveUndoState();
 
+
         hit.label =
             newLabel.trim();
 
+
         hit.source =
             "human";
+
+
+        hit.review =
+            false;
+
 
         render();
 
@@ -1365,29 +1931,38 @@ function canvasDoubleClick(event) {
    CANVAS COORDINATES
 ========================================================= */
 
-function getCanvasPoint(event) {
+function getCanvasPoint(
+    event
+) {
 
     const rect =
         canvas.getBoundingClientRect();
+
 
     const scaleX =
         canvas.width /
         rect.width;
 
+
     const scaleY =
         canvas.height /
         rect.height;
 
+
     return {
 
         x:
-            (event.clientX -
-            rect.left) *
+            (
+                event.clientX -
+                rect.left
+            ) *
             scaleX,
 
         y:
-            (event.clientY -
-            rect.top) *
+            (
+                event.clientY -
+                rect.top
+            ) *
             scaleY
 
     };
@@ -1413,341 +1988,57 @@ function findAnnotationAt(
         i--
     ) {
 
-        const a =
+        const annotation =
             state.annotations[i];
 
+
         if (
-            a.type === "bbox"
+            annotation.type ===
+            "bbox"
         ) {
 
             if (
-                x >= a.x &&
-                x <= a.x + a.width &&
-                y >= a.y &&
-                y <= a.y + a.height
+                x >= annotation.x &&
+                x <=
+                    annotation.x +
+                    annotation.width &&
+                y >= annotation.y &&
+                y <=
+                    annotation.y +
+                    annotation.height
             ) {
 
-                return a;
+                return annotation;
 
             }
 
         }
 
+
         if (
-            a.type === "polygon" &&
-            a.points
+            annotation.type ===
+            "polygon" &&
+            annotation.points
         ) {
 
             if (
                 pointInsidePolygon(
                     x,
                     y,
-                    a.points
+                    annotation.points
                 )
             ) {
 
-                return a;
+                return annotation;
 
             }
 
         }
 
     }
+
 
     return null;
-
-}
-
-
-/* =========================================================
-   RENDER
-========================================================= */
-
-function render() {
-
-    if (!state.image) {
-        return;
-    }
-
-    ctx.clearRect(
-        0,
-        0,
-        canvas.width,
-        canvas.height
-    );
-
-    ctx.drawImage(
-        state.image,
-        0,
-        0
-    );
-
-
-    for (
-        const annotation
-        of state.annotations
-    ) {
-
-        if (
-            annotation.type === "bbox"
-        ) {
-
-            drawBox(annotation);
-
-        }
-
-        else if (
-            annotation.type === "polygon"
-        ) {
-
-            drawPolygon(annotation);
-
-        }
-
-        else if (
-            annotation.type ===
-            "segmentation"
-        ) {
-
-            drawSegmentation(
-                annotation
-            );
-
-        }
-
-    }
-
-}
-
-
-function drawBox(annotation) {
-
-    const selected =
-        annotation.id ===
-        state.selectedId;
-
-    ctx.save();
-
-    ctx.lineWidth =
-        selected ? 4 : 2;
-
-    ctx.strokeStyle =
-        selected
-            ? "#a78bfa"
-            : "#22c55e";
-
-    ctx.fillStyle =
-        selected
-            ? "rgba(139,92,246,.10)"
-            : "rgba(34,197,94,.05)";
-
-    ctx.fillRect(
-        annotation.x,
-        annotation.y,
-        annotation.width,
-        annotation.height
-    );
-
-    ctx.strokeRect(
-        annotation.x,
-        annotation.y,
-        annotation.width,
-        annotation.height
-    );
-
-
-    drawLabel(
-        annotation.label,
-        annotation.confidence,
-        annotation.x,
-        annotation.y
-    );
-
-    ctx.restore();
-
-}
-
-
-function drawPolygon(annotation) {
-
-    if (
-        !annotation.points ||
-        annotation.points.length < 3
-    ) {
-
-        return;
-
-    }
-
-    const selected =
-        annotation.id ===
-        state.selectedId;
-
-    ctx.save();
-
-    ctx.beginPath();
-
-    annotation.points.forEach(
-        (point, index) => {
-
-            if (index === 0) {
-
-                ctx.moveTo(
-                    point.x,
-                    point.y
-                );
-
-            } else {
-
-                ctx.lineTo(
-                    point.x,
-                    point.y
-                );
-
-            }
-
-        }
-    );
-
-    ctx.closePath();
-
-    ctx.fillStyle =
-        selected
-            ? "rgba(139,92,246,.20)"
-            : "rgba(34,197,94,.15)";
-
-    ctx.strokeStyle =
-        selected
-            ? "#a78bfa"
-            : "#22c55e";
-
-    ctx.lineWidth =
-        selected ? 4 : 2;
-
-    ctx.fill();
-
-    ctx.stroke();
-
-
-    annotation.points.forEach(
-        point => {
-
-            ctx.beginPath();
-
-            ctx.arc(
-                point.x,
-                point.y,
-                5,
-                0,
-                Math.PI * 2
-            );
-
-            ctx.fillStyle =
-                "#a78bfa";
-
-            ctx.fill();
-
-        }
-    );
-
-
-    drawLabel(
-        annotation.label,
-        annotation.confidence,
-        annotation.points[0].x,
-        annotation.points[0].y
-    );
-
-    ctx.restore();
-
-}
-
-
-function drawSegmentation(
-    annotation
-) {
-
-    if (!annotation.mask) {
-        return;
-    }
-
-    const mask =
-        new Image();
-
-    mask.onload = () => {
-
-        ctx.save();
-
-        ctx.globalAlpha =
-            annotation.id ===
-            state.selectedId
-                ? .45
-                : .28;
-
-        ctx.globalCompositeOperation =
-            "source-over";
-
-        ctx.drawImage(
-            mask,
-            0,
-            0,
-            canvas.width,
-            canvas.height
-        );
-
-        ctx.restore();
-
-    };
-
-    mask.src =
-        annotation.mask;
-
-}
-
-
-function drawLabel(
-    label,
-    confidence,
-    x,
-    y
-) {
-
-    const text =
-        `${label} ${(confidence * 100).toFixed(0)}%`;
-
-    ctx.font =
-        "bold 14px Arial";
-
-    const width =
-        ctx.measureText(text).width + 10;
-
-    const height =
-        21;
-
-    const top =
-        Math.max(
-            0,
-            y - height
-        );
-
-    ctx.fillStyle =
-        "#111827";
-
-    ctx.fillRect(
-        x,
-        top,
-        width,
-        height
-    );
-
-    ctx.fillStyle =
-        "#ffffff";
-
-    ctx.fillText(
-        text,
-        x + 5,
-        top + 15
-    );
 
 }
 
@@ -1762,7 +2053,9 @@ function pointInsidePolygon(
     points
 ) {
 
-    let inside = false;
+    let inside =
+        false;
+
 
     for (
         let i = 0,
@@ -1785,6 +2078,7 @@ function pointInsidePolygon(
         const yj =
             points[j].y;
 
+
         const intersect =
             (
                 yi > y
@@ -1804,13 +2098,395 @@ function pointInsidePolygon(
             ) +
             xi;
 
+
         if (intersect) {
-            inside = !inside;
+
+            inside =
+                !inside;
+
         }
 
     }
 
+
     return inside;
+
+}
+
+
+/* =========================================================
+   RENDER
+========================================================= */
+
+function render() {
+
+    if (!state.image) {
+
+        return;
+
+    }
+
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+
+    ctx.drawImage(
+        state.image,
+        0,
+        0
+    );
+
+
+    for (
+        const annotation
+        of state.annotations
+    ) {
+
+        if (
+            annotation.type ===
+            "bbox"
+        ) {
+
+            drawBox(
+                annotation
+            );
+
+        }
+
+
+        else if (
+            annotation.type ===
+            "polygon"
+        ) {
+
+            drawPolygon(
+                annotation
+            );
+
+        }
+
+
+        else if (
+            annotation.type ===
+            "segmentation"
+        ) {
+
+            drawSegmentation(
+                annotation
+            );
+
+        }
+
+    }
+
+}
+
+
+/* =========================================================
+   BOX
+========================================================= */
+
+function drawBox(
+    annotation
+) {
+
+    const selected =
+        annotation.id ===
+        state.selectedId;
+
+
+    ctx.save();
+
+
+    ctx.lineWidth =
+        selected ? 4 : 2;
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#a78bfa"
+            : "#22c55e";
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(139,92,246,.10)"
+            : "rgba(34,197,94,.05)";
+
+
+    ctx.fillRect(
+        annotation.x,
+        annotation.y,
+        annotation.width,
+        annotation.height
+    );
+
+
+    ctx.strokeRect(
+        annotation.x,
+        annotation.y,
+        annotation.width,
+        annotation.height
+    );
+
+
+    drawLabel(
+        annotation.label,
+        annotation.confidence,
+        annotation.x,
+        annotation.y
+    );
+
+
+    ctx.restore();
+
+}
+
+
+/* =========================================================
+   POLYGON
+========================================================= */
+
+function drawPolygon(
+    annotation
+) {
+
+    if (
+        !annotation.points ||
+        annotation.points.length <
+            3
+    ) {
+
+        return;
+
+    }
+
+
+    const selected =
+        annotation.id ===
+        state.selectedId;
+
+
+    ctx.save();
+
+
+    ctx.beginPath();
+
+
+    annotation.points.forEach(
+        (
+            point,
+            index
+        ) => {
+
+            if (
+                index === 0
+            ) {
+
+                ctx.moveTo(
+                    point.x,
+                    point.y
+                );
+
+            } else {
+
+                ctx.lineTo(
+                    point.x,
+                    point.y
+                );
+
+            }
+
+        }
+    );
+
+
+    ctx.closePath();
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(139,92,246,.20)"
+            : "rgba(34,197,94,.15)";
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#a78bfa"
+            : "#22c55e";
+
+
+    ctx.lineWidth =
+        selected ? 4 : 2;
+
+
+    ctx.fill();
+
+    ctx.stroke();
+
+
+    /*
+     * Editable polygon points.
+     */
+
+    annotation.points.forEach(
+        point => {
+
+            ctx.beginPath();
+
+
+            ctx.arc(
+                point.x,
+                point.y,
+                5,
+                0,
+                Math.PI * 2
+            );
+
+
+            ctx.fillStyle =
+                "#a78bfa";
+
+
+            ctx.fill();
+
+        }
+    );
+
+
+    drawLabel(
+        annotation.label,
+        annotation.confidence,
+        annotation.points[0].x,
+        annotation.points[0].y
+    );
+
+
+    ctx.restore();
+
+}
+
+
+/* =========================================================
+   SEGMENTATION
+========================================================= */
+
+function drawSegmentation(
+    annotation
+) {
+
+    if (
+        !annotation.mask
+    ) {
+
+        return;
+
+    }
+
+
+    const mask =
+        new Image();
+
+
+    mask.onload =
+        () => {
+
+            ctx.save();
+
+
+            ctx.globalAlpha =
+                annotation.id ===
+                state.selectedId
+                    ? .45
+                    : .28;
+
+
+            ctx.drawImage(
+                mask,
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+
+            ctx.restore();
+
+        };
+
+
+    mask.src =
+        annotation.mask;
+
+}
+
+
+/* =========================================================
+   LABEL
+========================================================= */
+
+function drawLabel(
+    label,
+    confidence,
+    x,
+    y
+) {
+
+    const text =
+        `${label} ${
+            Math.round(
+                confidence * 100
+            )
+        }%`;
+
+
+    ctx.font =
+        "bold 14px Arial";
+
+
+    const width =
+        ctx.measureText(
+            text
+        ).width + 10;
+
+
+    const height =
+        21;
+
+
+    const top =
+        Math.max(
+            0,
+            y - height
+        );
+
+
+    ctx.fillStyle =
+        "#111827";
+
+
+    ctx.fillRect(
+        x,
+        top,
+        width,
+        height
+    );
+
+
+    ctx.fillStyle =
+        "#ffffff";
+
+
+    ctx.fillText(
+        text,
+        x + 5,
+        top + 15
+    );
 
 }
 
@@ -1824,18 +2500,22 @@ function renderObjects() {
     const list =
         $("#objectList");
 
+
     if (
-        state.annotations.length === 0
+        state.annotations.length ===
+        0
     ) {
 
         list.innerHTML =
             `<div class="no-objects">
                 No annotations yet.
-             </div>`;
+            </div>`;
+
 
         $("#objectSummary")
             .textContent =
             "No objects";
+
 
         return;
 
@@ -1853,10 +2533,12 @@ function renderObjects() {
                             ? "selected"
                             : "";
 
+
                     const review =
                         annotation.review
                             ? " • REVIEW"
                             : "";
+
 
                     return `
                     <div
@@ -1869,7 +2551,9 @@ function renderObjects() {
                         <div class="object-info">
 
                             <div class="object-name">
-                                ${escapeHtml(annotation.label)}
+                                ${escapeHtml(
+                                    annotation.label
+                                )}
                             </div>
 
                             <div class="object-meta">
@@ -1880,7 +2564,9 @@ function renderObjects() {
                         </div>
 
                         <div class="object-confidence">
-                            ${(annotation.confidence * 100).toFixed(0)}%
+                            ${Math.round(
+                                annotation.confidence * 100
+                            )}%
                         </div>
 
                     </div>
@@ -1902,6 +2588,7 @@ function renderObjects() {
                 state.selectedId =
                     row.dataset.id;
 
+
                 render();
 
                 renderObjects();
@@ -1914,7 +2601,11 @@ function renderObjects() {
 
     $("#objectSummary")
         .textContent =
-        `${state.annotations.length} object${state.annotations.length === 1 ? "" : "s"}`;
+        `${state.annotations.length} object${
+            state.annotations.length === 1
+                ? ""
+                : "s"
+        }`;
 
 }
 
@@ -1935,7 +2626,9 @@ function deleteSelected() {
 
     }
 
+
     saveUndoState();
+
 
     state.annotations =
         state.annotations.filter(
@@ -1944,8 +2637,10 @@ function deleteSelected() {
                 state.selectedId
         );
 
+
     state.selectedId =
         null;
+
 
     render();
 
@@ -1969,16 +2664,24 @@ function deleteSelected() {
 function resetAnnotations() {
 
     if (
-        state.annotations.length === 0
+        state.annotations.length ===
+        0
     ) {
+
         return;
+
     }
+
 
     saveUndoState();
 
-    state.annotations = [];
 
-    state.selectedId = null;
+    state.annotations =
+        [];
+
+    state.selectedId =
+        null;
+
 
     render();
 
@@ -1986,7 +2689,10 @@ function resetAnnotations() {
 
     updateCanvasInfo();
 
-    updateQuality([]);
+    updateQuality(
+        []
+    );
+
 
     showToast(
         "Annotations reset."
@@ -1996,7 +2702,7 @@ function resetAnnotations() {
 
 
 /* =========================================================
-   UNDO / REDO
+   UNDO
 ========================================================= */
 
 function saveUndoState() {
@@ -2007,15 +2713,19 @@ function saveUndoState() {
         )
     );
 
+
     if (
-        state.undoStack.length > 50
+        state.undoStack.length >
+        50
     ) {
 
         state.undoStack.shift();
 
     }
 
-    state.redoStack = [];
+
+    state.redoStack =
+        [];
 
 }
 
@@ -2023,12 +2733,14 @@ function saveUndoState() {
 function undo() {
 
     if (
-        state.undoStack.length === 0
+        state.undoStack.length ===
+        0
     ) {
 
         return;
 
     }
+
 
     state.redoStack.push(
         JSON.stringify(
@@ -2036,13 +2748,16 @@ function undo() {
         )
     );
 
+
     state.annotations =
         JSON.parse(
             state.undoStack.pop()
         );
 
+
     state.selectedId =
         null;
+
 
     render();
 
@@ -2053,15 +2768,21 @@ function undo() {
 }
 
 
+/* =========================================================
+   REDO
+========================================================= */
+
 function redo() {
 
     if (
-        state.redoStack.length === 0
+        state.redoStack.length ===
+        0
     ) {
 
         return;
 
     }
+
 
     state.undoStack.push(
         JSON.stringify(
@@ -2069,10 +2790,16 @@ function redo() {
         )
     );
 
+
     state.annotations =
         JSON.parse(
             state.redoStack.pop()
         );
+
+
+    state.selectedId =
+        null;
+
 
     render();
 
@@ -2095,7 +2822,8 @@ function setupKeyboard() {
 
             if (
                 event.ctrlKey &&
-                event.key.toLowerCase() === "z"
+                event.key.toLowerCase() ===
+                    "z"
             ) {
 
                 event.preventDefault();
@@ -2104,9 +2832,11 @@ function setupKeyboard() {
 
             }
 
+
             if (
                 event.ctrlKey &&
-                event.key.toLowerCase() === "y"
+                event.key.toLowerCase() ===
+                    "y"
             ) {
 
                 event.preventDefault();
@@ -2115,8 +2845,10 @@ function setupKeyboard() {
 
             }
 
+
             if (
-                event.key === "Delete"
+                event.key ===
+                "Delete"
             ) {
 
                 deleteSelected();
@@ -2133,23 +2865,29 @@ function setupKeyboard() {
    ZOOM
 ========================================================= */
 
-function setZoom(value) {
+function setZoom(
+    value
+) {
 
     state.zoom =
         Math.max(
-            0.1,
+            .1,
             Math.min(
                 4,
                 value
             )
         );
 
+
     canvas.style.transform =
         `scale(${state.zoom})`;
 
+
     $("#zoomValue")
         .textContent =
-        `${Math.round(state.zoom * 100)}%`;
+        `${Math.round(
+            state.zoom * 100
+        )}%`;
 
 }
 
@@ -2157,11 +2895,15 @@ function setZoom(value) {
 function calculateFitZoom() {
 
     if (!state.image) {
+
         return;
+
     }
+
 
     const container =
         $("#canvasContainer");
+
 
     const horizontal =
         (
@@ -2170,6 +2912,7 @@ function calculateFitZoom() {
         ) /
         state.imageWidth;
 
+
     const vertical =
         (
             container.clientHeight -
@@ -2177,11 +2920,13 @@ function calculateFitZoom() {
         ) /
         state.imageHeight;
 
+
     const zoom =
         Math.min(
             horizontal,
             vertical
         );
+
 
     setZoom(
         Math.max(
@@ -2197,7 +2942,7 @@ function calculateFitZoom() {
 
 
 /* =========================================================
-   QUALITY ENGINE
+   QUALITY
 ========================================================= */
 
 function updateQuality(
@@ -2205,16 +2950,19 @@ function updateQuality(
 ) {
 
     if (
-        annotations.length === 0
+        annotations.length ===
+        0
     ) {
 
         $("#qualityScore")
             .textContent =
             "—";
 
+
         $("#qualityMessages")
             .textContent =
             "Run annotation to check quality.";
+
 
         return;
 
@@ -2241,11 +2989,15 @@ function updateQuality(
         ).length;
 
 
-    if (reviewCount > 0) {
+    if (
+        reviewCount > 0
+    ) {
 
         score -=
-            reviewCount /
-            annotations.length *
+            (
+                reviewCount /
+                annotations.length
+            ) *
             .2;
 
     }
@@ -2263,7 +3015,9 @@ function updateQuality(
 
     $("#qualityScore")
         .textContent =
-        `${Math.round(score * 100)}%`;
+        `${Math.round(
+            score * 100
+        )}%`;
 
 
     $("#qualityMessages")
@@ -2282,7 +3036,7 @@ function updateQuality(
 
 
 /* =========================================================
-   DOWNLOAD
+   DOWNLOAD IMAGE
 ========================================================= */
 
 function downloadAnnotatedImage() {
@@ -2297,24 +3051,33 @@ function downloadAnnotatedImage() {
 
     }
 
+
     render();
 
 
     const link =
-        document.createElement("a");
+        document.createElement(
+            "a"
+        );
+
 
     link.download =
-        `${removeExtension(state.imageName)}_annotated.png`;
+        `${removeExtension(
+            state.imageName
+        )}_annotated.png`;
+
 
     link.href =
         canvas.toDataURL(
             "image/png"
         );
 
+
     link.click();
 
 
     downloadAnnotationJSON();
+
 
     showToast(
         "Annotated image and JSON downloaded."
@@ -2324,7 +3087,7 @@ function downloadAnnotatedImage() {
 
 
 /* =========================================================
-   JSON DOWNLOAD
+   DOWNLOAD JSON
 ========================================================= */
 
 function downloadAnnotationJSON() {
@@ -2335,7 +3098,7 @@ function downloadAnnotationJSON() {
             "AI Annotation Studio",
 
         version:
-            "1.0",
+            "1.0.1",
 
         image:
             state.imageName,
@@ -2381,16 +3144,25 @@ function downloadAnnotationJSON() {
             blob
         );
 
+
     const link =
-        document.createElement("a");
+        document.createElement(
+            "a"
+        );
+
 
     link.href =
         url;
 
+
     link.download =
-        `${removeExtension(state.imageName)}_annotations.json`;
+        `${removeExtension(
+            state.imageName
+        )}_annotations.json`;
+
 
     link.click();
+
 
     URL.revokeObjectURL(
         url
@@ -2400,14 +3172,17 @@ function downloadAnnotationJSON() {
 
 
 /* =========================================================
-   TRAINING DATA
+   TRAINING
 ========================================================= */
 
 function saveTrainingSnapshot() {
 
     if (!state.imageName) {
+
         return;
+
     }
+
 
     const training =
         loadJSON(
@@ -2441,20 +3216,14 @@ function saveTrainingSnapshot() {
     };
 
 
-    training.push(record);
-
-
-    /*
-     * Keep browser storage manageable.
-     */
-
-    const trimmed =
-        training.slice(-500);
+    training.push(
+        record
+    );
 
 
     saveJSON(
         CONFIG.storageKeys.training,
-        trimmed
+        training.slice(-500)
     );
 
 }
@@ -2501,9 +3270,11 @@ function updateTrainingPage() {
         .textContent =
         training.length;
 
+
     $("#trainingCorrections")
         .textContent =
         corrections;
+
 
     $("#trainingObjects")
         .textContent =
@@ -2511,7 +3282,8 @@ function updateTrainingPage() {
 
 
     if (
-        training.length === 0
+        training.length ===
+        0
     ) {
 
         $("#trainingList")
@@ -2528,27 +3300,35 @@ function updateTrainingPage() {
         training
             .slice()
             .reverse()
-            .slice(0, 50)
+            .slice(
+                0,
+                50
+            )
             .map(
-                item => `
+                item =>
+                    `
                     <div class="object-row">
 
                         <div class="object-info">
 
                             <div class="object-name">
-                                ${escapeHtml(item.image)}
+                                ${escapeHtml(
+                                    item.image
+                                )}
                             </div>
 
                             <div class="object-meta">
                                 ${item.annotations.length}
                                 annotations •
-                                ${new Date(item.timestamp).toLocaleString()}
+                                ${new Date(
+                                    item.timestamp
+                                ).toLocaleString()}
                             </div>
 
                         </div>
 
                     </div>
-                `
+                    `
             )
             .join("");
 
@@ -2567,8 +3347,10 @@ function exportTraining() {
             []
         );
 
+
     if (
-        training.length === 0
+        training.length ===
+        0
     ) {
 
         showToast(
@@ -2601,16 +3383,23 @@ function exportTraining() {
             blob
         );
 
+
     const link =
-        document.createElement("a");
+        document.createElement(
+            "a"
+        );
+
 
     link.href =
         url;
 
+
     link.download =
         "annotation_training_data.json";
 
+
     link.click();
+
 
     URL.revokeObjectURL(
         url
@@ -2625,7 +3414,7 @@ function exportTraining() {
 
 
 /* =========================================================
-   RULE STORAGE
+   RULES
 ========================================================= */
 
 function saveRules() {
@@ -2635,10 +3424,12 @@ function saveRules() {
             .value
             .trim();
 
+
     localStorage.setItem(
         CONFIG.storageKeys.rules,
         rules
     );
+
 
     showToast(
         "Annotation rules saved."
@@ -2653,6 +3444,7 @@ function loadLocalData() {
         localStorage.getItem(
             CONFIG.storageKeys.rules
         );
+
 
     if (rules) {
 
@@ -2716,7 +3508,8 @@ function updateHistoryPage() {
 
 
     if (
-        history.length === 0
+        history.length ===
+        0
     ) {
 
         $("#historyList")
@@ -2734,26 +3527,31 @@ function updateHistoryPage() {
             .slice()
             .reverse()
             .map(
-                item => `
-                <div class="object-row">
+                item =>
+                    `
+                    <div class="object-row">
 
-                    <div class="object-info">
+                        <div class="object-info">
 
-                        <div class="object-name">
-                            ${escapeHtml(item.image)}
-                        </div>
+                            <div class="object-name">
+                                ${escapeHtml(
+                                    item.image
+                                )}
+                            </div>
 
-                        <div class="object-meta">
-                            ${item.annotationCount}
-                            objects •
-                            ${item.annotationType} •
-                            ${new Date(item.timestamp).toLocaleString()}
+                            <div class="object-meta">
+                                ${item.annotationCount}
+                                objects •
+                                ${item.annotationType} •
+                                ${new Date(
+                                    item.timestamp
+                                ).toLocaleString()}
+                            </div>
+
                         </div>
 
                     </div>
-
-                </div>
-                `
+                    `
             )
             .join("");
 
@@ -2772,9 +3570,11 @@ function clearHistory() {
 
     }
 
+
     localStorage.removeItem(
         CONFIG.storageKeys.history
     );
+
 
     updateHistoryPage();
 
@@ -2814,17 +3614,21 @@ function showToast(
     const toast =
         $("#toast");
 
+
     $("#toastMessage")
         .textContent =
         message;
+
 
     toast.classList.add(
         "show"
     );
 
+
     clearTimeout(
         showToast.timer
     );
+
 
     showToast.timer =
         setTimeout(
@@ -2835,7 +3639,7 @@ function showToast(
                 );
 
             },
-            3000
+            4000
         );
 
 }
@@ -2848,6 +3652,7 @@ function showModal(
     $("#modalMessage")
         .textContent =
         message;
+
 
     $("#annotationModal")
         .classList.remove(
@@ -2876,7 +3681,7 @@ function createId() {
         Date.now().toString(36) +
         Math.random()
             .toString(36)
-            .substring(2, 9)
+            .substring(2, 10)
     );
 
 }
@@ -2887,8 +3692,11 @@ function normalizeLabel(
 ) {
 
     if (!label) {
+
         return "unknown";
+
     }
+
 
     return label
         .toString()
@@ -2916,11 +3724,26 @@ function escapeHtml(
 ) {
 
     return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
 
 }
 
@@ -2948,7 +3771,10 @@ function loadJSON(
         return JSON.parse(
             localStorage.getItem(
                 key
-            ) || JSON.stringify(fallback)
+            ) ||
+            JSON.stringify(
+                fallback
+            )
         );
 
     } catch {
