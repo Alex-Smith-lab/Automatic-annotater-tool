@@ -1,18 +1,43 @@
 /* =========================================================
-   AI ANNOTATION STUDIO
-   CORRECTED VERSION
-   Browser / GitHub Pages
+   AI ANNOTATION STUDIO PRO
+   GitHub / GitHub Pages
    No Supabase
-========================================================= */
+   ========================================================= */
 
 import {
-    pipeline
+    pipeline,
+    env
 } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0";
 
 
 /* =========================================================
-   CONFIG
-========================================================= */
+   TRANSFORMERS.JS SETTINGS
+   ========================================================= */
+
+/*
+ * DETR does NOT need a tokenizer.
+ *
+ * The model works through the object-detection pipeline.
+ *
+ * We only show actual errors instead of unnecessary
+ * informational messages.
+ */
+
+try {
+    if (env && env.LogLevel) {
+        env.logLevel = env.LogLevel.ERROR;
+    }
+} catch (e) {
+    console.warn(
+        "Could not change Transformers logging level.",
+        e
+    );
+}
+
+
+/* =========================================================
+   CONFIGURATION
+   ========================================================= */
 
 const CONFIG = {
 
@@ -20,21 +45,35 @@ const CONFIG = {
         "Xenova/detr-resnet-50",
 
     /*
-     * Keep segmentation disabled by default until a
-     * compatible segmentation model is selected.
-     *
-     * The application still supports the segmentation
-     * editor/data structure.
+     * Keep null until a proper segmentation model
+     * is connected.
      */
     segmentationModel:
         null,
 
-    defaultThreshold: 0.50,
+    defaultThreshold:
+        0.50,
 
-    storageKeys: {
-        rules: "ai_annotation_rules",
-        training: "ai_annotation_training",
-        history: "ai_annotation_history"
+    maxHistory:
+        500,
+
+    maxUndo:
+        100,
+
+    storage: {
+
+        rules:
+            "ai_annotation_rules",
+
+        training:
+            "ai_annotation_training",
+
+        history:
+            "ai_annotation_history",
+
+        classifications:
+            "ai_annotation_classifications"
+
     }
 
 };
@@ -42,80 +81,145 @@ const CONFIG = {
 
 /* =========================================================
    STATE
-========================================================= */
+   ========================================================= */
 
 const state = {
 
-    image: null,
+    image:
+        null,
 
-    imageUrl: null,
+    imageUrl:
+        null,
 
-    imageBlob: null,
+    imageBlob:
+        null,
 
-    imageName: null,
+    imageName:
+        "",
 
-    imageWidth: 0,
+    imageWidth:
+        0,
 
-    imageHeight: 0,
+    imageHeight:
+        0,
 
-    annotationType: "bbox",
+    annotationType:
+        "bbox",
 
-    activeTool: "select",
+    activeTool:
+        "select",
 
-    threshold: 0.50,
+    threshold:
+        0.50,
 
-    applyRules: true,
+    applyRules:
+        true,
 
-    annotations: [],
+    annotations:
+        [],
 
-    selectedId: null,
+    selectedId:
+        null,
 
-    undoStack: [],
+    undoStack:
+        [],
 
-    redoStack: [],
+    redoStack:
+        [],
 
-    zoom: 1,
+    zoom:
+        1,
 
-    detector: null,
+    minZoom:
+        0.10,
 
-    segmenter: null,
+    maxZoom:
+        8,
 
-    detectorReady: false,
+    panX:
+        0,
 
-    segmenterReady: false,
+    panY:
+        0,
 
-    isProcessing: false,
+    panning:
+        false,
 
-    mouse: {
-        down: false,
-        startX: 0,
-        startY: 0
-    }
+    panStartX:
+        0,
+
+    panStartY:
+        0,
+
+    panOriginX:
+        0,
+
+    panOriginY:
+        0,
+
+    detector:
+        null,
+
+    segmenter:
+        null,
+
+    detectorReady:
+        false,
+
+    segmenterReady:
+        false,
+
+    isProcessing:
+        false,
+
+    drag:
+        null,
+
+    classifications:
+        new Set(),
+
+    excludedClassifications:
+        new Set(),
+
+    nextManualClass:
+        "object"
 
 };
 
 
 /* =========================================================
-   DOM HELPERS
-========================================================= */
+   DOM
+   ========================================================= */
 
-const $ = selector =>
-    document.querySelector(selector);
+const $ =
+    selector =>
+        document.querySelector(
+            selector
+        );
 
-const $$ = selector =>
-    [...document.querySelectorAll(selector)];
+
+const $$ =
+    selector =>
+        [
+            ...document.querySelectorAll(
+                selector
+            )
+        ];
 
 
 const canvas =
     $("#annotationCanvas");
 
+
 const ctx =
-    canvas.getContext("2d");
+    canvas.getContext(
+        "2d"
+    );
 
 
 /* =========================================================
-   START
-========================================================= */
+   INITIALIZATION
+   ========================================================= */
 
 document.addEventListener(
     "DOMContentLoaded",
@@ -126,6 +230,8 @@ document.addEventListener(
 function initialize() {
 
     loadLocalData();
+
+    ensureClassificationUI();
 
     setupNavigation();
 
@@ -141,7 +247,11 @@ function initialize() {
 
     setupKeyboard();
 
+    render();
+
     renderObjects();
+
+    renderClassificationManager();
 
     updateTrainingPage();
 
@@ -149,124 +259,172 @@ function initialize() {
 
     updateCursor();
 
-    setAIStatus("Ready");
+    setAIStatus(
+        "Ready"
+    );
 
 }
 
 
 /* =========================================================
    NAVIGATION
-========================================================= */
+   ========================================================= */
 
 function setupNavigation() {
 
-    $$(".nav-item").forEach(button => {
+    $$(".nav-item")
+        .forEach(
+            button => {
 
-        button.addEventListener(
-            "click",
-            () => {
+                button.addEventListener(
+                    "click",
+                    () => {
 
-                const page =
-                    button.dataset.page;
+                        const page =
+                            button.dataset.page;
 
-                $$(".nav-item")
-                    .forEach(item =>
-                        item.classList.remove(
+
+                        $$(".nav-item")
+                            .forEach(
+                                item =>
+                                    item.classList.remove(
+                                        "active"
+                                    )
+                            );
+
+
+                        button.classList.add(
                             "active"
-                        )
-                    );
+                        );
 
-                button.classList.add(
-                    "active"
+
+                        $$(".page")
+                            .forEach(
+                                item =>
+                                    item.classList.remove(
+                                        "active-page"
+                                    )
+                            );
+
+
+                        const target =
+                            $(
+                                `#${page}Page`
+                            );
+
+
+                        if (target) {
+
+                            target.classList.add(
+                                "active-page"
+                            );
+
+                        }
+
+
+                        const titles = {
+
+                            workspace: [
+                                "Annotation Workspace",
+                                "Upload an image and let AI create annotations."
+                            ],
+
+                            rules: [
+                                "Annotation Rules",
+                                "Control how customer-specific annotations should be created."
+                            ],
+
+                            training: [
+                                "Learning Data",
+                                "Human corrections become training examples."
+                            ],
+
+                            history: [
+                                "Annotation History",
+                                "Review previous local annotation sessions."
+                            ]
+
+                        };
+
+
+                        if (
+                            titles[page]
+                        ) {
+
+                            const title =
+                                $("#pageTitle");
+
+                            const subtitle =
+                                $("#pageSubtitle");
+
+
+                            if (title) {
+
+                                title.textContent =
+                                    titles[page][0];
+
+                            }
+
+
+                            if (subtitle) {
+
+                                subtitle.textContent =
+                                    titles[page][1];
+
+                            }
+
+                        }
+
+                    }
                 );
-
-                $$(".page")
-                    .forEach(item =>
-                        item.classList.remove(
-                            "active-page"
-                        )
-                    );
-
-                const target =
-                    $(`#${page}Page`);
-
-                if (target) {
-
-                    target.classList.add(
-                        "active-page"
-                    );
-
-                }
-
-                const titles = {
-
-                    workspace: [
-                        "Annotation Workspace",
-                        "Upload an image and let AI create annotations."
-                    ],
-
-                    rules: [
-                        "Annotation Rules",
-                        "Control how customer-specific annotations should be created."
-                    ],
-
-                    training: [
-                        "Learning Data",
-                        "Human corrections become training examples."
-                    ],
-
-                    history: [
-                        "Annotation History",
-                        "Review previous local annotation sessions."
-                    ]
-
-                };
-
-                if (titles[page]) {
-
-                    $("#pageTitle")
-                        .textContent =
-                        titles[page][0];
-
-                    $("#pageSubtitle")
-                        .textContent =
-                        titles[page][1];
-
-                }
 
             }
         );
-
-    });
 
 }
 
 
 /* =========================================================
-   IMAGE UPLOAD
-========================================================= */
+   UPLOAD
+   ========================================================= */
 
 function setupUpload() {
 
-    $("#imageInput")
-        .addEventListener(
-            "change",
-            handleImageUpload
-        );
+    const input =
+        $("#imageInput");
+
+
+    if (!input) {
+        return;
+    }
+
+
+    input.addEventListener(
+        "change",
+        handleImageUpload
+    );
 
 }
 
 
-async function handleImageUpload(event) {
+async function handleImageUpload(
+    event
+) {
 
     const file =
         event.target.files?.[0];
+
 
     if (!file) {
         return;
     }
 
-    if (!file.type.startsWith("image/")) {
+
+    if (
+        !file.type.startsWith(
+            "image/"
+        )
+    ) {
 
         showToast(
             "Please select a JPG, PNG or WEBP image."
@@ -285,15 +443,10 @@ async function handleImageUpload(event) {
         state.imageName =
             file.name;
 
-        /*
-         * IMPORTANT:
-         *
-         * We keep the Blob and create a URL from it.
-         * Transformers.js receives the URL instead
-         * of the HTMLImageElement.
-         */
 
-        if (state.imageUrl) {
+        if (
+            state.imageUrl
+        ) {
 
             URL.revokeObjectURL(
                 state.imageUrl
@@ -301,8 +454,11 @@ async function handleImageUpload(event) {
 
         }
 
+
         state.imageUrl =
-            URL.createObjectURL(file);
+            URL.createObjectURL(
+                file
+            );
 
 
         const image =
@@ -321,13 +477,24 @@ async function handleImageUpload(event) {
             image.naturalHeight;
 
 
-        state.annotations = [];
+        state.annotations =
+            [];
 
-        state.selectedId = null;
+        state.selectedId =
+            null;
 
-        state.undoStack = [];
+        state.undoStack =
+            [];
 
-        state.redoStack = [];
+        state.redoStack =
+            [];
+
+
+        state.panX =
+            0;
+
+        state.panY =
+            0;
 
 
         canvas.width =
@@ -337,17 +504,41 @@ async function handleImageUpload(event) {
             state.imageHeight;
 
 
-        $("#imageName")
-            .textContent =
-            state.imageName;
+        const imageName =
+            $("#imageName");
 
-        $("#annotateBtn")
-            .disabled =
-            false;
 
-        $("#emptyState")
-            .style.display =
-            "none";
+        if (imageName) {
+
+            imageName.textContent =
+                state.imageName;
+
+        }
+
+
+        const annotateButton =
+            $("#annotateBtn");
+
+
+        if (annotateButton) {
+
+            annotateButton.disabled =
+                false;
+
+        }
+
+
+        const empty =
+            $("#emptyState");
+
+
+        if (empty) {
+
+            empty.style.display =
+                "none";
+
+        }
+
 
         canvas.style.display =
             "block";
@@ -361,24 +552,30 @@ async function handleImageUpload(event) {
 
         updateCanvasInfo();
 
-        updateQuality([]);
+        updateQuality(
+            []
+        );
 
 
-        $("#processingStatus")
-            .textContent =
-            "Image ready. Choose annotation type and click AUTO ANNOTATE.";
+        setProcessing(
+            "Image ready. Choose annotation type and click AUTO ANNOTATE."
+        );
 
 
         showToast(
             "Image loaded successfully."
         );
 
+
     } catch (error) {
 
-        console.error(error);
+        console.error(
+            error
+        );
+
 
         showToast(
-            "Could not load the image."
+            "Could not load image."
         );
 
     }
@@ -388,20 +585,28 @@ async function handleImageUpload(event) {
 
 /* =========================================================
    IMAGE LOADER
-========================================================= */
+   ========================================================= */
 
 function loadImage(
     source
 ) {
 
     return new Promise(
-        (resolve, reject) => {
+        (
+            resolve,
+            reject
+        ) => {
 
             const image =
                 new Image();
 
+
             image.onload =
-                () => resolve(image);
+                () =>
+                    resolve(
+                        image
+                    );
+
 
             image.onerror =
                 () =>
@@ -410,6 +615,7 @@ function loadImage(
                             "Image could not be decoded."
                         )
                     );
+
 
             image.src =
                 source;
@@ -421,145 +627,114 @@ function loadImage(
 
 
 /* =========================================================
-   ANNOTATION TYPES
-========================================================= */
+   ANNOTATION TYPE
+   ========================================================= */
 
 function setupAnnotationTypes() {
 
     $$(".annotation-type")
-        .forEach(button => {
+        .forEach(
+            button => {
 
-            button.addEventListener(
-                "click",
-                () => {
+                button.addEventListener(
+                    "click",
+                    () => {
 
-                    $$(".annotation-type")
-                        .forEach(b =>
-                            b.classList.remove(
-                                "active"
-                            )
+                        $$(".annotation-type")
+                            .forEach(
+                                b =>
+                                    b.classList.remove(
+                                        "active"
+                                    )
+                            );
+
+
+                        button.classList.add(
+                            "active"
                         );
 
-                    button.classList.add(
-                        "active"
-                    );
 
-                    state.annotationType =
-                        button.dataset.type;
+                        state.annotationType =
+                            button.dataset.type;
 
-
-                    if (
-                        state.annotationType ===
-                        "segmentation"
-                    ) {
 
                         if (
+                            state.annotationType ===
+                            "segmentation" &&
                             !CONFIG.segmentationModel
                         ) {
 
                             showToast(
-                                "Segmentation AI model is not configured yet. The editor is ready for a compatible segmentation model."
+                                "Segmentation editor is ready, but a true segmentation AI model still needs to be connected."
                             );
 
                         }
 
                     }
+                );
 
-                    render();
-
-                }
-            );
-
-        });
+            }
+        );
 
 }
 
 
 /* =========================================================
    TOOLS
-========================================================= */
+   ========================================================= */
 
 function setupTools() {
 
     $$(".tool-button")
-        .forEach(button => {
+        .forEach(
+            button => {
 
-            button.addEventListener(
-                "click",
-                () => {
+                button.addEventListener(
+                    "click",
+                    () => {
 
-                    $$(".tool-button")
-                        .forEach(b =>
-                            b.classList.remove(
-                                "active"
-                            )
+                        $$(".tool-button")
+                            .forEach(
+                                b =>
+                                    b.classList.remove(
+                                        "active"
+                                    )
+                            );
+
+
+                        button.classList.add(
+                            "active"
                         );
 
-                    button.classList.add(
-                        "active"
-                    );
 
-                    state.activeTool =
-                        button.dataset.tool;
-
-                    updateCursor();
-
-                }
-            );
-
-        });
-
-}
+                        state.activeTool =
+                            button.dataset.tool;
 
 
-function updateCursor() {
+                        updateCursor();
 
-    if (!canvas) {
-        return;
-    }
+                    }
+                );
 
-    if (
-        state.activeTool ===
-        "pan"
-    ) {
-
-        canvas.style.cursor =
-            "grab";
-
-    } else if (
-        state.activeTool ===
-        "draw"
-    ) {
-
-        canvas.style.cursor =
-            "crosshair";
-
-    } else if (
-        state.activeTool ===
-        "erase"
-    ) {
-
-        canvas.style.cursor =
-            "not-allowed";
-
-    } else {
-
-        canvas.style.cursor =
-            "default";
-
-    }
+            }
+        );
 
 }
 
 
 /* =========================================================
    CONTROLS
-========================================================= */
+   ========================================================= */
 
 function setupControls() {
 
-    $("#confidenceSlider")
-        .addEventListener(
+    const confidence =
+        $("#confidenceSlider");
+
+
+    if (confidence) {
+
+        confidence.addEventListener(
             "input",
             event => {
 
@@ -568,16 +743,31 @@ function setupControls() {
                         event.target.value
                     ) / 100;
 
-                $("#thresholdValue")
-                    .textContent =
-                    `${event.target.value}%`;
+
+                const value =
+                    $("#thresholdValue");
+
+
+                if (value) {
+
+                    value.textContent =
+                        `${event.target.value}%`;
+
+                }
 
             }
         );
 
+    }
 
-    $("#autoRules")
-        .addEventListener(
+
+    const rules =
+        $("#autoRules");
+
+
+    if (rules) {
+
+        rules.addEventListener(
             "change",
             event => {
 
@@ -587,120 +777,159 @@ function setupControls() {
             }
         );
 
-
-    $("#annotateBtn")
-        .addEventListener(
-            "click",
-            runAIAnnotation
-        );
+    }
 
 
-    $("#downloadBtn")
-        .addEventListener(
-            "click",
-            downloadAnnotatedImage
-        );
+    bind(
+        "#annotateBtn",
+        "click",
+        runAIAnnotation
+    );
 
 
-    $("#deleteSelected")
-        .addEventListener(
-            "click",
-            deleteSelected
-        );
+    bind(
+        "#downloadBtn",
+        "click",
+        downloadAnnotatedImage
+    );
 
 
-    $("#resetBtn")
-        .addEventListener(
-            "click",
-            resetAnnotations
-        );
+    bind(
+        "#deleteSelected",
+        "click",
+        deleteSelected
+    );
 
 
-    $("#undoBtn")
-        .addEventListener(
-            "click",
-            undo
-        );
+    bind(
+        "#resetBtn",
+        "click",
+        resetAnnotations
+    );
 
 
-    $("#redoBtn")
-        .addEventListener(
-            "click",
-            redo
-        );
+    bind(
+        "#undoBtn",
+        "click",
+        undo
+    );
 
 
-    $("#zoomIn")
-        .addEventListener(
-            "click",
-            () =>
-                setZoom(
-                    state.zoom + .1
-                )
-        );
+    bind(
+        "#redoBtn",
+        "click",
+        redo
+    );
 
 
-    $("#zoomOut")
-        .addEventListener(
-            "click",
-            () =>
-                setZoom(
-                    state.zoom - .1
-                )
-        );
+    bind(
+        "#zoomIn",
+        "click",
+        () =>
+            setZoom(
+                state.zoom *
+                1.20
+            )
+    );
 
 
-    $("#fitCanvas")
-        .addEventListener(
-            "click",
-            calculateFitZoom
-        );
+    bind(
+        "#zoomOut",
+        "click",
+        () =>
+            setZoom(
+                state.zoom /
+                1.20
+            )
+    );
 
 
-    $("#saveRules")
-        .addEventListener(
-            "click",
-            saveRules
-        );
+    bind(
+        "#fitCanvas",
+        "click",
+        calculateFitZoom
+    );
 
 
-    $("#exportTraining")
-        .addEventListener(
-            "click",
-            exportTraining
-        );
+    bind(
+        "#saveRules",
+        "click",
+        saveRules
+    );
 
 
-    $("#clearHistory")
-        .addEventListener(
-            "click",
-            clearHistory
-        );
+    bind(
+        "#exportTraining",
+        "click",
+        exportTraining
+    );
 
 
-    $("#closeModal")
-        .addEventListener(
-            "click",
-            () => {
+    bind(
+        "#clearHistory",
+        "click",
+        clearHistory
+    );
 
-                $("#annotationModal")
-                    .classList.add(
-                        "hidden"
-                    );
+
+    bind(
+        "#closeModal",
+        "click",
+        () => {
+
+            const modal =
+                $("#annotationModal");
+
+
+            if (modal) {
+
+                modal.classList.add(
+                    "hidden"
+                );
 
             }
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   SAFE BIND
+   ========================================================= */
+
+function bind(
+    selector,
+    event,
+    callback
+) {
+
+    const element =
+        $(selector);
+
+
+    if (element) {
+
+        element.addEventListener(
+            event,
+            callback
         );
+
+    }
 
 }
 
 
 /* =========================================================
    AI MODEL
-========================================================= */
+   ========================================================= */
 
 async function loadDetector() {
 
-    if (state.detector) {
+    if (
+        state.detector
+    ) {
 
         return state.detector;
 
@@ -713,10 +942,8 @@ async function loadDetector() {
 
 
     /*
-     * IMPORTANT:
-     *
-     * This model is downloaded once and then
-     * normally cached by the browser.
+     * This is the official Transformers.js
+     * usage pattern for this model.
      */
 
     state.detector =
@@ -724,7 +951,8 @@ async function loadDetector() {
             "object-detection",
             CONFIG.detectionModel,
             {
-                dtype: "q8"
+                dtype:
+                    "q8"
             }
         );
 
@@ -744,61 +972,8 @@ async function loadDetector() {
 
 
 /* =========================================================
-   SEGMENTATION MODEL
-========================================================= */
-
-async function loadSegmenter() {
-
-    if (
-        !CONFIG.segmentationModel
-    ) {
-
-        throw new Error(
-            "No compatible segmentation model has been configured."
-        );
-
-    }
-
-
-    if (state.segmenter) {
-
-        return state.segmenter;
-
-    }
-
-
-    setAIStatus(
-        "Downloading segmentation model..."
-    );
-
-
-    state.segmenter =
-        await pipeline(
-            "image-segmentation",
-            CONFIG.segmentationModel,
-            {
-                dtype: "q8"
-            }
-        );
-
-
-    state.segmenterReady =
-        true;
-
-
-    setAIStatus(
-        "Segmentation ready"
-    );
-
-
-    return state.segmenter;
-
-}
-
-
-/* =========================================================
-   RUN AI
-========================================================= */
+   AI ANNOTATION
+   ========================================================= */
 
 async function runAIAnnotation() {
 
@@ -813,7 +988,9 @@ async function runAIAnnotation() {
     }
 
 
-    if (state.isProcessing) {
+    if (
+        state.isProcessing
+    ) {
 
         return;
 
@@ -823,9 +1000,17 @@ async function runAIAnnotation() {
     state.isProcessing =
         true;
 
-    $("#annotateBtn")
-        .disabled =
-        true;
+
+    const button =
+        $("#annotateBtn");
+
+
+    if (button) {
+
+        button.disabled =
+            true;
+
+    }
 
 
     try {
@@ -833,12 +1018,13 @@ async function runAIAnnotation() {
         saveUndoState();
 
 
-        let results;
+        let results =
+            [];
 
 
-        /* ===============================================
+        /* -------------------------------------------------
            BOX
-        =============================================== */
+        ------------------------------------------------- */
 
         if (
             state.annotationType ===
@@ -859,14 +1045,6 @@ async function runAIAnnotation() {
             );
 
 
-            /*
-             * FIX:
-             *
-             * DO NOT send state.image here.
-             *
-             * Send state.imageUrl instead.
-             */
-
             results =
                 await detector(
                     state.imageUrl,
@@ -885,9 +1063,9 @@ async function runAIAnnotation() {
         }
 
 
-        /* ===============================================
+        /* -------------------------------------------------
            POLYGON
-        =============================================== */
+        ------------------------------------------------- */
 
         else if (
             state.annotationType ===
@@ -895,7 +1073,7 @@ async function runAIAnnotation() {
         ) {
 
             setProcessing(
-                "AI is detecting objects for polygon annotation..."
+                "Detecting objects for editable polygons..."
             );
 
 
@@ -919,16 +1097,6 @@ async function runAIAnnotation() {
                 );
 
 
-            /*
-             * Temporary editable polygon.
-             *
-             * Each detection box becomes an editable
-             * four-point polygon.
-             *
-             * A true segmentation-based polygon
-             * should replace this in the next AI upgrade.
-             */
-
             state.annotations =
                 boxes.map(
                     convertBoxToPolygon
@@ -937,28 +1105,25 @@ async function runAIAnnotation() {
         }
 
 
-        /* ===============================================
+        /* -------------------------------------------------
            SEGMENTATION
-        =============================================== */
+        ------------------------------------------------- */
 
         else if (
             state.annotationType ===
             "segmentation"
         ) {
 
-            /*
-             * We deliberately don't fake segmentation.
-             *
-             * The previous code attempted to use an
-             * incompatible model here.
-             */
-
             if (
                 !CONFIG.segmentationModel
             ) {
 
+                /*
+                 * Do NOT create fake segmentation.
+                 */
+
                 throw new Error(
-                    "Segmentation model is not configured. Use 2D Box or Polygon for now, or configure a compatible image-segmentation model."
+                    "No true segmentation model is configured yet."
                 );
 
             }
@@ -968,18 +1133,9 @@ async function runAIAnnotation() {
                 await loadSegmenter();
 
 
-            setProcessing(
-                "AI is generating segmentation masks..."
-            );
-
-
             results =
                 await segmenter(
-                    state.imageUrl,
-                    {
-                        threshold:
-                            state.threshold
-                    }
+                    state.imageUrl
                 );
 
 
@@ -990,10 +1146,6 @@ async function runAIAnnotation() {
 
         }
 
-
-        /* ===============================================
-           RULES
-        =============================================== */
 
         if (
             state.applyRules
@@ -1007,18 +1159,7 @@ async function runAIAnnotation() {
         }
 
 
-        state.annotations =
-            state.annotations.map(
-                annotation => ({
-
-                    ...annotation,
-
-                    source:
-                        annotation.source ||
-                        "ai"
-
-                })
-            );
+        rebuildClassificationSet();
 
 
         state.selectedId =
@@ -1029,6 +1170,8 @@ async function runAIAnnotation() {
         render();
 
         renderObjects();
+
+        renderClassificationManager();
 
         updateCanvasInfo();
 
@@ -1066,7 +1209,7 @@ async function runAIAnnotation() {
 
         let message =
             error?.message ||
-            "Unknown AI error.";
+            "AI annotation failed.";
 
 
         if (
@@ -1076,19 +1219,7 @@ async function runAIAnnotation() {
         ) {
 
             message =
-                "The AI rejected the image input. The corrected version now sends the uploaded image URL instead of the browser Image object.";
-
-        }
-
-
-        if (
-            message.includes(
-                "404"
-            )
-        ) {
-
-            message +=
-                " A model or dependency URL may not exist.";
+                "The image input was rejected. The system now sends the uploaded image URL to Transformers.js.";
 
         }
 
@@ -1107,9 +1238,14 @@ async function runAIAnnotation() {
         state.isProcessing =
             false;
 
-        $("#annotateBtn")
-            .disabled =
-            false;
+
+        if (button) {
+
+            button.disabled =
+                false;
+
+        }
+
 
         setAIStatus(
             "Ready"
@@ -1121,19 +1257,16 @@ async function runAIAnnotation() {
 
 
 /* =========================================================
-   DETECTION → BOX
-========================================================= */
+   DETECTION CONVERTER
+   ========================================================= */
 
 function convertDetections(
     results
 ) {
 
-    if (!Array.isArray(results)) {
-
-        console.warn(
-            "Unexpected detector output:",
-            results
-        );
+    if (
+        !Array.isArray(results)
+    ) {
 
         return [];
 
@@ -1158,15 +1291,18 @@ function convertDetections(
                         box.xmin
                     );
 
+
                 const ymin =
                     Number(
                         box.ymin
                     );
 
+
                 const xmax =
                     Number(
                         box.xmax
                     );
+
 
                 const ymax =
                     Number(
@@ -1194,21 +1330,31 @@ function convertDetections(
                         ),
 
                     x:
-                        xmin,
+                        clamp(
+                            xmin,
+                            0,
+                            state.imageWidth
+                        ),
 
                     y:
-                        ymin,
+                        clamp(
+                            ymin,
+                            0,
+                            state.imageHeight
+                        ),
 
                     width:
                         Math.max(
-                            0,
-                            xmax - xmin
+                            2,
+                            xmax -
+                            xmin
                         ),
 
                     height:
                         Math.max(
-                            0,
-                            ymax - ymin
+                            2,
+                            ymax -
+                            ymin
                         ),
 
                     points:
@@ -1233,7 +1379,7 @@ function convertDetections(
 
 /* =========================================================
    BOX → POLYGON
-========================================================= */
+   ========================================================= */
 
 function convertBoxToPolygon(
     annotation
@@ -1293,53 +1439,73 @@ function convertBoxToPolygon(
 
 /* =========================================================
    SEGMENTATION
-========================================================= */
+   ========================================================= */
+
+async function loadSegmenter() {
+
+    if (
+        state.segmenter
+    ) {
+
+        return state.segmenter;
+
+    }
+
+
+    if (
+        !CONFIG.segmentationModel
+    ) {
+
+        throw new Error(
+            "Segmentation model is not configured."
+        );
+
+    }
+
+
+    state.segmenter =
+        await pipeline(
+            "image-segmentation",
+            CONFIG.segmentationModel,
+            {
+                dtype:
+                    "q8"
+            }
+        );
+
+
+    state.segmenterReady =
+        true;
+
+
+    return state.segmenter;
+
+}
+
 
 async function convertSegments(
     results
 ) {
 
-    if (!Array.isArray(results)) {
+    if (
+        !Array.isArray(results)
+    ) {
 
         return [];
 
     }
 
 
-    const annotations = [];
+    const output =
+        [];
 
 
     for (
-        const item of results
+        const item
+        of results
     ) {
 
-        let mask = null;
-
-
-        if (item.mask) {
-
-            try {
-
-                mask =
-                    await rawImageToDataURL(
-                        item.mask
-                    );
-
-            } catch (
-                error
-            ) {
-
-                console.warn(
-                    "Could not convert mask:",
-                    error
-                );
-
-            }
-
-        }
-
-
-        annotations.push({
+        output.push({
 
             id:
                 createId(),
@@ -1355,7 +1521,7 @@ async function convertSegments(
             confidence:
                 Number(
                     item.score ||
-                    0
+                    1
                 ),
 
             x:
@@ -1373,7 +1539,8 @@ async function convertSegments(
             points:
                 null,
 
-            mask,
+            mask:
+                null,
 
             source:
                 "ai",
@@ -1386,106 +1553,18 @@ async function convertSegments(
     }
 
 
-    return annotations;
-
-}
-
-
-/* =========================================================
-   MASK → DATA URL
-========================================================= */
-
-async function rawImageToDataURL(
-    rawImage
-) {
-
-    if (!rawImage) {
-
-        return null;
-
-    }
-
-
-    /*
-     * Transformers.js RawImage normally provides
-     * toBlob(). If available, use it.
-     */
-
-    if (
-        typeof rawImage.toBlob ===
-        "function"
-    ) {
-
-        const blob =
-            await rawImage.toBlob();
-
-
-        return await blobToDataURL(
-            blob
-        );
-
-    }
-
-
-    /*
-     * Some versions expose image data differently.
-     * Return null rather than crashing the whole job.
-     */
-
-    return null;
-
-}
-
-
-function blobToDataURL(
-    blob
-) {
-
-    return new Promise(
-        (resolve, reject) => {
-
-            const reader =
-                new FileReader();
-
-            reader.onload =
-                () =>
-                    resolve(
-                        reader.result
-                    );
-
-            reader.onerror =
-                reject;
-
-            reader.readAsDataURL(
-                blob
-            );
-
-        }
-    );
+    return output;
 
 }
 
 
 /* =========================================================
    RULE ENGINE
-========================================================= */
+   ========================================================= */
 
 function applyAnnotationRules(
     annotations
 ) {
-
-    const rules =
-        localStorage.getItem(
-            CONFIG.storageKeys.rules
-        ) || "";
-
-
-    if (!rules.trim()) {
-
-        return annotations;
-
-    }
-
 
     return annotations.map(
         annotation => {
@@ -1500,10 +1579,16 @@ function applyAnnotationRules(
                 false;
 
 
-            /*
-             * Very small annotations
-             * automatically receive review.
-             */
+            if (
+                updated.confidence <
+                state.threshold
+            ) {
+
+                updated.review =
+                    true;
+
+            }
+
 
             if (
                 updated.type ===
@@ -1525,45 +1610,6 @@ function applyAnnotationRules(
             }
 
 
-            if (
-                updated.confidence <
-                state.threshold
-            ) {
-
-                updated.review =
-                    true;
-
-            }
-
-
-            /*
-             * Keep annotation inside image.
-             */
-
-            if (
-                updated.type ===
-                "bbox"
-            ) {
-
-                if (
-                    updated.x < 0 ||
-                    updated.y < 0 ||
-                    updated.x +
-                    updated.width >
-                    state.imageWidth ||
-                    updated.y +
-                    updated.height >
-                    state.imageHeight
-                ) {
-
-                    updated.review =
-                        true;
-
-                }
-
-            }
-
-
             return updated;
 
         }
@@ -1573,8 +1619,8 @@ function applyAnnotationRules(
 
 
 /* =========================================================
-   CANVAS EVENTS
-========================================================= */
+   CANVAS
+   ========================================================= */
 
 function setupCanvas() {
 
@@ -1583,20 +1629,34 @@ function setupCanvas() {
         canvasMouseDown
     );
 
+
     canvas.addEventListener(
         "mousemove",
         canvasMouseMove
     );
+
 
     canvas.addEventListener(
         "mouseup",
         canvasMouseUp
     );
 
+
     canvas.addEventListener(
         "mouseleave",
         canvasMouseUp
     );
+
+
+    canvas.addEventListener(
+        "wheel",
+        canvasWheel,
+        {
+            passive:
+                false
+        }
+    );
+
 
     canvas.addEventListener(
         "dblclick",
@@ -1606,11 +1666,55 @@ function setupCanvas() {
 }
 
 
+/* =========================================================
+   MOUSE DOWN
+   ========================================================= */
+
 function canvasMouseDown(
     event
 ) {
 
-    if (!state.image) {
+    if (
+        !state.image
+    ) {
+
+        return;
+
+    }
+
+
+    /*
+     * Middle mouse = pan
+     */
+
+    if (
+        event.button ===
+        1
+    ) {
+
+        startPan(
+            event
+        );
+
+        event.preventDefault();
+
+        return;
+
+    }
+
+
+    /*
+     * Pan tool
+     */
+
+    if (
+        state.activeTool ===
+        "pan"
+    ) {
+
+        startPan(
+            event
+        );
 
         return;
 
@@ -1618,90 +1722,33 @@ function canvasMouseDown(
 
 
     const point =
-        getCanvasPoint(
-            event
+        screenToImage(
+            event.clientX,
+            event.clientY
         );
 
 
-    state.mouse.down =
-        true;
-
-    state.mouse.startX =
-        point.x;
-
-    state.mouse.startY =
-        point.y;
-
+    /*
+     * DRAW
+     */
 
     if (
         state.activeTool ===
         "draw"
     ) {
 
-        saveUndoState();
-
-
-        if (
-            state.annotationType ===
-            "bbox"
-        ) {
-
-            const annotation = {
-
-                id:
-                    createId(),
-
-                type:
-                    "bbox",
-
-                label:
-                    "unknown",
-
-                confidence:
-                    1,
-
-                x:
-                    point.x,
-
-                y:
-                    point.y,
-
-                width:
-                    0,
-
-                height:
-                    0,
-
-                points:
-                    null,
-
-                mask:
-                    null,
-
-                source:
-                    "human",
-
-                review:
-                    false
-
-            };
-
-
-            state.annotations.push(
-                annotation
-            );
-
-
-            state.selectedId =
-                annotation.id;
-
-        }
-
+        startDrawing(
+            point
+        );
 
         return;
 
     }
 
+
+    /*
+     * ERASE
+     */
 
     if (
         state.activeTool ===
@@ -1719,24 +1766,9 @@ function canvasMouseDown(
 
             saveUndoState();
 
-
-            state.annotations =
-                state.annotations.filter(
-                    item =>
-                        item.id !==
-                        hit.id
-                );
-
-
-            state.selectedId =
-                null;
-
-
-            render();
-
-            renderObjects();
-
-            updateCanvasInfo();
+            removeAnnotation(
+                hit.id
+            );
 
         }
 
@@ -1746,34 +1778,39 @@ function canvasMouseDown(
     }
 
 
-    const hit =
-        findAnnotationAt(
-            point.x,
-            point.y
+    /*
+     * SELECT
+     */
+
+    if (
+        state.activeTool ===
+        "select"
+    ) {
+
+        selectOrResize(
+            point
         );
-
-
-    if (hit) {
-
-        state.selectedId =
-            hit.id;
-
-        renderObjects();
-
-        render();
 
     }
 
 }
 
 
+/* =========================================================
+   MOUSE MOVE
+   ========================================================= */
+
 function canvasMouseMove(
     event
 ) {
 
     if (
-        !state.mouse.down
+        state.panning
     ) {
+
+        movePan(
+            event
+        );
 
         return;
 
@@ -1781,8 +1818,7 @@ function canvasMouseMove(
 
 
     if (
-        state.activeTool !==
-        "draw"
+        !state.drag
     ) {
 
         return;
@@ -1791,20 +1827,491 @@ function canvasMouseMove(
 
 
     const point =
-        getCanvasPoint(
-            event
+        screenToImage(
+            event.clientX,
+            event.clientY
         );
 
 
-    const annotation =
-        state.annotations.find(
-            item =>
-                item.id ===
-                state.selectedId
+    handleDrag(
+        point
+    );
+
+}
+
+
+/* =========================================================
+   MOUSE UP
+   ========================================================= */
+
+function canvasMouseUp() {
+
+    if (
+        state.panning
+    ) {
+
+        state.panning =
+            false;
+
+
+        canvas.style.cursor =
+            state.activeTool ===
+            "pan"
+                ? "grab"
+                : "default";
+
+    }
+
+
+    if (
+        state.drag
+    ) {
+
+        state.drag =
+            null;
+
+
+        render();
+
+        renderObjects();
+
+        updateCanvasInfo();
+
+        saveTrainingSnapshot();
+
+    }
+
+}
+
+
+/* =========================================================
+   PAN
+   ========================================================= */
+
+function startPan(
+    event
+) {
+
+    state.panning =
+        true;
+
+
+    state.panStartX =
+        event.clientX;
+
+
+    state.panStartY =
+        event.clientY;
+
+
+    state.panOriginX =
+        state.panX;
+
+
+    state.panOriginY =
+        state.panY;
+
+
+    canvas.style.cursor =
+        "grabbing";
+
+}
+
+
+function movePan(
+    event
+) {
+
+    const dx =
+        event.clientX -
+        state.panStartX;
+
+
+    const dy =
+        event.clientY -
+        state.panStartY;
+
+
+    state.panX =
+        state.panOriginX +
+        dx;
+
+
+    state.panY =
+        state.panOriginY +
+        dy;
+
+
+    applyCanvasTransform();
+
+}
+
+
+/* =========================================================
+   ZOOM
+   ========================================================= */
+
+function canvasWheel(
+    event
+) {
+
+    event.preventDefault();
+
+
+    if (
+        !state.image
+    ) {
+
+        return;
+
+    }
+
+
+    const oldZoom =
+        state.zoom;
+
+
+    const direction =
+        event.deltaY < 0
+            ? 1.15
+            : 1 / 1.15;
+
+
+    const newZoom =
+        clamp(
+            oldZoom *
+            direction,
+            state.minZoom,
+            state.maxZoom
         );
 
 
-    if (!annotation) {
+    if (
+        newZoom ===
+        oldZoom
+    ) {
+
+        return;
+
+    }
+
+
+    /*
+     * Zoom around mouse position.
+     */
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    const mouseX =
+        event.clientX -
+        rect.left;
+
+
+    const mouseY =
+        event.clientY -
+        rect.top;
+
+
+    const imageBefore =
+        screenToImage(
+            event.clientX,
+            event.clientY
+        );
+
+
+    state.zoom =
+        newZoom;
+
+
+    state.panX =
+        mouseX -
+        (
+            imageBefore.x *
+            state.zoom
+        );
+
+
+    state.panY =
+        mouseY -
+        (
+            imageBefore.y *
+            state.zoom
+        );
+
+
+    applyCanvasTransform();
+
+}
+
+
+/* =========================================================
+   SET ZOOM
+   ========================================================= */
+
+function setZoom(
+    zoom
+) {
+
+    state.zoom =
+        clamp(
+            zoom,
+            state.minZoom,
+            state.maxZoom
+        );
+
+
+    applyCanvasTransform();
+
+}
+
+
+/* =========================================================
+   FIT
+   ========================================================= */
+
+function calculateFitZoom() {
+
+    if (
+        !state.image
+    ) {
+
+        return;
+
+    }
+
+
+    const container =
+        $("#canvasContainer");
+
+
+    if (!container) {
+
+        return;
+
+    }
+
+
+    const availableWidth =
+        Math.max(
+            100,
+            container.clientWidth -
+            30
+        );
+
+
+    const availableHeight =
+        Math.max(
+            100,
+            container.clientHeight -
+            30
+        );
+
+
+    const xZoom =
+        availableWidth /
+        state.imageWidth;
+
+
+    const yZoom =
+        availableHeight /
+        state.imageHeight;
+
+
+    state.zoom =
+        clamp(
+            Math.min(
+                xZoom,
+                yZoom
+            ),
+            state.minZoom,
+            1
+        );
+
+
+    state.panX =
+        0;
+
+
+    state.panY =
+        0;
+
+
+    applyCanvasTransform();
+
+}
+
+
+/* =========================================================
+   TRANSFORM
+   ========================================================= */
+
+function applyCanvasTransform() {
+
+    canvas.style.transform =
+        `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+
+
+    const zoomValue =
+        $("#zoomValue");
+
+
+    if (zoomValue) {
+
+        zoomValue.textContent =
+            `${Math.round(
+                state.zoom *
+                100
+            )}%`;
+
+    }
+
+}
+
+
+/* =========================================================
+   SCREEN → IMAGE
+   ========================================================= */
+
+function screenToImage(
+    clientX,
+    clientY
+) {
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    /*
+     * Because getBoundingClientRect()
+     * already includes transform, we need to
+     * use the transformed top-left.
+     */
+
+    const x =
+        (
+            clientX -
+            rect.left
+        ) /
+        state.zoom;
+
+
+    const y =
+        (
+            clientY -
+            rect.top
+        ) /
+        state.zoom;
+
+
+    return {
+
+        x:
+            clamp(
+                x,
+                0,
+                state.imageWidth
+            ),
+
+        y:
+            clamp(
+                y,
+                0,
+                state.imageHeight
+            )
+
+    };
+
+}
+
+
+/* =========================================================
+   START DRAWING
+   ========================================================= */
+
+function startDrawing(
+    point
+) {
+
+    saveUndoState();
+
+
+    const label =
+        state.nextManualClass ||
+        "object";
+
+
+    if (
+        state.annotationType ===
+        "bbox"
+    ) {
+
+        const annotation = {
+
+            id:
+                createId(),
+
+            type:
+                "bbox",
+
+            label,
+
+            confidence:
+                1,
+
+            x:
+                point.x,
+
+            y:
+                point.y,
+
+            width:
+                1,
+
+            height:
+                1,
+
+            points:
+                null,
+
+            mask:
+                null,
+
+            source:
+                "human",
+
+            review:
+                false
+
+        };
+
+
+        state.annotations.push(
+            annotation
+        );
+
+
+        state.selectedId =
+            annotation.id;
+
+
+        state.drag = {
+
+            mode:
+                "draw",
+
+            id:
+                annotation.id,
+
+            startX:
+                point.x,
+
+            startY:
+                point.y
+
+        };
+
 
         return;
 
@@ -1812,33 +2319,553 @@ function canvasMouseMove(
 
 
     if (
-        annotation.type ===
+        state.annotationType ===
+        "polygon"
+    ) {
+
+        const annotation = {
+
+            id:
+                createId(),
+
+            type:
+                "polygon",
+
+            label,
+
+            confidence:
+                1,
+
+            x:
+                point.x,
+
+            y:
+                point.y,
+
+            width:
+                0,
+
+            height:
+                0,
+
+            points: [
+
+                {
+                    x:
+                        point.x,
+
+                    y:
+                        point.y
+                },
+
+                {
+                    x:
+                        point.x +
+                        80,
+
+                    y:
+                        point.y
+                },
+
+                {
+                    x:
+                        point.x +
+                        80,
+
+                    y:
+                        point.y +
+                        80
+                },
+
+                {
+                    x:
+                        point.x,
+
+                    y:
+                        point.y +
+                        80
+                }
+
+            ],
+
+            mask:
+                null,
+
+            source:
+                "human",
+
+            review:
+                false
+
+        };
+
+
+        state.annotations.push(
+            annotation
+        );
+
+
+        state.selectedId =
+            annotation.id;
+
+
+        state.drag = {
+
+            mode:
+                "move",
+
+            id:
+                annotation.id,
+
+            offsetX:
+                0,
+
+            offsetY:
+                0
+
+        };
+
+
+        render();
+
+        renderObjects();
+
+        return;
+
+    }
+
+
+    /*
+     * Segmentation is normally edited using
+     * a proper mask editor.
+     */
+
+    showToast(
+        "Use a segmentation model to create masks, then edit/delete them."
+    );
+
+}
+
+
+/* =========================================================
+   SELECT / RESIZE
+   ========================================================= */
+
+function selectOrResize(
+    point
+) {
+
+    const selected =
+        state.selectedId
+            ? state.annotations.find(
+                a =>
+                    a.id ===
+                    state.selectedId
+            )
+            : null;
+
+
+    /*
+     * First check resize handles.
+     */
+
+    if (
+        selected &&
+        selected.type ===
         "bbox"
+    ) {
+
+        const handle =
+            getResizeHandle(
+                selected,
+                point
+            );
+
+
+        if (handle) {
+
+            saveUndoState();
+
+
+            state.drag = {
+
+                mode:
+                    "resize",
+
+                id:
+                    selected.id,
+
+                handle,
+
+                original:
+                    clone(
+                        selected
+                    )
+
+            };
+
+
+            return;
+
+        }
+
+    }
+
+
+    /*
+     * Polygon vertex.
+     */
+
+    if (
+        selected &&
+        selected.type ===
+        "polygon"
+    ) {
+
+        const vertex =
+            getPolygonVertex(
+                selected,
+                point
+            );
+
+
+        if (
+            vertex !==
+            -1
+        ) {
+
+            saveUndoState();
+
+
+            state.drag = {
+
+                mode:
+                    "vertex",
+
+                id:
+                    selected.id,
+
+                vertex
+
+            };
+
+
+            return;
+
+        }
+
+    }
+
+
+    /*
+     * Object body.
+     */
+
+    const hit =
+        findAnnotationAt(
+            point.x,
+            point.y
+        );
+
+
+    if (!hit) {
+
+        state.selectedId =
+            null;
+
+
+        render();
+
+        renderObjects();
+
+        return;
+
+    }
+
+
+    state.selectedId =
+        hit.id;
+
+
+    saveUndoState();
+
+
+    if (
+        hit.type ===
+        "bbox"
+    ) {
+
+        state.drag = {
+
+            mode:
+                "move",
+
+            id:
+                hit.id,
+
+            offsetX:
+                point.x -
+                hit.x,
+
+            offsetY:
+                point.y -
+                hit.y
+
+        };
+
+    }
+
+
+    else if (
+        hit.type ===
+        "polygon"
+    ) {
+
+        state.drag = {
+
+            mode:
+                "polygonMove",
+
+            id:
+                hit.id,
+
+            startX:
+                point.x,
+
+            startY:
+                point.y,
+
+            originalPoints:
+                clone(
+                    hit.points
+                )
+
+        };
+
+    }
+
+
+    render();
+
+    renderObjects();
+
+}
+
+
+/* =========================================================
+   HANDLE DRAG
+   ========================================================= */
+
+function handleDrag(
+    point
+) {
+
+    const drag =
+        state.drag;
+
+
+    if (!drag) {
+        return;
+    }
+
+
+    const annotation =
+        state.annotations.find(
+            a =>
+                a.id ===
+                drag.id
+        );
+
+
+    if (!annotation) {
+        return;
+    }
+
+
+    /*
+     * CREATE BOX
+     */
+
+    if (
+        drag.mode ===
+        "draw"
     ) {
 
         annotation.x =
             Math.min(
-                state.mouse.startX,
+                drag.startX,
                 point.x
             );
 
+
         annotation.y =
             Math.min(
-                state.mouse.startY,
+                drag.startY,
                 point.y
             );
 
+
         annotation.width =
-            Math.abs(
-                point.x -
-                state.mouse.startX
+            Math.max(
+                2,
+                Math.abs(
+                    point.x -
+                    drag.startX
+                )
             );
 
+
         annotation.height =
-            Math.abs(
-                point.y -
-                state.mouse.startY
+            Math.max(
+                2,
+                Math.abs(
+                    point.y -
+                    drag.startY
+                )
             );
+
+    }
+
+
+    /*
+     * MOVE BOX
+     */
+
+    else if (
+        drag.mode ===
+        "move"
+    ) {
+
+        annotation.x =
+            clamp(
+                point.x -
+                drag.offsetX,
+                0,
+                state.imageWidth -
+                annotation.width
+            );
+
+
+        annotation.y =
+            clamp(
+                point.y -
+                drag.offsetY,
+                0,
+                state.imageHeight -
+                annotation.height
+            );
+
+
+        annotation.source =
+            "human";
+
+    }
+
+
+    /*
+     * RESIZE BOX
+     */
+
+    else if (
+        drag.mode ===
+        "resize"
+    ) {
+
+        resizeBox(
+            annotation,
+            drag,
+            point
+        );
+
+
+        annotation.source =
+            "human";
+
+    }
+
+
+    /*
+     * MOVE POLYGON
+     */
+
+    else if (
+        drag.mode ===
+        "polygonMove"
+    ) {
+
+        const dx =
+            point.x -
+            drag.startX;
+
+
+        const dy =
+            point.y -
+            drag.startY;
+
+
+        annotation.points =
+            drag.originalPoints.map(
+                p => ({
+
+                    x:
+                        clamp(
+                            p.x +
+                            dx,
+                            0,
+                            state.imageWidth
+                        ),
+
+                    y:
+                        clamp(
+                            p.y +
+                            dy,
+                            0,
+                            state.imageHeight
+                        )
+
+                })
+            );
+
+
+        annotation.source =
+            "human";
+
+    }
+
+
+    /*
+     * MOVE POLYGON VERTEX
+     */
+
+    else if (
+        drag.mode ===
+        "vertex"
+    ) {
+
+        if (
+            annotation.points &&
+            annotation.points[
+                drag.vertex
+            ]
+        ) {
+
+            annotation.points[
+                drag.vertex
+            ] = {
+
+                x:
+                    point.x,
+
+                y:
+                    point.y
+
+            };
+
+
+            annotation.source =
+                "human";
+
+        }
 
     }
 
@@ -1848,30 +2875,326 @@ function canvasMouseMove(
 }
 
 
-function canvasMouseUp() {
+/* =========================================================
+   RESIZE BOX
+   ========================================================= */
 
-    state.mouse.down =
-        false;
+function resizeBox(
+    box,
+    drag,
+    point
+) {
+
+    const minSize =
+        4;
 
 
-    renderObjects();
+    const original =
+        drag.original;
 
-    updateCanvasInfo();
+
+    let left =
+        original.x;
+
+
+    let top =
+        original.y;
+
+
+    let right =
+        original.x +
+        original.width;
+
+
+    let bottom =
+        original.y +
+        original.height;
+
+
+    const handle =
+        drag.handle;
+
+
+    if (
+        handle.includes(
+            "w"
+        )
+    ) {
+
+        left =
+            Math.min(
+                point.x,
+                right -
+                minSize
+            );
+
+    }
+
+
+    if (
+        handle.includes(
+            "e"
+        )
+    ) {
+
+        right =
+            Math.max(
+                point.x,
+                left +
+                minSize
+            );
+
+    }
+
+
+    if (
+        handle.includes(
+            "n"
+        )
+    ) {
+
+        top =
+            Math.min(
+                point.y,
+                bottom -
+                minSize
+            );
+
+    }
+
+
+    if (
+        handle.includes(
+            "s"
+        )
+    ) {
+
+        bottom =
+            Math.max(
+                point.y,
+                top +
+                minSize
+            );
+
+    }
+
+
+    box.x =
+        clamp(
+            left,
+            0,
+            state.imageWidth -
+            minSize
+        );
+
+
+    box.y =
+        clamp(
+            top,
+            0,
+            state.imageHeight -
+            minSize
+        );
+
+
+    box.width =
+        clamp(
+            right -
+            box.x,
+            minSize,
+            state.imageWidth -
+            box.x
+        );
+
+
+    box.height =
+        clamp(
+            bottom -
+            box.y,
+            minSize,
+            state.imageHeight -
+            box.y
+        );
 
 }
 
 
 /* =========================================================
-   DOUBLE CLICK EDIT
-========================================================= */
+   RESIZE HANDLES
+   ========================================================= */
+
+function getResizeHandle(
+    box,
+    point
+) {
+
+    const size =
+        12 /
+        state.zoom;
+
+
+    const handles = {
+
+        nw: [
+            box.x,
+            box.y
+        ],
+
+        n: [
+            box.x +
+            box.width / 2,
+            box.y
+        ],
+
+        ne: [
+            box.x +
+            box.width,
+            box.y
+        ],
+
+        e: [
+            box.x +
+            box.width,
+            box.y +
+            box.height / 2
+        ],
+
+        se: [
+            box.x +
+            box.width,
+            box.y +
+            box.height
+        ],
+
+        s: [
+            box.x +
+            box.width / 2,
+            box.y +
+            box.height
+        ],
+
+        sw: [
+            box.x,
+            box.y +
+            box.height
+        ],
+
+        w: [
+            box.x,
+            box.y +
+            box.height / 2
+        ]
+
+    };
+
+
+    for (
+        const [
+            name,
+            position
+        ]
+        of Object.entries(
+            handles
+        )
+    ) {
+
+        if (
+            Math.abs(
+                point.x -
+                position[0]
+            ) <= size &&
+            Math.abs(
+                point.y -
+                position[1]
+            ) <= size
+        ) {
+
+            return name;
+
+        }
+
+    }
+
+
+    return null;
+
+}
+
+
+/* =========================================================
+   POLYGON VERTEX
+   ========================================================= */
+
+function getPolygonVertex(
+    polygon,
+    point
+) {
+
+    if (
+        !polygon.points
+    ) {
+
+        return -1;
+
+    }
+
+
+    const tolerance =
+        14 /
+        state.zoom;
+
+
+    for (
+        let i = 0;
+
+        i <
+        polygon.points.length;
+
+        i++
+    ) {
+
+        const p =
+            polygon.points[i];
+
+
+        const distance =
+            Math.hypot(
+                p.x -
+                point.x,
+                p.y -
+                point.y
+            );
+
+
+        if (
+            distance <=
+            tolerance
+        ) {
+
+            return i;
+
+        }
+
+    }
+
+
+    return -1;
+
+}
+
+
+/* =========================================================
+   DOUBLE CLICK
+   ========================================================= */
 
 function canvasDoubleClick(
     event
 ) {
 
     const point =
-        getCanvasPoint(
-            event
+        screenToImage(
+            event.clientX,
+            event.clientY
         );
 
 
@@ -1889,90 +3212,16 @@ function canvasDoubleClick(
     }
 
 
-    const newLabel =
-        prompt(
-            "Change object class:",
-            hit.label
-        );
-
-
-    if (
-        newLabel &&
-        newLabel.trim()
-    ) {
-
-        saveUndoState();
-
-
-        hit.label =
-            newLabel.trim();
-
-
-        hit.source =
-            "human";
-
-
-        hit.review =
-            false;
-
-
-        render();
-
-        renderObjects();
-
-        saveTrainingSnapshot();
-
-    }
+    editClassification(
+        hit
+    );
 
 }
 
 
 /* =========================================================
-   CANVAS COORDINATES
-========================================================= */
-
-function getCanvasPoint(
-    event
-) {
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-
-    const scaleX =
-        canvas.width /
-        rect.width;
-
-
-    const scaleY =
-        canvas.height /
-        rect.height;
-
-
-    return {
-
-        x:
-            (
-                event.clientX -
-                rect.left
-            ) *
-            scaleX,
-
-        y:
-            (
-                event.clientY -
-                rect.top
-            ) *
-            scaleY
-
-    };
-
-}
-
-
-/* =========================================================
-   HIT TEST
-========================================================= */
+   FIND ANNOTATION
+   ========================================================= */
 
 function findAnnotationAt(
     x,
@@ -1981,7 +3230,8 @@ function findAnnotationAt(
 
     for (
         let i =
-            state.annotations.length - 1;
+            state.annotations.length -
+            1;
 
         i >= 0;
 
@@ -1998,11 +3248,13 @@ function findAnnotationAt(
         ) {
 
             if (
-                x >= annotation.x &&
+                x >=
+                    annotation.x &&
                 x <=
                     annotation.x +
                     annotation.width &&
-                y >= annotation.y &&
+                y >=
+                    annotation.y &&
                 y <=
                     annotation.y +
                     annotation.height
@@ -2017,8 +3269,7 @@ function findAnnotationAt(
 
         if (
             annotation.type ===
-            "polygon" &&
-            annotation.points
+            "polygon"
         ) {
 
             if (
@@ -2027,6 +3278,36 @@ function findAnnotationAt(
                     y,
                     annotation.points
                 )
+            ) {
+
+                return annotation;
+
+            }
+
+        }
+
+
+        if (
+            annotation.type ===
+            "segmentation"
+        ) {
+
+            /*
+             * Until actual mask hit testing is
+             * connected, use its bounding region.
+             */
+
+            if (
+                x >=
+                    annotation.x &&
+                x <=
+                    annotation.x +
+                    annotation.width &&
+                y >=
+                    annotation.y &&
+                y <=
+                    annotation.y +
+                    annotation.height
             ) {
 
                 return annotation;
@@ -2045,7 +3326,7 @@ function findAnnotationAt(
 
 /* =========================================================
    POLYGON TEST
-========================================================= */
+   ========================================================= */
 
 function pointInsidePolygon(
     x,
@@ -2053,15 +3334,28 @@ function pointInsidePolygon(
     points
 ) {
 
+    if (
+        !points ||
+        points.length <
+            3
+    ) {
+
+        return false;
+
+    }
+
+
     let inside =
         false;
 
 
     for (
         let i = 0,
-        j = points.length - 1;
+        j =
+            points.length - 1;
 
-        i < points.length;
+        i <
+        points.length;
 
         j = i++
     ) {
@@ -2069,11 +3363,14 @@ function pointInsidePolygon(
         const xi =
             points[i].x;
 
+
         const yi =
             points[i].y;
 
+
         const xj =
             points[j].x;
+
 
         const yj =
             points[j].y;
@@ -2087,19 +3384,24 @@ function pointInsidePolygon(
                 yj > y
             ) &&
             x <
-            (
-                xj - xi
-            ) *
-            (
-                y - yi
-            ) /
-            (
-                yj - yi
-            ) +
-            xi;
+                (
+                    xj -
+                    xi
+                ) *
+                (
+                    y -
+                    yi
+                ) /
+                (
+                    yj -
+                    yi
+                ) +
+                xi;
 
 
-        if (intersect) {
+        if (
+            intersect
+        ) {
 
             inside =
                 !inside;
@@ -2116,11 +3418,13 @@ function pointInsidePolygon(
 
 /* =========================================================
    RENDER
-========================================================= */
+   ========================================================= */
 
 function render() {
 
-    if (!state.image) {
+    if (
+        !state.image
+    ) {
 
         return;
 
@@ -2188,8 +3492,8 @@ function render() {
 
 
 /* =========================================================
-   BOX
-========================================================= */
+   DRAW BOX
+   ========================================================= */
 
 function drawBox(
     annotation
@@ -2204,7 +3508,9 @@ function drawBox(
 
 
     ctx.lineWidth =
-        selected ? 4 : 2;
+        selected
+            ? 3
+            : 2;
 
 
     ctx.strokeStyle =
@@ -2215,8 +3521,8 @@ function drawBox(
 
     ctx.fillStyle =
         selected
-            ? "rgba(139,92,246,.10)"
-            : "rgba(34,197,94,.05)";
+            ? "rgba(139,92,246,.08)"
+            : "rgba(34,197,94,.04)";
 
 
     ctx.fillRect(
@@ -2243,14 +3549,132 @@ function drawBox(
     );
 
 
+    if (
+        selected
+    ) {
+
+        drawResizeHandles(
+            annotation
+        );
+
+    }
+
+
     ctx.restore();
 
 }
 
 
 /* =========================================================
-   POLYGON
-========================================================= */
+   RESIZE HANDLES
+   ========================================================= */
+
+function drawResizeHandles(
+    box
+) {
+
+    const size =
+        8 /
+        state.zoom;
+
+
+    const handles = [
+
+        [
+            box.x,
+            box.y
+        ],
+
+        [
+            box.x +
+            box.width / 2,
+            box.y
+        ],
+
+        [
+            box.x +
+            box.width,
+            box.y
+        ],
+
+        [
+            box.x +
+            box.width,
+            box.y +
+            box.height / 2
+        ],
+
+        [
+            box.x +
+            box.width,
+            box.y +
+            box.height
+        ],
+
+        [
+            box.x +
+            box.width / 2,
+            box.y +
+            box.height
+        ],
+
+        [
+            box.x,
+            box.y +
+            box.height
+        ],
+
+        [
+            box.x,
+            box.y +
+            box.height / 2
+        ]
+
+    ];
+
+
+    ctx.fillStyle =
+        "#ffffff";
+
+
+    ctx.strokeStyle =
+        "#8b5cf6";
+
+
+    ctx.lineWidth =
+        2 /
+        state.zoom;
+
+
+    handles.forEach(
+        position => {
+
+            ctx.beginPath();
+
+
+            ctx.rect(
+                position[0] -
+                    size,
+                position[1] -
+                    size,
+                size * 2,
+                size * 2
+            );
+
+
+            ctx.fill();
+
+            ctx.stroke();
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   DRAW POLYGON
+   ========================================================= */
 
 function drawPolygon(
     annotation
@@ -2285,7 +3709,8 @@ function drawPolygon(
         ) => {
 
             if (
-                index === 0
+                index ===
+                0
             ) {
 
                 ctx.moveTo(
@@ -2312,7 +3737,7 @@ function drawPolygon(
     ctx.fillStyle =
         selected
             ? "rgba(139,92,246,.20)"
-            : "rgba(34,197,94,.15)";
+            : "rgba(34,197,94,.12)";
 
 
     ctx.strokeStyle =
@@ -2322,17 +3747,15 @@ function drawPolygon(
 
 
     ctx.lineWidth =
-        selected ? 4 : 2;
+        selected
+            ? 3
+            : 2;
 
 
     ctx.fill();
 
     ctx.stroke();
 
-
-    /*
-     * Editable polygon points.
-     */
 
     annotation.points.forEach(
         point => {
@@ -2343,14 +3766,18 @@ function drawPolygon(
             ctx.arc(
                 point.x,
                 point.y,
-                5,
+                selected
+                    ? 6
+                    : 4,
                 0,
                 Math.PI * 2
             );
 
 
             ctx.fillStyle =
-                "#a78bfa";
+                selected
+                    ? "#a78bfa"
+                    : "#22c55e";
 
 
             ctx.fill();
@@ -2374,11 +3801,16 @@ function drawPolygon(
 
 /* =========================================================
    SEGMENTATION
-========================================================= */
+   ========================================================= */
 
 function drawSegmentation(
     annotation
 ) {
+
+    /*
+     * Actual masks will be drawn here when a proper
+     * segmentation model is connected.
+     */
 
     if (
         !annotation.mask
@@ -2403,7 +3835,7 @@ function drawSegmentation(
                 annotation.id ===
                 state.selectedId
                     ? .45
-                    : .28;
+                    : .25;
 
 
             ctx.drawImage(
@@ -2428,7 +3860,7 @@ function drawSegmentation(
 
 /* =========================================================
    LABEL
-========================================================= */
+   ========================================================= */
 
 function drawLabel(
     label,
@@ -2440,7 +3872,8 @@ function drawLabel(
     const text =
         `${label} ${
             Math.round(
-                confidence * 100
+                confidence *
+                100
             )
         }%`;
 
@@ -2452,7 +3885,8 @@ function drawLabel(
     const width =
         ctx.measureText(
             text
-        ).width + 10;
+        ).width +
+        10;
 
 
     const height =
@@ -2462,7 +3896,8 @@ function drawLabel(
     const top =
         Math.max(
             0,
-            y - height
+            y -
+            height
         );
 
 
@@ -2484,8 +3919,10 @@ function drawLabel(
 
     ctx.fillText(
         text,
-        x + 5,
-        top + 15
+        x +
+            5,
+        top +
+            15
     );
 
 }
@@ -2493,12 +3930,17 @@ function drawLabel(
 
 /* =========================================================
    OBJECT LIST
-========================================================= */
+   ========================================================= */
 
 function renderObjects() {
 
     const list =
         $("#objectList");
+
+
+    if (!list) {
+        return;
+    }
 
 
     if (
@@ -2507,15 +3949,14 @@ function renderObjects() {
     ) {
 
         list.innerHTML =
-            `<div class="no-objects">
+            `
+            <div class="no-objects">
                 No annotations yet.
-            </div>`;
+            </div>
+            `;
 
 
-        $("#objectSummary")
-            .textContent =
-            "No objects";
-
+        updateCanvasInfo();
 
         return;
 
@@ -2541,6 +3982,7 @@ function renderObjects() {
 
 
                     return `
+
                     <div
                         class="object-row ${selected}"
                         data-id="${annotation.id}"
@@ -2565,11 +4007,21 @@ function renderObjects() {
 
                         <div class="object-confidence">
                             ${Math.round(
-                                annotation.confidence * 100
+                                annotation.confidence *
+                                100
                             )}%
                         </div>
 
+                        <button
+                            class="object-delete"
+                            data-delete-id="${annotation.id}"
+                            title="Delete annotation"
+                        >
+                            ×
+                        </button>
+
                     </div>
+
                     `;
 
                 }
@@ -2579,44 +4031,132 @@ function renderObjects() {
 
     list.querySelectorAll(
         ".object-row"
-    ).forEach(row => {
+    ).forEach(
+        row => {
 
-        row.addEventListener(
-            "click",
-            () => {
+            row.addEventListener(
+                "click",
+                event => {
 
-                state.selectedId =
-                    row.dataset.id;
+                    if (
+                        event.target.closest(
+                            ".object-delete"
+                        )
+                    ) {
 
+                        return;
 
-                render();
-
-                renderObjects();
-
-            }
-        );
-
-    });
+                    }
 
 
-    $("#objectSummary")
-        .textContent =
-        `${state.annotations.length} object${
-            state.annotations.length === 1
-                ? ""
-                : "s"
-        }`;
+                    state.selectedId =
+                        row.dataset.id;
+
+
+                    render();
+
+                    renderObjects();
+
+                }
+            );
+
+        }
+    );
+
+
+    list.querySelectorAll(
+        ".object-delete"
+    ).forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                event => {
+
+                    event.stopPropagation();
+
+
+                    saveUndoState();
+
+
+                    removeAnnotation(
+                        button.dataset.deleteId
+                    );
+
+                }
+            );
+
+        }
+    );
+
+
+    updateCanvasInfo();
 
 }
 
 
 /* =========================================================
-   DELETE
-========================================================= */
+   REMOVE ANNOTATION
+   ========================================================= */
+
+function removeAnnotation(
+    id
+) {
+
+    state.annotations =
+        state.annotations.filter(
+            annotation =>
+                annotation.id !==
+                id
+        );
+
+
+    if (
+        state.selectedId ===
+        id
+    ) {
+
+        state.selectedId =
+            null;
+
+    }
+
+
+    rebuildClassificationSet();
+
+    render();
+
+    renderObjects();
+
+    renderClassificationManager();
+
+    updateQuality(
+        state.annotations
+    );
+
+
+    updateCanvasInfo();
+
+
+    saveTrainingSnapshot();
+
+
+    showToast(
+        "Annotation deleted."
+    );
+
+}
+
+
+/* =========================================================
+   DELETE SELECTED
+   ========================================================= */
 
 function deleteSelected() {
 
-    if (!state.selectedId) {
+    if (
+        !state.selectedId
+    ) {
 
         showToast(
             "Select an annotation first."
@@ -2630,28 +4170,8 @@ function deleteSelected() {
     saveUndoState();
 
 
-    state.annotations =
-        state.annotations.filter(
-            item =>
-                item.id !==
-                state.selectedId
-        );
-
-
-    state.selectedId =
-        null;
-
-
-    render();
-
-    renderObjects();
-
-    updateCanvasInfo();
-
-    saveTrainingSnapshot();
-
-    showToast(
-        "Annotation deleted."
+    removeAnnotation(
+        state.selectedId
     );
 
 }
@@ -2659,7 +4179,7 @@ function deleteSelected() {
 
 /* =========================================================
    RESET
-========================================================= */
+   ========================================================= */
 
 function resetAnnotations() {
 
@@ -2679,6 +4199,7 @@ function resetAnnotations() {
     state.annotations =
         [];
 
+
     state.selectedId =
         null;
 
@@ -2687,11 +4208,13 @@ function resetAnnotations() {
 
     renderObjects();
 
-    updateCanvasInfo();
+    renderClassificationManager();
 
     updateQuality(
         []
     );
+
+    updateCanvasInfo();
 
 
     showToast(
@@ -2703,7 +4226,7 @@ function resetAnnotations() {
 
 /* =========================================================
    UNDO
-========================================================= */
+   ========================================================= */
 
 function saveUndoState() {
 
@@ -2716,7 +4239,7 @@ function saveUndoState() {
 
     if (
         state.undoStack.length >
-        50
+        CONFIG.maxUndo
     ) {
 
         state.undoStack.shift();
@@ -2759,9 +4282,13 @@ function undo() {
         null;
 
 
+    rebuildClassificationSet();
+
     render();
 
     renderObjects();
+
+    renderClassificationManager();
 
     updateCanvasInfo();
 
@@ -2770,7 +4297,7 @@ function undo() {
 
 /* =========================================================
    REDO
-========================================================= */
+   ========================================================= */
 
 function redo() {
 
@@ -2801,9 +4328,13 @@ function redo() {
         null;
 
 
+    rebuildClassificationSet();
+
     render();
 
     renderObjects();
+
+    renderClassificationManager();
 
     updateCanvasInfo();
 
@@ -2812,7 +4343,7 @@ function redo() {
 
 /* =========================================================
    KEYBOARD
-========================================================= */
+   ========================================================= */
 
 function setupKeyboard() {
 
@@ -2855,6 +4386,30 @@ function setupKeyboard() {
 
             }
 
+
+            /*
+             * ESC clears selection.
+             */
+
+            if (
+                event.key ===
+                "Escape"
+            ) {
+
+                state.selectedId =
+                    null;
+
+
+                state.drag =
+                    null;
+
+
+                render();
+
+                renderObjects();
+
+            }
+
         }
     );
 
@@ -2862,186 +4417,666 @@ function setupKeyboard() {
 
 
 /* =========================================================
-   ZOOM
-========================================================= */
+   CLASSIFICATION SYSTEM
+   ========================================================= */
 
-function setZoom(
-    value
-) {
+function ensureClassificationUI() {
 
-    state.zoom =
-        Math.max(
-            .1,
-            Math.min(
-                4,
-                value
-            )
-        );
+    /*
+     * If the HTML already has a classification
+     * container, use it.
+     *
+     * Otherwise create one.
+     */
 
-
-    canvas.style.transform =
-        `scale(${state.zoom})`;
+    let container =
+        $("#classificationManager");
 
 
-    $("#zoomValue")
-        .textContent =
-        `${Math.round(
-            state.zoom * 100
-        )}%`;
-
-}
-
-
-function calculateFitZoom() {
-
-    if (!state.image) {
+    if (
+        container
+    ) {
 
         return;
 
     }
 
 
-    const container =
-        $("#canvasContainer");
-
-
-    const horizontal =
-        (
-            container.clientWidth -
-            30
-        ) /
-        state.imageWidth;
-
-
-    const vertical =
-        (
-            container.clientHeight -
-            30
-        ) /
-        state.imageHeight;
-
-
-    const zoom =
-        Math.min(
-            horizontal,
-            vertical
+    container =
+        document.createElement(
+            "div"
         );
 
 
-    setZoom(
-        Math.max(
-            .1,
-            Math.min(
-                1,
-                zoom
-            )
-        )
-    );
+    container.id =
+        "classificationManager";
+
+
+    container.style.cssText = `
+
+        margin-top:20px;
+        padding:14px;
+        border:1px solid #27273a;
+        border-radius:10px;
+        background:#0d0d17;
+        color:#fff;
+
+    `;
+
+
+    container.innerHTML = `
+
+        <div style="
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin-bottom:10px;
+        ">
+
+            <strong>
+                CLASSIFICATIONS
+            </strong>
+
+            <button
+                id="addClassification"
+                type="button"
+                style="
+                    border:0;
+                    border-radius:6px;
+                    padding:5px 9px;
+                    cursor:pointer;
+                    background:#7c3aed;
+                    color:#fff;
+                "
+            >
+                + Add
+            </button>
+
+        </div>
+
+
+        <div
+            id="classificationList"
+        ></div>
+
+        <div style="
+            margin-top:9px;
+            font-size:11px;
+            color:#8b8b9a;
+        ">
+            Remove a class to exclude it from export.
+        </div>
+
+    `;
+
+
+    const sidebar =
+        document.querySelector(
+            ".sidebar"
+        ) ||
+        document.querySelector(
+            "aside"
+        );
+
+
+    if (
+        sidebar
+    ) {
+
+        sidebar.appendChild(
+            container
+        );
+
+    } else {
+
+        document.body.appendChild(
+            container
+        );
+
+    }
+
+
+    $("#addClassification")
+        .addEventListener(
+            "click",
+            addClassification
+        );
 
 }
 
 
-/* =========================================================
-   QUALITY
-========================================================= */
+function rebuildClassificationSet() {
 
-function updateQuality(
-    annotations
-) {
+    state.classifications =
+        new Set(
+            state.annotations
+                .map(
+                    annotation =>
+                        annotation.label
+                )
+                .filter(
+                    Boolean
+                )
+        );
+
+
+    /*
+     * Removed classes remain excluded.
+     */
+
+}
+
+
+function renderClassificationManager() {
+
+    ensureClassificationUI();
+
+
+    const list =
+        $("#classificationList");
+
+
+    if (!list) {
+        return;
+    }
+
+
+    const classes =
+        [...state.classifications]
+            .sort();
+
 
     if (
-        annotations.length ===
+        classes.length ===
         0
     ) {
 
-        $("#qualityScore")
-            .textContent =
-            "—";
-
-
-        $("#qualityMessages")
-            .textContent =
-            "Run annotation to check quality.";
-
+        list.innerHTML =
+            `
+            <div style="
+                color:#777;
+                font-size:12px;
+            ">
+                No classifications yet.
+            </div>
+            `;
 
         return;
 
     }
 
 
-    let score =
-        annotations.reduce(
-            (
-                total,
-                item
-            ) =>
-                total +
-                item.confidence,
-            0
-        ) /
-        annotations.length;
+    list.innerHTML =
+        classes
+            .map(
+                label => {
+
+                    const excluded =
+                        state.excludedClassifications
+                            .has(
+                                label
+                            );
 
 
-    const reviewCount =
-        annotations.filter(
-            item =>
-                item.review
-        ).length;
+                    const count =
+                        state.annotations
+                            .filter(
+                                annotation =>
+                                    annotation.label ===
+                                    label
+                            )
+                            .length;
 
 
-    if (
-        reviewCount > 0
-    ) {
+                    return `
 
-        score -=
-            (
-                reviewCount /
-                annotations.length
-            ) *
-            .2;
+                    <div style="
+                        display:flex;
+                        gap:6px;
+                        align-items:center;
+                        margin-bottom:6px;
+                    ">
 
-    }
+                        <input
+                            type="checkbox"
+                            class="classification-export"
+                            data-class="${escapeAttr(
+                                label
+                            )}"
+                            ${
+                                !excluded
+                                    ? "checked"
+                                    : ""
+                            }
+                        >
 
+                        <button
+                            type="button"
+                            class="classification-name"
+                            data-edit-class="${escapeAttr(
+                                label
+                            )}"
+                            style="
+                                flex:1;
+                                text-align:left;
+                                border:0;
+                                background:transparent;
+                                color:${
+                                    excluded
+                                        ? "#666"
+                                        : "#fff"
+                                };
+                                cursor:pointer;
+                            "
+                        >
+                            ${escapeHtml(
+                                label
+                            )}
+                            <span style="
+                                color:#777;
+                            ">
+                                (${count})
+                            </span>
+                        </button>
 
-    score =
-        Math.max(
-            0,
-            Math.min(
-                1,
-                score
+                        <button
+                            type="button"
+                            class="classification-remove"
+                            data-remove-class="${escapeAttr(
+                                label
+                            )}"
+                            title="Remove classification"
+                            style="
+                                border:0;
+                                background:#2a1520;
+                                color:#ff6b81;
+                                border-radius:5px;
+                                cursor:pointer;
+                            "
+                        >
+                            ×
+                        </button>
+
+                    </div>
+
+                    `;
+
+                }
             )
-        );
+            .join("");
 
 
-    $("#qualityScore")
-        .textContent =
-        `${Math.round(
-            score * 100
-        )}%`;
+    list.querySelectorAll(
+        ".classification-export"
+    ).forEach(
+        checkbox => {
+
+            checkbox.addEventListener(
+                "change",
+                () => {
+
+                    const label =
+                        checkbox.dataset.class;
 
 
-    $("#qualityMessages")
-        .innerHTML =
-        `
-        ${annotations.length} objects detected.<br>
-        ${reviewCount} require review.<br>
-        ${
-            reviewCount === 0
-                ? "No automatic rule violations."
-                : "Review flagged annotations before export."
+                    if (
+                        checkbox.checked
+                    ) {
+
+                        state.excludedClassifications
+                            .delete(
+                                label
+                            );
+
+                    } else {
+
+                        state.excludedClassifications
+                            .add(
+                                label
+                            );
+
+                    }
+
+                }
+            );
+
         }
-        `;
+    );
+
+
+    list.querySelectorAll(
+        ".classification-name"
+    ).forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    const label =
+                        button.dataset.editClass;
+
+
+                    const annotation =
+                        state.annotations.find(
+                            item =>
+                                item.label ===
+                                label
+                        );
+
+
+                    if (
+                        annotation
+                    ) {
+
+                        editClassification(
+                            annotation
+                        );
+
+                    }
+
+                }
+            );
+
+        }
+    );
+
+
+    list.querySelectorAll(
+        ".classification-remove"
+    ).forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    removeClassification(
+                        button.dataset.removeClass
+                    );
+
+                }
+            );
+
+        }
+    );
 
 }
 
 
 /* =========================================================
-   DOWNLOAD IMAGE
-========================================================= */
+   ADD CLASSIFICATION
+   ========================================================= */
+
+function addClassification() {
+
+    const name =
+        prompt(
+            "Enter the new classification name:"
+        );
+
+
+    if (
+        !name ||
+        !name.trim()
+    ) {
+
+        return;
+
+    }
+
+
+    const label =
+        normalizeLabel(
+            name
+        );
+
+
+    state.classifications.add(
+        label
+    );
+
+
+    state.excludedClassifications
+        .delete(
+            label
+        );
+
+
+    state.nextManualClass =
+        label;
+
+
+    renderClassificationManager();
+
+
+    showToast(
+        `Classification "${label}" added.`
+    );
+
+}
+
+
+/* =========================================================
+   REMOVE CLASSIFICATION
+   ========================================================= */
+
+function removeClassification(
+    label
+) {
+
+    const count =
+        state.annotations.filter(
+            annotation =>
+                annotation.label ===
+                label
+        ).length;
+
+
+    const confirmed =
+        confirm(
+            count > 0
+                ? `Remove "${label}" from the project? ${count} annotation(s) will be excluded from export.`
+                : `Remove "${label}"?`
+        );
+
+
+    if (
+        !confirmed
+    ) {
+
+        return;
+
+    }
+
+
+    state.classifications.delete(
+        label
+    );
+
+
+    state.excludedClassifications.add(
+        label
+    );
+
+
+    /*
+     * Keep annotations visually available
+     * for review, but exclude from export.
+     */
+
+    renderClassificationManager();
+
+
+    showToast(
+        `"${label}" excluded from export.`
+    );
+
+}
+
+
+/* =========================================================
+   EDIT CLASSIFICATION
+   ========================================================= */
+
+function editClassification(
+    annotation
+) {
+
+    const newLabel =
+        prompt(
+            "Classification:",
+            annotation.label
+        );
+
+
+    if (
+        !newLabel ||
+        !newLabel.trim()
+    ) {
+
+        return;
+
+    }
+
+
+    const label =
+        normalizeLabel(
+            newLabel
+        );
+
+
+    saveUndoState();
+
+
+    annotation.label =
+        label;
+
+
+    annotation.source =
+        "human";
+
+
+    state.classifications.add(
+        label
+    );
+
+
+    state.excludedClassifications
+        .delete(
+            label
+        );
+
+
+    render();
+
+    renderObjects();
+
+    renderClassificationManager();
+
+    saveTrainingSnapshot();
+
+
+    showToast(
+        "Classification updated."
+    );
+
+}
+
+
+/* =========================================================
+   ADD OBJECT TO SELECTED CLASS
+   ========================================================= */
+
+function addObjectWithClassification() {
+
+    const classes =
+        [
+            ...state.classifications
+        ];
+
+
+    if (
+        classes.length ===
+        0
+    ) {
+
+        showToast(
+            "Add a classification first."
+        );
+
+        return;
+
+    }
+
+
+    const label =
+        prompt(
+            `Classification:\n${classes.join(
+                ", "
+            )}`,
+            classes[0]
+        );
+
+
+    if (
+        !label
+    ) {
+
+        return;
+
+    }
+
+
+    state.nextManualClass =
+        normalizeLabel(
+            label
+        );
+
+
+    state.activeTool =
+        "draw";
+
+
+    updateCursor();
+
+
+    showToast(
+        `Draw a new ${state.nextManualClass} annotation.`
+    );
+
+}
+
+
+/* =========================================================
+   EXPORT
+   ========================================================= */
+
+function getExportAnnotations() {
+
+    return state.annotations
+        .filter(
+            annotation =>
+                !state.excludedClassifications
+                    .has(
+                        annotation.label
+                    )
+        )
+        .map(
+            annotation =>
+                clone(
+                    annotation
+                )
+        );
+
+}
+
 
 function downloadAnnotatedImage() {
 
-    if (!state.image) {
+    if (
+        !state.image
+    ) {
 
         showToast(
             "Upload an image first."
@@ -3052,7 +5087,47 @@ function downloadAnnotatedImage() {
     }
 
 
-    render();
+    /*
+     * Create a dedicated export canvas.
+     * This means excluded classifications are
+     * not written onto the downloaded image.
+     */
+
+    const exportCanvas =
+        document.createElement(
+            "canvas"
+        );
+
+
+    exportCanvas.width =
+        state.imageWidth;
+
+
+    exportCanvas.height =
+        state.imageHeight;
+
+
+    const exportCtx =
+        exportCanvas.getContext(
+            "2d"
+        );
+
+
+    exportCtx.drawImage(
+        state.image,
+        0,
+        0
+    );
+
+
+    const exportAnnotations =
+        getExportAnnotations();
+
+
+    drawAnnotationsToContext(
+        exportCtx,
+        exportAnnotations
+    );
 
 
     const link =
@@ -3068,7 +5143,7 @@ function downloadAnnotatedImage() {
 
 
     link.href =
-        canvas.toDataURL(
+        exportCanvas.toDataURL(
             "image/png"
         );
 
@@ -3076,7 +5151,9 @@ function downloadAnnotatedImage() {
     link.click();
 
 
-    downloadAnnotationJSON();
+    downloadAnnotationJSON(
+        exportAnnotations
+    );
 
 
     showToast(
@@ -3087,18 +5164,227 @@ function downloadAnnotatedImage() {
 
 
 /* =========================================================
-   DOWNLOAD JSON
-========================================================= */
+   EXPORT DRAW
+   ========================================================= */
 
-function downloadAnnotationJSON() {
+function drawAnnotationsToContext(
+    targetCtx,
+    annotations
+) {
+
+    annotations.forEach(
+        annotation => {
+
+            targetCtx.save();
+
+
+            if (
+                annotation.type ===
+                "bbox"
+            ) {
+
+                targetCtx.strokeStyle =
+                    "#22c55e";
+
+
+                targetCtx.lineWidth =
+                    3;
+
+
+                targetCtx.strokeRect(
+                    annotation.x,
+                    annotation.y,
+                    annotation.width,
+                    annotation.height
+                );
+
+
+                drawExportLabel(
+                    targetCtx,
+                    annotation.label,
+                    annotation.confidence,
+                    annotation.x,
+                    annotation.y
+                );
+
+            }
+
+
+            else if (
+                annotation.type ===
+                "polygon"
+            ) {
+
+                if (
+                    !annotation.points ||
+                    annotation.points.length <
+                        3
+                ) {
+
+                    targetCtx.restore();
+
+                    return;
+
+                }
+
+
+                targetCtx.beginPath();
+
+
+                annotation.points.forEach(
+                    (
+                        point,
+                        index
+                    ) => {
+
+                        if (
+                            index ===
+                            0
+                        ) {
+
+                            targetCtx.moveTo(
+                                point.x,
+                                point.y
+                            );
+
+                        } else {
+
+                            targetCtx.lineTo(
+                                point.x,
+                                point.y
+                            );
+
+                        }
+
+                    }
+                );
+
+
+                targetCtx.closePath();
+
+
+                targetCtx.fillStyle =
+                    "rgba(34,197,94,.15)";
+
+
+                targetCtx.strokeStyle =
+                    "#22c55e";
+
+
+                targetCtx.lineWidth =
+                    3;
+
+
+                targetCtx.fill();
+
+                targetCtx.stroke();
+
+
+                drawExportLabel(
+                    targetCtx,
+                    annotation.label,
+                    annotation.confidence,
+                    annotation.points[0].x,
+                    annotation.points[0].y
+                );
+
+            }
+
+
+            targetCtx.restore();
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   EXPORT LABEL
+   ========================================================= */
+
+function drawExportLabel(
+    targetCtx,
+    label,
+    confidence,
+    x,
+    y
+) {
+
+    const text =
+        `${label} ${
+            Math.round(
+                confidence *
+                100
+            )
+        }%`;
+
+
+    targetCtx.font =
+        "bold 18px Arial";
+
+
+    const width =
+        targetCtx.measureText(
+            text
+        ).width +
+        14;
+
+
+    const height =
+        26;
+
+
+    const top =
+        Math.max(
+            0,
+            y -
+            height
+        );
+
+
+    targetCtx.fillStyle =
+        "#111827";
+
+
+    targetCtx.fillRect(
+        x,
+        top,
+        width,
+        height
+    );
+
+
+    targetCtx.fillStyle =
+        "#ffffff";
+
+
+    targetCtx.fillText(
+        text,
+        x +
+            7,
+        top +
+            19
+    );
+
+}
+
+
+/* =========================================================
+   JSON EXPORT
+   ========================================================= */
+
+function downloadAnnotationJSON(
+    annotations
+) {
 
     const data = {
 
         application:
-            "AI Annotation Studio",
+            "AI Annotation Studio Pro",
 
         version:
-            "1.0.1",
+            "2.0",
 
         image:
             state.imageName,
@@ -3112,13 +5398,17 @@ function downloadAnnotationJSON() {
         annotationType:
             state.annotationType,
 
-        rules:
-            localStorage.getItem(
-                CONFIG.storageKeys.rules
-            ) || "",
+        classifications:
+            [
+                ...state.classifications
+            ],
 
-        annotations:
-            state.annotations
+        excludedClassifications:
+            [
+                ...state.excludedClassifications
+            ],
+
+        annotations
 
     };
 
@@ -3172,12 +5462,14 @@ function downloadAnnotationJSON() {
 
 
 /* =========================================================
-   TRAINING
-========================================================= */
+   TRAINING DATA
+   ========================================================= */
 
 function saveTrainingSnapshot() {
 
-    if (!state.imageName) {
+    if (
+        !state.imageName
+    ) {
 
         return;
 
@@ -3186,18 +5478,19 @@ function saveTrainingSnapshot() {
 
     const training =
         loadJSON(
-            CONFIG.storageKeys.training,
+            CONFIG.storage.training,
             []
         );
 
 
-    const record = {
+    training.push({
 
         id:
             createId(),
 
         timestamp:
-            new Date().toISOString(),
+            new Date()
+                .toISOString(),
 
         image:
             state.imageName,
@@ -3209,21 +5502,18 @@ function saveTrainingSnapshot() {
             state.imageHeight,
 
         annotations:
-            structuredClone(
+            clone(
                 state.annotations
             )
 
-    };
-
-
-    training.push(
-        record
-    );
+    });
 
 
     saveJSON(
-        CONFIG.storageKeys.training,
-        training.slice(-500)
+        CONFIG.storage.training,
+        training.slice(
+            -CONFIG.maxHistory
+        )
     );
 
 }
@@ -3233,7 +5523,7 @@ function updateTrainingPage() {
 
     const training =
         loadJSON(
-            CONFIG.storageKeys.training,
+            CONFIG.storage.training,
             []
         );
 
@@ -3241,13 +5531,13 @@ function updateTrainingPage() {
     const corrections =
         training.reduce(
             (
-                count,
+                total,
                 item
             ) =>
-                count +
+                total +
                 item.annotations.filter(
-                    a =>
-                        a.source ===
+                    annotation =>
+                        annotation.source ===
                         "human"
                 ).length,
             0
@@ -3257,28 +5547,40 @@ function updateTrainingPage() {
     const objects =
         training.reduce(
             (
-                count,
+                total,
                 item
             ) =>
-                count +
+                total +
                 item.annotations.length,
             0
         );
 
 
-    $("#trainingImages")
-        .textContent =
-        training.length;
+    setText(
+        "#trainingImages",
+        training.length
+    );
 
 
-    $("#trainingCorrections")
-        .textContent =
-        corrections;
+    setText(
+        "#trainingCorrections",
+        corrections
+    );
 
 
-    $("#trainingObjects")
-        .textContent =
-        objects;
+    setText(
+        "#trainingObjects",
+        objects
+    );
+
+
+    const list =
+        $("#trainingList");
+
+
+    if (!list) {
+        return;
+    }
 
 
     if (
@@ -3286,8 +5588,7 @@ function updateTrainingPage() {
         0
     ) {
 
-        $("#trainingList")
-            .textContent =
+        list.textContent =
             "No training examples yet.";
 
         return;
@@ -3295,8 +5596,7 @@ function updateTrainingPage() {
     }
 
 
-    $("#trainingList")
-        .innerHTML =
+    list.innerHTML =
         training
             .slice()
             .reverse()
@@ -3307,6 +5607,7 @@ function updateTrainingPage() {
             .map(
                 item =>
                     `
+
                     <div class="object-row">
 
                         <div class="object-info">
@@ -3328,6 +5629,7 @@ function updateTrainingPage() {
                         </div>
 
                     </div>
+
                     `
             )
             .join("");
@@ -3336,14 +5638,14 @@ function updateTrainingPage() {
 
 
 /* =========================================================
-   EXPORT TRAINING
-========================================================= */
+   TRAINING EXPORT
+   ========================================================= */
 
 function exportTraining() {
 
     const training =
         loadJSON(
-            CONFIG.storageKeys.training,
+            CONFIG.storage.training,
             []
         );
 
@@ -3415,19 +5717,22 @@ function exportTraining() {
 
 /* =========================================================
    RULES
-========================================================= */
+   ========================================================= */
 
 function saveRules() {
 
-    const rules =
-        $("#rulesInput")
-            .value
-            .trim();
+    const input =
+        $("#rulesInput");
+
+
+    if (!input) {
+        return;
+    }
 
 
     localStorage.setItem(
-        CONFIG.storageKeys.rules,
-        rules
+        CONFIG.storage.rules,
+        input.value.trim()
     );
 
 
@@ -3438,34 +5743,59 @@ function saveRules() {
 }
 
 
+/* =========================================================
+   LOCAL DATA
+   ========================================================= */
+
 function loadLocalData() {
 
     const rules =
         localStorage.getItem(
-            CONFIG.storageKeys.rules
+            CONFIG.storage.rules
         );
 
 
-    if (rules) {
+    const input =
+        $("#rulesInput");
 
-        $("#rulesInput")
-            .value =
+
+    if (
+        rules &&
+        input
+    ) {
+
+        input.value =
             rules;
 
     }
+
+
+    const savedClasses =
+        loadJSON(
+            CONFIG.storage.classifications,
+            []
+        );
+
+
+    savedClasses.forEach(
+        label =>
+            state.classifications.add(
+                label
+            )
+    );
 
 }
 
 
 /* =========================================================
    HISTORY
-========================================================= */
+   ========================================================= */
 
 function saveHistory() {
 
     const history =
         loadJSON(
-            CONFIG.storageKeys.history,
+            CONFIG.storage.history,
             []
         );
 
@@ -3476,7 +5806,8 @@ function saveHistory() {
             createId(),
 
         timestamp:
-            new Date().toISOString(),
+            new Date()
+                .toISOString(),
 
         image:
             state.imageName,
@@ -3491,8 +5822,10 @@ function saveHistory() {
 
 
     saveJSON(
-        CONFIG.storageKeys.history,
-        history.slice(-200)
+        CONFIG.storage.history,
+        history.slice(
+            -CONFIG.maxHistory
+        )
     );
 
 }
@@ -3502,9 +5835,18 @@ function updateHistoryPage() {
 
     const history =
         loadJSON(
-            CONFIG.storageKeys.history,
+            CONFIG.storage.history,
             []
         );
+
+
+    const list =
+        $("#historyList");
+
+
+    if (!list) {
+        return;
+    }
 
 
     if (
@@ -3512,8 +5854,7 @@ function updateHistoryPage() {
         0
     ) {
 
-        $("#historyList")
-            .textContent =
+        list.textContent =
             "No history.";
 
         return;
@@ -3521,14 +5862,14 @@ function updateHistoryPage() {
     }
 
 
-    $("#historyList")
-        .innerHTML =
+    list.innerHTML =
         history
             .slice()
             .reverse()
             .map(
                 item =>
                     `
+
                     <div class="object-row">
 
                         <div class="object-info">
@@ -3551,6 +5892,7 @@ function updateHistoryPage() {
                         </div>
 
                     </div>
+
                     `
             )
             .join("");
@@ -3572,7 +5914,7 @@ function clearHistory() {
 
 
     localStorage.removeItem(
-        CONFIG.storageKeys.history
+        CONFIG.storage.history
     );
 
 
@@ -3582,16 +5924,121 @@ function clearHistory() {
 
 
 /* =========================================================
-   UI
-========================================================= */
+   QUALITY
+   ========================================================= */
+
+function updateQuality(
+    annotations
+) {
+
+    const scoreElement =
+        $("#qualityScore");
+
+
+    const messageElement =
+        $("#qualityMessages");
+
+
+    if (
+        annotations.length ===
+        0
+    ) {
+
+        if (scoreElement) {
+
+            scoreElement.textContent =
+                "—";
+
+        }
+
+
+        if (messageElement) {
+
+            messageElement.textContent =
+                "Run annotation to check quality.";
+
+        }
+
+
+        return;
+
+    }
+
+
+    let score =
+        annotations.reduce(
+            (
+                total,
+                annotation
+            ) =>
+                total +
+                annotation.confidence,
+            0
+        ) /
+        annotations.length;
+
+
+    const reviewCount =
+        annotations.filter(
+            annotation =>
+                annotation.review
+        ).length;
+
+
+    score =
+        clamp(
+            score,
+            0,
+            1
+        );
+
+
+    if (
+        scoreElement
+    ) {
+
+        scoreElement.textContent =
+            `${Math.round(
+                score *
+                100
+            )}%`;
+
+    }
+
+
+    if (
+        messageElement
+    ) {
+
+        messageElement.innerHTML =
+            `
+            ${annotations.length} objects detected.<br>
+            ${reviewCount} require review.
+            `;
+
+    }
+
+}
+
+
+/* =========================================================
+   STATUS
+   ========================================================= */
 
 function setAIStatus(
     text
 ) {
 
-    $("#aiStatus")
-        .textContent =
-        text;
+    const element =
+        $("#aiStatus");
+
+
+    if (element) {
+
+        element.textContent =
+            text;
+
+    }
 
 }
 
@@ -3600,9 +6047,16 @@ function setProcessing(
     text
 ) {
 
-    $("#processingStatus")
-        .textContent =
-        text;
+    const element =
+        $("#processingStatus");
+
+
+    if (element) {
+
+        element.textContent =
+            text;
+
+    }
 
 }
 
@@ -3615,8 +6069,25 @@ function showToast(
         $("#toast");
 
 
-    $("#toastMessage")
-        .textContent =
+    const text =
+        $("#toastMessage");
+
+
+    if (
+        !toast ||
+        !text
+    ) {
+
+        console.log(
+            message
+        );
+
+        return;
+
+    }
+
+
+    text.textContent =
         message;
 
 
@@ -3649,39 +6120,133 @@ function showModal(
     message
 ) {
 
-    $("#modalMessage")
-        .textContent =
+    const modal =
+        $("#annotationModal");
+
+
+    const text =
+        $("#modalMessage");
+
+
+    if (
+        !modal ||
+        !text
+    ) {
+
+        return;
+
+    }
+
+
+    text.textContent =
         message;
 
 
-    $("#annotationModal")
-        .classList.remove(
-            "hidden"
-        );
+    modal.classList.remove(
+        "hidden"
+    );
 
 }
 
 
+/* =========================================================
+   CURSOR
+   ========================================================= */
+
+function updateCursor() {
+
+    if (!canvas) {
+        return;
+    }
+
+
+    if (
+        state.activeTool ===
+        "pan"
+    ) {
+
+        canvas.style.cursor =
+            "grab";
+
+    }
+
+
+    else if (
+        state.activeTool ===
+        "draw"
+    ) {
+
+        canvas.style.cursor =
+            "crosshair";
+
+    }
+
+
+    else if (
+        state.activeTool ===
+        "erase"
+    ) {
+
+        canvas.style.cursor =
+            "not-allowed";
+
+    }
+
+
+    else {
+
+        canvas.style.cursor =
+            "default";
+
+    }
+
+}
+
+
+/* =========================================================
+   CANVAS INFO
+   ========================================================= */
+
 function updateCanvasInfo() {
 
-    $("#objectCount")
-        .textContent =
-        `${state.annotations.length} objects`;
+    setText(
+        "#objectCount",
+        `${state.annotations.length} objects`
+    );
+
+
+    setText(
+        "#objectSummary",
+        `${state.annotations.length} ${
+            state.annotations.length ===
+            1
+                ? "object"
+                : "objects"
+        }`
+    );
 
 }
 
 
 /* =========================================================
    UTILITIES
-========================================================= */
+   ========================================================= */
 
 function createId() {
 
     return (
-        Date.now().toString(36) +
+        Date.now()
+            .toString(
+                36
+            ) +
         Math.random()
-            .toString(36)
-            .substring(2, 10)
+            .toString(
+                36
+            )
+            .substring(
+                2,
+                10
+            )
     );
 
 }
@@ -3691,15 +6256,10 @@ function normalizeLabel(
     label
 ) {
 
-    if (!label) {
-
-        return "unknown";
-
-    }
-
-
-    return label
-        .toString()
+    return String(
+        label ||
+        "unknown"
+    )
         .trim()
         .toLowerCase();
 
@@ -3710,7 +6270,10 @@ function removeExtension(
     filename
 ) {
 
-    return filename
+    return String(
+        filename ||
+        "image"
+    )
         .replace(
             /\.[^/.]+$/,
             ""
@@ -3723,7 +6286,9 @@ function escapeHtml(
     value
 ) {
 
-    return String(value)
+    return String(
+        value
+    )
         .replaceAll(
             "&",
             "&amp;"
@@ -3748,6 +6313,66 @@ function escapeHtml(
 }
 
 
+function escapeAttr(
+    value
+) {
+
+    return escapeHtml(
+        value
+    );
+
+}
+
+
+function clone(
+    value
+) {
+
+    return JSON.parse(
+        JSON.stringify(
+            value
+        )
+    );
+
+}
+
+
+function clamp(
+    value,
+    min,
+    max
+) {
+
+    return Math.max(
+        min,
+        Math.min(
+            max,
+            value
+        )
+    );
+
+}
+
+
+function setText(
+    selector,
+    value
+) {
+
+    const element =
+        $(selector);
+
+
+    if (element) {
+
+        element.textContent =
+            value;
+
+    }
+
+}
+
+
 function saveJSON(
     key,
     value
@@ -3755,7 +6380,9 @@ function saveJSON(
 
     localStorage.setItem(
         key,
-        JSON.stringify(value)
+        JSON.stringify(
+            value
+        )
     );
 
 }
@@ -3784,3 +6411,52 @@ function loadJSON(
     }
 
 }
+
+
+/* =========================================================
+   SAVE CLASSIFICATIONS
+   ========================================================= */
+
+window.addEventListener(
+    "beforeunload",
+    () => {
+
+        saveJSON(
+            CONFIG.storage.classifications,
+            [
+                ...state.classifications
+            ]
+        );
+
+    }
+);
+
+
+/* =========================================================
+   EXTRA GLOBAL ACTIONS
+   ========================================================= */
+
+window.AnnotationStudio = {
+
+    addClassification,
+
+    addObjectWithClassification,
+
+    deleteSelected,
+
+    undo,
+
+    redo,
+
+    setZoom,
+
+    fit:
+        calculateFitZoom,
+
+    getAnnotations:
+        () =>
+            clone(
+                state.annotations
+            )
+
+};
