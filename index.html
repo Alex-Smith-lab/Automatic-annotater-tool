@@ -59,6 +59,7 @@
                 <button type="button" class="annotation-type" data-tool="polygon">◇ POLYGON</button>
                 <button type="button" class="annotation-type" data-tool="segmentation">◈ SEGMENTATION</button>
             </div>
+            <small class="keyboard-help">Box: click-drag. Polygon/Segmentation: click each point, then press Enter or double-click to finish.</small>
         </section>
 
         <!-- EDIT TOOLS -->
@@ -71,7 +72,7 @@
                 <button type="button" class="tool-button" data-mode="erase">⌫ Erase</button>
             </div>
             <button id="deleteSelected" type="button" class="danger-button">DELETE SELECTED</button>
-            <small class="keyboard-help">Hold Space or Shift to pan from any tool • Scroll to zoom, anytime</small>
+            <small class="keyboard-help">Hold Space or Shift to pan from any tool • Scroll to zoom anytime, even mid-draw • Overlapping boxes are always allowed</small>
         </section>
 
         <!-- AI -->
@@ -82,6 +83,7 @@
             <select id="aiEngine" class="select">
                 <option value="detr">DETR — COCO</option>
                 <option value="yolo">YOLO — COCO</option>
+                <option value="both">DETR + YOLO — Both</option>
             </select>
 
             <label class="field-label">CONFIDENCE FILTER</label>
@@ -174,10 +176,14 @@ min_confidence: 0.45"></textarea>
                 <div id="annPopupBody" class="ann-popup-body"></div>
             </div>
 
+            <!-- TOASTS -->
+            <div id="toastContainer" class="toast-container"></div>
+
         </div>
 
         <!-- VIDEO FILMSTRIP -->
         <div id="filmstripBar" class="filmstrip-bar" style="display:none;">
+            <span id="filmstripCurrentLabel" class="filmstrip-current">Frame 0</span>
             <button id="filmstripPlay" type="button" class="filmstrip-play" title="Play / pause">▶</button>
             <div id="filmstripTrack" class="filmstrip-track"></div>
             <span id="filmstripLabel" class="filmstrip-label">0 / 0</span>
