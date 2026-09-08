@@ -24,7 +24,6 @@ const emptyWorkspace = $("emptyWorkspace");
 const appEl = document.querySelector(".app");
 const workspaceRoot = $("workspaceRoot");
 
-const rightPanel = $("rightPanel");
 const annotationsList = $("annotationsList");
 
 const popupEl = $("annotationPopup");
@@ -35,6 +34,9 @@ const popupExpandBtn = $("annPopupExpand");
 const filmstripBar = $("filmstripBar");
 const filmstripTrack = $("filmstripTrack");
 const filmstripLabel = $("filmstripLabel");
+const filmstripCurrentLabel = $("filmstripCurrentLabel");
+
+const toastContainer = $("toastContainer");
 
 /* ============================================================
    STATE
@@ -385,7 +387,7 @@ function renderLiveVideo() {
 }
 
 /* ============================================================
-   KEYBOARD (includes automatic pan via Space)
+   KEYBOARD (automatic pan via Space, Enter completes annotation)
 ============================================================ */
 
 window.addEventListener("keydown", event => {
@@ -395,7 +397,6 @@ window.addEventListener("keydown", event => {
     }
 
     if (event.code === "Space" && state.mediaType !== "video") {
-        // Only steal Space for pan when there's no video (video uses Space to play/pause).
         event.preventDefault();
         if (!state.spacePan) {
             state.spacePan = true;
@@ -424,6 +425,13 @@ window.addEventListener("keydown", event => {
         }
     }
 
+    if (event.key === "Enter" && state.drawing) {
+        event.preventDefault();
+        if (state.annotationType === "box") finishBoxDrawing();
+        else finalizePolygon();
+        return;
+    }
+
     if (event.key === "+" || event.key === "=") zoomCenter(1.20);
     if (event.key === "-" || event.key === "_") zoomCenter(1 / 1.20);
     if (event.key === "Delete" || event.key === "Backspace") deleteSelected();
@@ -439,9 +447,10 @@ window.addEventListener("keyup", event => {
 
 /* ============================================================
    ANNOTATION TYPE
-   Selecting a type moves into Draw mode, but pan + zoom (Space,
-   Shift-drag, middle-click, scroll wheel) stay available from any
-   mode automatically, so switching to the Pan tool is never required.
+   Box = click-drag. Polygon/Segmentation = click each vertex,
+   Enter or double-click to finish. Pan (Space/Shift/middle-click)
+   and zoom (scroll wheel) work from any tool, any time, mid-draw
+   included — no need to leave the annotation tool to reposition.
 ============================================================ */
 
 document.querySelectorAll(".annotation-type").forEach(button => {
@@ -570,7 +579,8 @@ $("resetView").addEventListener("click", () => {
 });
 
 /* ============================================================
-   ZOOM
+   ZOOM — scroll wheel works in every mode, mid-draw included,
+   with no modifier key required.
 ============================================================ */
 
 $("zoomIn").addEventListener("click", () => zoomCenter(1.20));
@@ -666,7 +676,7 @@ function pointerDown(event) {
     canvas.setPointerCapture(event.pointerId);
     state.pointerDown = true;
 
-    // PAN — automatic from any tool via Space, Shift, or middle-click
+    // PAN — automatic from any tool via Space, Shift, or middle-click. Never blocks zoom.
     if (state.mode === "pan" || event.button === 1 || event.shiftKey || state.spacePan) {
         state.panning = true;
         state.panStart = { x: p.x, y: p.y, offsetX: state.offsetX, offsetY: state.offsetY };
@@ -705,7 +715,11 @@ function pointerDown(event) {
         return;
     }
 
-    if (state.mode === "draw") beginDrawing(p.x, p.y);
+    if (state.mode === "draw") {
+        // Overlapping annotations are always allowed — no hit-test guard here.
+        if (state.annotationType === "box") beginDrawing(p.x, p.y);
+        else addPolygonPoint(p.x, p.y);
+    }
 }
 
 function pointerMove(event) {
@@ -752,7 +766,11 @@ function pointerMove(event) {
 }
 
 function pointerUp() {
-    if (state.mode === "draw" && state.drawing) finishDrawing();
+    // Box finishes on release. Polygon/segmentation stay open until
+    // Enter, double-click, or the user presses Escape.
+    if (state.mode === "draw" && state.drawing && state.annotationType === "box") {
+        finishBoxDrawing();
+    }
 
     state.pointerDown = false;
     state.dragging = false;
@@ -763,7 +781,7 @@ function pointerUp() {
 }
 
 /* ============================================================
-   DRAWING
+   DRAWING — BOX (click-drag)
 ============================================================ */
 
 function beginDrawing(x, y) {
@@ -771,67 +789,70 @@ function beginDrawing(x, y) {
     state.drawing = true;
     state.drawStart = point;
     state.drawCurrent = point;
-
-    if (state.annotationType === "polygon" || state.annotationType === "segmentation") {
-        state.polygonPoints = [point];
-    }
 }
 
-function finishDrawing() {
+function finishBoxDrawing() {
     if (!state.drawing) return;
 
     const start = state.drawStart;
     const end = state.drawCurrent;
+    const x = Math.min(start.x, end.x);
+    const y = Math.min(start.y, end.y);
+    const width = Math.abs(end.x - start.x);
+    const height = Math.abs(end.y - start.y);
 
-    if (state.annotationType === "box") {
-        const x = Math.min(start.x, end.x);
-        const y = Math.min(start.y, end.y);
-        const width = Math.abs(end.x - start.x);
-        const height = Math.abs(end.y - start.y);
-
-        if (width >= 5 && height >= 5) {
-            createAnnotation({ type: "box", x, y, width, height, label: "unknown", score: null, occlusion: 0, truncation: "NONE" });
-        }
-    } else {
-        if (state.polygonPoints.length < 3) {
-            const x = Math.min(start.x, end.x);
-            const y = Math.min(start.y, end.y);
-            const width = Math.abs(end.x - start.x);
-            const height = Math.abs(end.y - start.y);
-
-            if (width >= 5 && height >= 5) {
-                createAnnotation({
-                    type: state.annotationType,
-                    points: [{ x, y }, { x: x + width, y }, { x: x + width, y: y + height }, { x, y: y + height }],
-                    label: "unknown", score: null, occlusion: 0, truncation: "NONE"
-                });
-            }
-        }
+    if (width >= 5 && height >= 5) {
+        createAnnotation({ type: "box", x, y, width, height, label: "unknown", score: null, occlusion: 0, truncation: "NONE" });
     }
 
     state.drawing = false;
     state.drawStart = null;
     state.drawCurrent = null;
-    state.polygonPoints = [];
 
     saveFrame();
     updateCounts();
     render();
 }
 
+/* ============================================================
+   DRAWING — POLYGON / SEGMENTATION (click each vertex)
+============================================================ */
+
+function addPolygonPoint(x, y) {
+    const point = screenToImage(x, y);
+
+    if (!state.drawing) {
+        state.drawing = true;
+        state.polygonPoints = [point];
+    } else {
+        state.polygonPoints.push(point);
+    }
+
+    state.drawCurrent = point;
+    render();
+}
+
+function finalizePolygon() {
+    if (state.polygonPoints.length < 3) {
+        cancelDrawing();
+        return;
+    }
+
+    const points = state.polygonPoints.map(p => ({ x: p.x, y: p.y }));
+    createAnnotation({ type: state.annotationType, points, label: "unknown", score: null, occlusion: 0, truncation: "NONE" });
+
+    state.drawing = false;
+    state.polygonPoints = [];
+    state.drawCurrent = null;
+
+    saveFrame();
+    render();
+}
+
 function doubleClick() {
     if (state.mode !== "draw") return;
-    if (state.annotationType !== "polygon" && state.annotationType !== "segmentation") return;
-
-    if (state.polygonPoints.length >= 3) {
-        const points = state.polygonPoints.map(p => ({ x: p.x, y: p.y }));
-        createAnnotation({ type: state.annotationType, points, label: "unknown", score: null, occlusion: 0, truncation: "NONE" });
-
-        state.drawing = false;
-        state.polygonPoints = [];
-        saveFrame();
-        render();
-    }
+    if (state.annotationType === "box") return;
+    finalizePolygon();
 }
 
 function cancelDrawing() {
@@ -1098,11 +1119,17 @@ function renderPopupBody(a) {
 
     $("popupSaveClass").addEventListener("click", savePopupClassification);
     $("popupDeleteClass").addEventListener("click", deleteSelected);
+
+    $("popupObjectClass").addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); savePopupClassification(); }
+    });
 }
 
 function savePopupClassification() {
     const a = getSelected();
     if (!a) return;
+
+    showToast("Saving...");
 
     a.label = $("popupObjectClass").value.trim() || "unknown";
     a.occlusion = Number($("popupObjectOcclusion").value);
@@ -1112,6 +1139,29 @@ function savePopupClassification() {
 
     saveFrame();
     updateSelected();
+
+    setTimeout(() => showToast("Saved ✓"), 250);
+}
+
+/* ============================================================
+   TOAST NOTIFICATIONS
+============================================================ */
+
+function showToast(message) {
+    const el = document.createElement("div");
+    el.className = "toast";
+    el.innerHTML = `
+        <span class="toast-msg">${escapeHTML(message)}</span>
+        <div class="toast-bar"><div class="toast-bar-fill"></div></div>
+    `;
+    toastContainer.appendChild(el);
+
+    requestAnimationFrame(() => el.classList.add("show"));
+
+    setTimeout(() => {
+        el.classList.remove("show");
+        setTimeout(() => el.remove(), 250);
+    }, 1500);
 }
 
 /* ============================================================
@@ -1162,7 +1212,7 @@ $("confidence").addEventListener("input", () => {
 });
 
 /* ============================================================
-   AI — SINGLE FRAME + FULL VIDEO BATCH
+   AI — SINGLE FRAME + FULL VIDEO BATCH + DETR/YOLO/BOTH
 ============================================================ */
 
 $("autoAnnotate").addEventListener("click", runAI);
@@ -1176,9 +1226,60 @@ async function getDetector(engine) {
     return state.yolo;
 }
 
-async function detectOnCurrentImage(detector) {
-    const results = await detector(state.image.src, { threshold: Number($("confidence").value) });
+async function loadEngines(engine) {
+    if (engine === "both") {
+        const detr = await getDetector("detr");
+        const yolo = await getDetector("yolo");
+        return { detr, yolo };
+    }
+    const single = await getDetector(engine);
+    return { single };
+}
+
+async function runDetection(engines, engine) {
+    const threshold = Number($("confidence").value);
+
+    if (engine === "both") {
+        const [r1, r2] = await Promise.all([
+            engines.detr(state.image.src, { threshold }),
+            engines.yolo(state.image.src, { threshold })
+        ]);
+        const combined = nonMaxSuppress([...(r1 || []), ...(r2 || [])], 0.5);
+        return applyRules(combined);
+    }
+
+    const results = await engines.single(state.image.src, { threshold });
     return applyRules(results || []);
+}
+
+function iou(boxA, boxB) {
+    const x1 = Math.max(boxA.xmin, boxB.xmin);
+    const y1 = Math.max(boxA.ymin, boxB.ymin);
+    const x2 = Math.min(boxA.xmax, boxB.xmax);
+    const y2 = Math.min(boxA.ymax, boxB.ymax);
+
+    const interW = Math.max(0, x2 - x1);
+    const interH = Math.max(0, y2 - y1);
+    const interArea = interW * interH;
+
+    const areaA = Math.max(0, boxA.xmax - boxA.xmin) * Math.max(0, boxA.ymax - boxA.ymin);
+    const areaB = Math.max(0, boxB.xmax - boxB.xmin) * Math.max(0, boxB.ymax - boxB.ymin);
+    const union = areaA + areaB - interArea;
+
+    return union <= 0 ? 0 : interArea / union;
+}
+
+function nonMaxSuppress(detections, iouThreshold) {
+    const sorted = detections.filter(d => d && d.box).sort((a, b) => (b.score || 0) - (a.score || 0));
+    const kept = [];
+
+    for (const det of sorted) {
+        const detLabel = normalizeLabel(det.label);
+        const overlaps = kept.some(k => normalizeLabel(k.label) === detLabel && iou(k.box, det.box) > iouThreshold);
+        if (!overlaps) kept.push(det);
+    }
+
+    return kept;
 }
 
 function detectionsToAnnotations(detections) {
@@ -1224,11 +1325,11 @@ async function runAISingleFrame() {
     const engine = $("aiEngine").value;
 
     try {
-        setAIStatus(`Loading ${engine.toUpperCase()}...`);
-        const detector = await getDetector(engine);
+        setAIStatus(`Loading ${engine === "both" ? "DETR + YOLO" : engine.toUpperCase()}...`);
+        const engines = await loadEngines(engine);
 
         setAIStatus("Analysing customer image...");
-        const detections = await detectOnCurrentImage(detector);
+        const detections = await runDetection(engines, engine);
 
         state.annotations = state.annotations.filter(a => !a.aiGenerated);
         state.annotations.push(...detectionsToAnnotations(detections));
@@ -1262,15 +1363,15 @@ async function runAIAllFrames() {
     setProgress(0);
 
     try {
-        setAIStatus(`Loading ${engine.toUpperCase()}...`);
-        const detector = await getDetector(engine);
+        setAIStatus(`Loading ${engine === "both" ? "DETR + YOLO" : engine.toUpperCase()}...`);
+        const engines = await loadEngines(engine);
 
         for (let frame = 0; frame < total; frame++) {
             setAIStatus(`Annotating frame ${frame + 1} / ${total}...`);
             setProgress((frame / total) * 100);
 
             await seekVideoFrame(frame);
-            const detections = await detectOnCurrentImage(detector);
+            const detections = await runDetection(engines, engine);
 
             const existing = state.frameAnnotations.get(frame) || [];
             const human = existing.filter(a => !a.aiGenerated);
@@ -1511,6 +1612,17 @@ function drawCurrentPolygon() {
 
     ctx.stroke();
     ctx.restore();
+
+    // Vertex markers so each placed point is visible while building the shape
+    ctx.save();
+    state.polygonPoints.forEach(point => {
+        const p = imageToScreen(point.x, point.y);
+        ctx.fillStyle = "#a78bfa";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
 }
 
 /* ============================================================
@@ -1564,6 +1676,7 @@ function updateFilmstripCurrent() {
     if (state.mediaType !== "video") return;
 
     filmstripLabel.textContent = `${state.currentFrame} / ${state.totalFrames - 1}`;
+    filmstripCurrentLabel.textContent = `Frame ${state.currentFrame}`;
 
     const ticks = filmstripTrack.children;
     for (let i = 0; i < ticks.length; i++) {
