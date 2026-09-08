@@ -2,135 +2,415 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>AI Annotation Studio</title>
-
-    <meta
-        name="description"
-        content="Professional AI-powered image annotation platform"
-    />
+    <title>Customer Image Annotation AI</title>
 
     <link rel="stylesheet" href="styles.css">
 
-    <script type="module" src="app.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "@huggingface/transformers":
+                "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0"
+        }
+    }
+    </script>
 </head>
 
 <body>
 
-<!-- =========================================================
-     APP
-========================================================= -->
+<div class="app">
 
-<div id="app">
+    <!-- ========================================================= -->
+    <!-- LEFT SIDEBAR -->
+    <!-- ========================================================= -->
 
-    <!-- SIDEBAR -->
     <aside class="sidebar">
 
         <div class="brand">
             <div class="brand-icon">AI</div>
 
             <div>
-                <strong>Annotation Studio</strong>
-                <span>AI Labeling Platform</span>
+                <h1>ANNOTATION AI</h1>
+                <span>Customer Data Studio</span>
             </div>
         </div>
 
-        <nav>
+        <!-- UPLOAD -->
+        <section class="panel">
 
-            <button class="nav-item active" data-page="workspace">
-                <span>▣</span>
-                Workspace
-            </button>
+            <div class="section-title">
+                <span>1</span>
+                UPLOAD CUSTOMER DATA
+            </div>
 
-            <button class="nav-item" data-page="rules">
-                <span>⚙</span>
-                Annotation Rules
-            </button>
+            <label class="upload-box">
 
-            <button class="nav-item" data-page="training">
-                <span>◆</span>
-                Learning Data
-            </button>
+                <input
+                    id="mediaInput"
+                    type="file"
+                    accept="image/*,video/*"
+                    hidden
+                >
 
-            <button class="nav-item" data-page="history">
-                <span>◷</span>
-                History
-            </button>
+                <div class="upload-icon">↑</div>
 
-        </nav>
+                <strong>Upload Image / Video</strong>
 
-        <div class="sidebar-bottom">
+                <small>
+                    JPG, PNG, WEBP, MP4, MOV, WebM
+                </small>
 
-            <div class="ai-status">
-                <div class="status-dot"></div>
+            </label>
+
+            <div id="mediaInfo" class="media-info">
+                No media loaded
+            </div>
+
+        </section>
+
+
+        <!-- FRAME CONTROLS -->
+        <section
+            class="panel"
+            id="videoControlsPanel"
+            style="display:none;"
+        >
+
+            <div class="section-title">
+                <span>2</span>
+                VIDEO FRAMES
+            </div>
+
+            <div class="video-buttons">
+
+                <button id="previousFrame" title="Previous frame">
+                    ◀
+                </button>
+
+                <button
+                    id="playVideo"
+                    class="play-button"
+                    title="Play / Pause"
+                >
+                    ▶
+                </button>
+
+                <button id="nextFrame" title="Next frame">
+                    ▶
+                </button>
+
+            </div>
+
+            <div class="frame-info">
 
                 <div>
-                    <strong>AI Engine</strong>
-                    <small id="aiStatus">
-                        Ready
-                    </small>
+                    Frame
+                    <strong id="currentFrame">0</strong>
+                    /
+                    <strong id="totalFrames">0</strong>
                 </div>
+
+                <div>
+                    <span id="videoTime">00:00.000</span>
+                </div>
+
             </div>
 
-            <div class="version">
-                AI Annotation Studio v1.0
+            <input
+                id="frameSlider"
+                type="range"
+                min="0"
+                max="0"
+                value="0"
+                step="1"
+            >
+
+            <small class="keyboard-help">
+                ← Previous frame &nbsp; | &nbsp; →
+                Next frame &nbsp; | &nbsp; Space Play/Pause
+            </small>
+
+        </section>
+
+
+        <!-- ANNOTATION TYPE -->
+        <section class="panel">
+
+            <div class="section-title">
+                <span>3</span>
+                ANNOTATION TYPE
             </div>
 
-        </div>
+            <div class="annotation-types">
+
+                <button
+                    class="annotation-type active"
+                    data-tool="box"
+                >
+                    <span>▣</span>
+                    2D BOX
+                </button>
+
+                <button
+                    class="annotation-type"
+                    data-tool="polygon"
+                >
+                    <span>◇</span>
+                    POLYGON
+                </button>
+
+                <button
+                    class="annotation-type"
+                    data-tool="segmentation"
+                >
+                    <span>◈</span>
+                    SEGMENTATION
+                </button>
+
+            </div>
+
+        </section>
+
+
+        <!-- TOOLS -->
+        <section class="panel">
+
+            <div class="section-title">
+                <span>4</span>
+                ANNOTATION TOOLS
+            </div>
+
+            <div class="tool-grid">
+
+                <button
+                    class="tool-button active"
+                    data-mode="select"
+                >
+                    ↖ Select
+                </button>
+
+                <button
+                    class="tool-button"
+                    data-mode="draw"
+                >
+                    ✚ Draw
+                </button>
+
+                <button
+                    class="tool-button"
+                    data-mode="pan"
+                >
+                    ✋ Pan
+                </button>
+
+                <button
+                    class="tool-button"
+                    data-mode="erase"
+                >
+                    ⌫ Erase
+                </button>
+
+            </div>
+
+            <button
+                id="deleteSelected"
+                class="danger-button"
+            >
+                DELETE SELECTED
+            </button>
+
+        </section>
+
+
+        <!-- AI -->
+        <section class="panel">
+
+            <div class="section-title">
+                <span>5</span>
+                ANNOTATION AI
+            </div>
+
+            <label class="field-label">
+                AI ENGINE
+            </label>
+
+            <select id="aiEngine" class="select">
+
+                <option value="detr">
+                    DETR — COCO
+                </option>
+
+                <option value="yolo">
+                    YOLO — COCO
+                </option>
+
+            </select>
+
+            <label class="field-label">
+                CONFIDENCE FILTER
+            </label>
+
+            <div class="range-row">
+
+                <input
+                    id="confidence"
+                    type="range"
+                    min="0.1"
+                    max="0.95"
+                    value="0.45"
+                    step="0.05"
+                >
+
+                <span id="confidenceValue">
+                    45%
+                </span>
+
+            </div>
+
+            <label class="checkbox-row">
+
+                <input
+                    id="applyRules"
+                    type="checkbox"
+                    checked
+                >
+
+                Apply annotation rules
+
+            </label>
+
+            <textarea
+                id="rules"
+                class="rules-box"
+                placeholder="Example:
+
+include: car, truck, bus, person
+exclude: dog
+rename: automobile=car
+min_confidence: 0.45"
+            ></textarea>
+
+            <button
+                id="autoAnnotate"
+                class="primary-button"
+            >
+                ✨ AUTO ANNOTATE
+            </button>
+
+            <div
+                id="aiStatus"
+                class="ai-status"
+            >
+                AI ready
+            </div>
+
+        </section>
+
+
+        <!-- CLASSIFICATIONS -->
+        <section class="panel">
+
+            <div class="section-title">
+                <span>6</span>
+                CLASSIFICATIONS
+            </div>
+
+            <div id="classificationCard">
+
+                <div class="empty-card">
+                    Select an annotation
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- EXPORT -->
+        <section class="panel">
+
+            <div class="section-title">
+                <span>7</span>
+                EXPORT
+            </div>
+
+            <button
+                id="exportImage"
+                class="export-button"
+            >
+                ↓ Annotated Image
+            </button>
+
+            <button
+                id="exportJSON"
+                class="export-button"
+            >
+                ↓ Training JSON
+            </button>
+
+            <button
+                id="exportFrameJSON"
+                class="export-button"
+            >
+                ↓ Current Frame JSON
+            </button>
+
+        </section>
 
     </aside>
 
 
-    <!-- MAIN -->
-    <main class="main">
+    <!-- ========================================================= -->
+    <!-- MAIN WORKSPACE -->
+    <!-- ========================================================= -->
 
-        <!-- TOP BAR -->
-        <header class="topbar">
+    <main class="workspace">
+
+        <header class="workspace-header">
 
             <div>
-                <h1 id="pageTitle">
-                    Annotation Workspace
-                </h1>
 
-                <p id="pageSubtitle">
-                    Upload an image and let AI create annotations.
-                </p>
+                <div
+                    id="fileName"
+                    class="file-name"
+                >
+                    No customer data loaded
+                </div>
+
+                <div class="workspace-subtitle">
+
+                    <span id="objectCount">0</span>
+                    annotations
+
+                    <span class="separator">•</span>
+
+                    <span id="annotationMode">
+                        2D BOX
+                    </span>
+
+                </div>
+
             </div>
 
-            <div class="top-actions">
 
-                <button
-                    id="undoBtn"
-                    class="icon-button"
-                    title="Undo"
-                >
-                    ↶
+            <div class="zoom-controls">
+
+                <button id="zoomOut">−</button>
+
+                <span id="zoomValue">
+                    100%
+                </span>
+
+                <button id="zoomIn">+</button>
+
+                <button id="fitView">
+                    FIT
                 </button>
 
-                <button
-                    id="redoBtn"
-                    class="icon-button"
-                    title="Redo"
-                >
-                    ↷
-                </button>
-
-                <button
-                    id="resetBtn"
-                    class="secondary-button"
-                >
-                    Reset
-                </button>
-
-                <button
-                    id="downloadBtn"
-                    class="primary-button"
-                >
-                    Download
+                <button id="resetView">
+                    RESET
                 </button>
 
             </div>
@@ -138,564 +418,201 @@
         </header>
 
 
-        <!-- =================================================
-             WORKSPACE
-        ================================================== -->
-
-        <section
-            id="workspacePage"
-            class="page active-page"
+        <!-- CANVAS -->
+        <div
+            id="canvasWorkspace"
+            class="canvas-workspace"
         >
 
-            <div class="workspace">
-
-                <!-- LEFT CONTROL PANEL -->
-                <section class="control-panel">
-
-                    <div class="panel-section">
-
-                        <h3>1. Upload Image</h3>
-
-                        <label
-                            for="imageInput"
-                            class="upload-box"
-                        >
-
-                            <div class="upload-icon">
-                                ↑
-                            </div>
-
-                            <strong>
-                                Upload customer image
-                            </strong>
-
-                            <span>
-                                JPG, PNG or WEBP
-                            </span>
-
-                        </label>
-
-                        <input
-                            id="imageInput"
-                            type="file"
-                            accept="image/*"
-                            hidden
-                        />
-
-                    </div>
-
-
-                    <div class="panel-section">
-
-                        <h3>2. Annotation Type</h3>
-
-                        <div class="annotation-types">
-
-                            <button
-                                class="annotation-type active"
-                                data-type="bbox"
-                            >
-                                <span class="tool-icon">□</span>
-
-                                <div>
-                                    <strong>2D Box</strong>
-                                    <small>Bounding boxes</small>
-                                </div>
-                            </button>
-
-
-                            <button
-                                class="annotation-type"
-                                data-type="polygon"
-                            >
-                                <span class="tool-icon">◇</span>
-
-                                <div>
-                                    <strong>Polygon</strong>
-                                    <small>Object boundaries</small>
-                                </div>
-                            </button>
-
-
-                            <button
-                                class="annotation-type"
-                                data-type="segmentation"
-                            >
-                                <span class="tool-icon">▧</span>
-
-                                <div>
-                                    <strong>Segmentation</strong>
-                                    <small>Pixel-level masks</small>
-                                </div>
-                            </button>
-
-                        </div>
-
-                    </div>
-
-
-                    <div class="panel-section">
-
-                        <h3>3. AI Settings</h3>
-
-                        <label class="field-label">
-                            Confidence threshold
-
-                            <span id="thresholdValue">
-                                50%
-                            </span>
-                        </label>
-
-                        <input
-                            id="confidenceSlider"
-                            type="range"
-                            min="10"
-                            max="95"
-                            value="50"
-                        />
-
-                        <label class="check-row">
-
-                            <input
-                                id="autoRules"
-                                type="checkbox"
-                                checked
-                            />
-
-                            <span>
-                                Apply annotation rules
-                            </span>
-
-                        </label>
-
-                    </div>
-
-
-                    <div class="panel-section">
-
-                        <button
-                            id="annotateBtn"
-                            class="ai-button"
-                            disabled
-                        >
-                            <span>✦</span>
-                            AUTO ANNOTATE
-                        </button>
-
-                        <div
-                            id="processingStatus"
-                            class="processing-status"
-                        >
-                            Upload an image to begin.
-                        </div>
-
-                    </div>
-
-
-                    <div class="panel-section">
-
-                        <h3>Tools</h3>
-
-                        <div class="tools-grid">
-
-                            <button
-                                class="tool-button active"
-                                data-tool="select"
-                            >
-                                Select
-                            </button>
-
-                            <button
-                                class="tool-button"
-                                data-tool="draw"
-                            >
-                                Draw
-                            </button>
-
-                            <button
-                                class="tool-button"
-                                data-tool="erase"
-                            >
-                                Erase
-                            </button>
-
-                            <button
-                                class="tool-button"
-                                data-tool="pan"
-                            >
-                                Pan
-                            </button>
-
-                        </div>
-
-                    </div>
-
-                </section>
-
-
-                <!-- CANVAS AREA -->
-                <section class="canvas-area">
-
-                    <div class="canvas-toolbar">
-
-                        <div class="canvas-info">
-
-                            <span id="imageName">
-                                No image
-                            </span>
-
-                            <span class="separator">•</span>
-
-                            <span id="objectCount">
-                                0 objects
-                            </span>
-
-                        </div>
-
-                        <div class="zoom-controls">
-
-                            <button id="zoomOut">
-                                −
-                            </button>
-
-                            <span id="zoomValue">
-                                100%
-                            </span>
-
-                            <button id="zoomIn">
-                                +
-                            </button>
-
-                            <button id="fitCanvas">
-                                Fit
-                            </button>
-
-                        </div>
-
-                    </div>
-
-
-                    <div
-                        id="canvasContainer"
-                        class="canvas-container"
-                    >
-
-                        <div
-                            id="emptyState"
-                            class="empty-state"
-                        >
-
-                            <div class="empty-icon">
-                                ⬡
-                            </div>
-
-                            <h2>
-                                Upload an image
-                            </h2>
-
-                            <p>
-                                AI annotations will appear here.
-                            </p>
-
-                        </div>
-
-                        <canvas
-                            id="annotationCanvas"
-                        ></canvas>
-
-                    </div>
-
-                </section>
-
-
-                <!-- RIGHT OBJECT PANEL -->
-                <section class="objects-panel">
-
-                    <div class="objects-header">
-
-                        <div>
-                            <h3>Annotations</h3>
-
-                            <span id="objectSummary">
-                                No objects
-                            </span>
-                        </div>
-
-                        <button
-                            id="deleteSelected"
-                            class="danger-button"
-                        >
-                            Delete
-                        </button>
-
-                    </div>
-
-
-                    <div
-                        id="objectList"
-                        class="object-list"
-                    >
-
-                        <div class="no-objects">
-                            No annotations yet.
-                        </div>
-
-                    </div>
-
-
-                    <div class="quality-card">
-
-                        <div class="quality-title">
-                            Quality Check
-                        </div>
-
-                        <div class="quality-score">
-                            <strong id="qualityScore">
-                                —
-                            </strong>
-
-                            <span>
-                                AI quality
-                            </span>
-                        </div>
-
-                        <div
-                            id="qualityMessages"
-                            class="quality-messages"
-                        >
-                            Run annotation to check quality.
-                        </div>
-
-                    </div>
-
-                </section>
+            <canvas id="annotationCanvas"></canvas>
+
+            <div
+                id="emptyWorkspace"
+                class="empty-workspace"
+            >
+
+                <div class="empty-icon">
+                    ◎
+                </div>
+
+                <h2>
+                    CUSTOMER IMAGE
+                </h2>
+
+                <p>
+                    Upload an image or video to begin annotation
+                </p>
 
             </div>
 
-        </section>
+        </div>
 
 
-        <!-- =================================================
-             RULES PAGE
-        ================================================== -->
+        <!-- BOTTOM STATUS -->
+        <footer class="workspace-footer">
 
-        <section
-            id="rulesPage"
-            class="page"
-        >
+            <div>
 
-            <div class="page-card">
-
-                <div class="page-card-header">
-
-                    <div>
-                        <h2>Annotation Rules</h2>
-
-                        <p>
-                            Add the customer's annotation guidelines.
-                        </p>
-                    </div>
-
-                    <button
-                        id="saveRules"
-                        class="primary-button"
-                    >
-                        Save Rules
-                    </button>
-
-                </div>
-
-
-                <textarea
-                    id="rulesInput"
-                    class="rules-editor"
-                    placeholder="Example:
-
-Cars must include the entire visible vehicle.
-
-Do not annotate reflections.
-
-Pedestrian boxes must include the complete visible person.
-
-Motorcycle boxes must include the motorcycle and rider.
-
-Do not create annotations outside the road area.
-
-Objects below 20 pixels should be reviewed manually."
-                ></textarea>
-
-
-                <div class="rules-help">
-
-                    <strong>How rules work</strong>
-
-                    <p>
-                        Rules are stored locally and applied by the
-                        annotation quality engine. For customer-specific
-                        production rules, the model can later be fine-tuned
-                        using corrected annotations.
-                    </p>
-
-                </div>
+                Tool:
+                <strong id="activeTool">
+                    Select
+                </strong>
 
             </div>
 
-        </section>
+            <div>
 
-
-        <!-- =================================================
-             TRAINING PAGE
-        ================================================== -->
-
-        <section
-            id="trainingPage"
-            class="page"
-        >
-
-            <div class="page-card">
-
-                <div class="page-card-header">
-
-                    <div>
-                        <h2>Learning Data</h2>
-
-                        <p>
-                            Human corrections become training examples.
-                        </p>
-                    </div>
-
-                    <button
-                        id="exportTraining"
-                        class="primary-button"
-                    >
-                        Export Training Data
-                    </button>
-
-                </div>
-
-
-                <div class="training-stats">
-
-                    <div class="stat-card">
-                        <span>Images</span>
-                        <strong id="trainingImages">
-                            0
-                        </strong>
-                    </div>
-
-                    <div class="stat-card">
-                        <span>Corrections</span>
-                        <strong id="trainingCorrections">
-                            0
-                        </strong>
-                    </div>
-
-                    <div class="stat-card">
-                        <span>Objects</span>
-                        <strong id="trainingObjects">
-                            0
-                        </strong>
-                    </div>
-
-                </div>
-
-
-                <div
-                    id="trainingList"
-                    class="training-list"
-                >
-                    No training examples yet.
-                </div>
+                Zoom:
+                <strong id="footerZoom">
+                    100%
+                </strong>
 
             </div>
 
-        </section>
+            <div>
 
-
-        <!-- =================================================
-             HISTORY PAGE
-        ================================================== -->
-
-        <section
-            id="historyPage"
-            class="page"
-        >
-
-            <div class="page-card">
-
-                <div class="page-card-header">
-
-                    <div>
-                        <h2>Annotation History</h2>
-
-                        <p>
-                            Previous local annotation sessions.
-                        </p>
-                    </div>
-
-                    <button
-                        id="clearHistory"
-                        class="danger-button"
-                    >
-                        Clear History
-                    </button>
-
-                </div>
-
-
-                <div
-                    id="historyList"
-                    class="history-list"
-                >
-                    No history.
-                </div>
+                Selected:
+                <strong id="selectedObject">
+                    None
+                </strong>
 
             </div>
 
-        </section>
+        </footer>
 
     </main>
 
+
+    <!-- ========================================================= -->
+    <!-- RIGHT INFORMATION PANEL -->
+    <!-- ========================================================= -->
+
+    <aside class="right-panel">
+
+        <div class="right-title">
+            ANNOTATION DETAILS
+        </div>
+
+        <div id="annotationDetails">
+
+            <div class="details-empty">
+
+                <div class="details-icon">
+                    ◫
+                </div>
+
+                <strong>
+                    No annotation selected
+                </strong>
+
+                <span>
+                    Click an object in the workspace
+                    to edit its classification.
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <!-- WORKFLOW -->
+        <div class="workflow">
+
+            <div class="right-title">
+                CUSTOMER AI WORKFLOW
+            </div>
+
+            <div class="flow">
+
+                <div class="flow-node">
+                    CUSTOMER IMAGE
+                </div>
+
+                <div class="flow-arrow">│</div>
+                <div class="flow-arrow">▼</div>
+
+                <div class="flow-node">
+                    Annotation AI
+                </div>
+
+                <div class="flow-arrow">│</div>
+
+                <div class="flow-three">
+
+                    <div>
+                        <b>2D BOX</b>
+                    </div>
+
+                    <div>
+                        <b>SEGMENTATION</b>
+                    </div>
+
+                    <div>
+                        <b>POLYGON</b>
+                    </div>
+
+                </div>
+
+                <div class="flow-arrow">│</div>
+                <div class="flow-arrow">▼</div>
+
+                <div class="flow-node">
+                    RULE ENGINE
+                </div>
+
+                <div class="flow-arrow">│</div>
+                <div class="flow-arrow">▼</div>
+
+                <div class="flow-node human">
+                    HUMAN CORRECTION
+                </div>
+
+                <div class="flow-split">
+
+                    <div>
+                        ACCEPTED
+                    </div>
+
+                    <div>
+                        CORRECTED
+                    </div>
+
+                </div>
+
+                <div class="flow-arrow">│</div>
+                <div class="flow-arrow">▼</div>
+
+                <div class="flow-node">
+                    TRAINING DATA
+                </div>
+
+                <div class="flow-arrow">│</div>
+                <div class="flow-arrow">▼</div>
+
+                <div class="flow-node model">
+                    CUSTOMER MODEL
+                </div>
+
+            </div>
+
+        </div>
+
+    </aside>
+
 </div>
 
 
-<!-- TOAST -->
+<!-- Hidden video used for extracting frames -->
+<video
+    id="sourceVideo"
+    muted
+    playsinline
+    preload="auto"
+    style="display:none;"
+></video>
 
-<div
-    id="toast"
-    class="toast"
->
-    <span id="toastMessage"></span>
-</div>
 
-
-<!-- MODAL -->
-
-<div
-    id="annotationModal"
-    class="modal hidden"
->
-
-    <div class="modal-card">
-
-        <h2>
-            Annotation Complete
-        </h2>
-
-        <p id="modalMessage">
-            AI annotation has completed.
-        </p>
-
-        <button
-            id="closeModal"
-            class="primary-button"
-        >
-            Continue
-        </button>
-
-    </div>
-
-</div>
+<script type="module" src="app.js"></script>
 
 </body>
 </html>
