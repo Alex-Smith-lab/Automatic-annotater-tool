@@ -1,2225 +1,1114 @@
-/* =========================================================
-   AI ANNOTATION STUDIO PRO
-   GitHub / GitHub Pages
-   No Supabase
-   ========================================================= */
-
 import {
     pipeline,
-    env
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0";
+    env,
+    RawImage
+} from "@huggingface/transformers";
 
 
 /* =========================================================
    TRANSFORMERS.JS SETTINGS
-   ========================================================= */
+========================================================= */
 
-/*
- * DETR does NOT need a tokenizer.
- *
- * The model works through the object-detection pipeline.
- *
- * We only show actual errors instead of unnecessary
- * informational messages.
- */
-
-try {
-    if (env && env.LogLevel) {
-        env.logLevel = env.LogLevel.ERROR;
-    }
-} catch (e) {
-    console.warn(
-        "Could not change Transformers logging level.",
-        e
-    );
-}
-
-
-/* =========================================================
-   CONFIGURATION
-   ========================================================= */
-
-const CONFIG = {
-
-    detectionModel:
-        "Xenova/detr-resnet-50",
-
-    /*
-     * Keep null until a proper segmentation model
-     * is connected.
-     */
-    segmentationModel:
-        null,
-
-    defaultThreshold:
-        0.50,
-
-    maxHistory:
-        500,
-
-    maxUndo:
-        100,
-
-    storage: {
-
-        rules:
-            "ai_annotation_rules",
-
-        training:
-            "ai_annotation_training",
-
-        history:
-            "ai_annotation_history",
-
-        classifications:
-            "ai_annotation_classifications"
-
-    }
-
-};
-
-
-/* =========================================================
-   STATE
-   ========================================================= */
-
-const state = {
-
-    image:
-        null,
-
-    imageUrl:
-        null,
-
-    imageBlob:
-        null,
-
-    imageName:
-        "",
-
-    imageWidth:
-        0,
-
-    imageHeight:
-        0,
-
-    annotationType:
-        "bbox",
-
-    activeTool:
-        "select",
-
-    threshold:
-        0.50,
-
-    applyRules:
-        true,
-
-    annotations:
-        [],
-
-    selectedId:
-        null,
-
-    undoStack:
-        [],
-
-    redoStack:
-        [],
-
-    zoom:
-        1,
-
-    minZoom:
-        0.10,
-
-    maxZoom:
-        8,
-
-    panX:
-        0,
-
-    panY:
-        0,
-
-    panning:
-        false,
-
-    panStartX:
-        0,
-
-    panStartY:
-        0,
-
-    panOriginX:
-        0,
-
-    panOriginY:
-        0,
-
-    detector:
-        null,
-
-    segmenter:
-        null,
-
-    detectorReady:
-        false,
-
-    segmenterReady:
-        false,
-
-    isProcessing:
-        false,
-
-    drag:
-        null,
-
-    classifications:
-        new Set(),
-
-    excludedClassifications:
-        new Set(),
-
-    nextManualClass:
-        "object"
-
-};
+env.allowLocalModels = false;
+env.allowRemoteModels = true;
 
 
 /* =========================================================
    DOM
-   ========================================================= */
-
-const $ =
-    selector =>
-        document.querySelector(
-            selector
-        );
-
-
-const $$ =
-    selector =>
-        [
-            ...document.querySelectorAll(
-                selector
-            )
-        ];
-
+========================================================= */
 
 const canvas =
-    $("#annotationCanvas");
-
+    document.getElementById("annotationCanvas");
 
 const ctx =
-    canvas.getContext(
-        "2d"
-    );
+    canvas.getContext("2d");
+
+const workspace =
+    document.getElementById("canvasWorkspace");
+
+const mediaInput =
+    document.getElementById("mediaInput");
+
+const sourceVideo =
+    document.getElementById("sourceVideo");
+
+const emptyWorkspace =
+    document.getElementById("emptyWorkspace");
+
+const fileName =
+    document.getElementById("fileName");
+
+const objectCount =
+    document.getElementById("objectCount");
+
+const annotationMode =
+    document.getElementById("annotationMode");
+
+const activeToolLabel =
+    document.getElementById("activeTool");
+
+const selectedObjectLabel =
+    document.getElementById("selectedObject");
+
+const zoomValue =
+    document.getElementById("zoomValue");
+
+const footerZoom =
+    document.getElementById("footerZoom");
+
+const classificationCard =
+    document.getElementById("classificationCard");
+
+const annotationDetails =
+    document.getElementById("annotationDetails");
+
+const aiStatus =
+    document.getElementById("aiStatus");
+
+const confidence =
+    document.getElementById("confidence");
+
+const confidenceValue =
+    document.getElementById("confidenceValue");
+
+const aiEngine =
+    document.getElementById("aiEngine");
+
+const rulesInput =
+    document.getElementById("rules");
 
 
 /* =========================================================
-   INITIALIZATION
-   ========================================================= */
+   APPLICATION STATE
+========================================================= */
 
-document.addEventListener(
-    "DOMContentLoaded",
-    initialize
+const state = {
+
+    mediaType: null,
+
+    image: null,
+
+    imageURL: null,
+
+    videoURL: null,
+
+    videoDuration: 0,
+
+    fps: 30,
+
+    currentFrame: 0,
+
+    totalFrames: 0,
+
+    currentTime: 0,
+
+    isPlaying: false,
+
+    /* -----------------------------------------------------
+       View
+    ----------------------------------------------------- */
+
+    scale: 1,
+
+    offsetX: 0,
+
+    offsetY: 0,
+
+    minScale: 0.05,
+
+    maxScale: 20,
+
+    /* -----------------------------------------------------
+       Tools
+    ----------------------------------------------------- */
+
+    annotationType: "box",
+
+    mode: "select",
+
+    selectedId: null,
+
+    hoveredId: null,
+
+    isPointerDown: false,
+
+    isPanning: false,
+
+    isDrawing: false,
+
+    resizeHandle: null,
+
+    dragStart: null,
+
+    polygonPoints: [],
+
+    /* -----------------------------------------------------
+       Annotations
+    ----------------------------------------------------- */
+
+    annotations: [],
+
+    frameAnnotations: new Map(),
+
+    nextAnnotationId: 1,
+
+    /* -----------------------------------------------------
+       AI
+    ----------------------------------------------------- */
+
+    detr: null,
+
+    yolo: null,
+
+    aiBusy: false,
+
+    /* -----------------------------------------------------
+       Video
+    ----------------------------------------------------- */
+
+    videoReady: false,
+
+    videoFrameRequest: null,
+
+    /* -----------------------------------------------------
+       Classification
+    ----------------------------------------------------- */
+
+    classes: new Set()
+
+};
+
+
+/* =========================================================
+   MODEL CONFIGURATION
+========================================================= */
+
+const MODELS = {
+
+    detr:
+        "Xenova/detr-resnet-50",
+
+    /*
+     * YOLO model supplied through Transformers.js.
+     *
+     * This is a COCO object detector.
+     */
+    yolo:
+        "Xenova/yolov9-c"
+
+};
+
+
+/* =========================================================
+   COCO LABEL NORMALIZATION
+========================================================= */
+
+const LABEL_MAP = {
+
+    automobile: "car",
+
+    "motor vehicle":
+        "car",
+
+    vehicle:
+        "car",
+
+    "human":
+        "person",
+
+    cyclist:
+        "bicycle",
+
+    bike:
+        "bicycle"
+
+};
+
+
+/* =========================================================
+   INITIALIZE
+========================================================= */
+
+resizeCanvas();
+
+window.addEventListener(
+    "resize",
+    resizeCanvas
 );
-
-
-function initialize() {
-
-    loadLocalData();
-
-    ensureClassificationUI();
-
-    setupNavigation();
-
-    setupUpload();
-
-    setupAnnotationTypes();
-
-    setupTools();
-
-    setupControls();
-
-    setupCanvas();
-
-    setupKeyboard();
-
-    render();
-
-    renderObjects();
-
-    renderClassificationManager();
-
-    updateTrainingPage();
-
-    updateHistoryPage();
-
-    updateCursor();
-
-    setAIStatus(
-        "Ready"
-    );
-
-}
-
-
-/* =========================================================
-   NAVIGATION
-   ========================================================= */
-
-function setupNavigation() {
-
-    $$(".nav-item")
-        .forEach(
-            button => {
-
-                button.addEventListener(
-                    "click",
-                    () => {
-
-                        const page =
-                            button.dataset.page;
-
-
-                        $$(".nav-item")
-                            .forEach(
-                                item =>
-                                    item.classList.remove(
-                                        "active"
-                                    )
-                            );
-
-
-                        button.classList.add(
-                            "active"
-                        );
-
-
-                        $$(".page")
-                            .forEach(
-                                item =>
-                                    item.classList.remove(
-                                        "active-page"
-                                    )
-                            );
-
-
-                        const target =
-                            $(
-                                `#${page}Page`
-                            );
-
-
-                        if (target) {
-
-                            target.classList.add(
-                                "active-page"
-                            );
-
-                        }
-
-
-                        const titles = {
-
-                            workspace: [
-                                "Annotation Workspace",
-                                "Upload an image and let AI create annotations."
-                            ],
-
-                            rules: [
-                                "Annotation Rules",
-                                "Control how customer-specific annotations should be created."
-                            ],
-
-                            training: [
-                                "Learning Data",
-                                "Human corrections become training examples."
-                            ],
-
-                            history: [
-                                "Annotation History",
-                                "Review previous local annotation sessions."
-                            ]
-
-                        };
-
-
-                        if (
-                            titles[page]
-                        ) {
-
-                            const title =
-                                $("#pageTitle");
-
-                            const subtitle =
-                                $("#pageSubtitle");
-
-
-                            if (title) {
-
-                                title.textContent =
-                                    titles[page][0];
-
-                            }
-
-
-                            if (subtitle) {
-
-                                subtitle.textContent =
-                                    titles[page][1];
-
-                            }
-
-                        }
-
-                    }
-                );
-
-            }
-        );
-
-}
 
 
 /* =========================================================
    UPLOAD
-   ========================================================= */
+========================================================= */
 
-function setupUpload() {
-
-    const input =
-        $("#imageInput");
-
-
-    if (!input) {
-        return;
-    }
+mediaInput.addEventListener(
+    "change",
+    handleMediaUpload
+);
 
 
-    input.addEventListener(
-        "change",
-        handleImageUpload
-    );
-
-}
-
-
-async function handleImageUpload(
-    event
-) {
+async function handleMediaUpload(event) {
 
     const file =
         event.target.files?.[0];
-
 
     if (!file) {
         return;
     }
 
+    resetApplication();
 
-    if (
-        !file.type.startsWith(
-            "image/"
-        )
-    ) {
+    fileName.textContent =
+        file.name;
 
-        showToast(
-            "Please select a JPG, PNG or WEBP image."
-        );
+    const sizeMB =
+        (file.size / 1024 / 1024)
+        .toFixed(2);
 
-        return;
+    document.getElementById(
+        "mediaInfo"
+    ).textContent =
+        `${file.type || "media"} • ${sizeMB} MB`;
+
+    state.mediaType =
+        file.type.startsWith("video/")
+            ? "video"
+            : "image";
+
+    const url =
+        URL.createObjectURL(file);
+
+    if (state.mediaType === "image") {
+
+        await loadImage(url);
+
+    } else {
+
+        await loadVideo(url);
 
     }
 
+    emptyWorkspace.style.display =
+        "none";
 
-    try {
+    fitView();
 
-        state.imageBlob =
-            file;
-
-        state.imageName =
-            file.name;
-
-
-        if (
-            state.imageUrl
-        ) {
-
-            URL.revokeObjectURL(
-                state.imageUrl
-            );
-
-        }
-
-
-        state.imageUrl =
-            URL.createObjectURL(
-                file
-            );
-
-
-        const image =
-            await loadImage(
-                state.imageUrl
-            );
-
-
-        state.image =
-            image;
-
-        state.imageWidth =
-            image.naturalWidth;
-
-        state.imageHeight =
-            image.naturalHeight;
-
-
-        state.annotations =
-            [];
-
-        state.selectedId =
-            null;
-
-        state.undoStack =
-            [];
-
-        state.redoStack =
-            [];
-
-
-        state.panX =
-            0;
-
-        state.panY =
-            0;
-
-
-        canvas.width =
-            state.imageWidth;
-
-        canvas.height =
-            state.imageHeight;
-
-
-        const imageName =
-            $("#imageName");
-
-
-        if (imageName) {
-
-            imageName.textContent =
-                state.imageName;
-
-        }
-
-
-        const annotateButton =
-            $("#annotateBtn");
-
-
-        if (annotateButton) {
-
-            annotateButton.disabled =
-                false;
-
-        }
-
-
-        const empty =
-            $("#emptyState");
-
-
-        if (empty) {
-
-            empty.style.display =
-                "none";
-
-        }
-
-
-        canvas.style.display =
-            "block";
-
-
-        calculateFitZoom();
-
-        render();
-
-        renderObjects();
-
-        updateCanvasInfo();
-
-        updateQuality(
-            []
-        );
-
-
-        setProcessing(
-            "Image ready. Choose annotation type and click AUTO ANNOTATE."
-        );
-
-
-        showToast(
-            "Image loaded successfully."
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            error
-        );
-
-
-        showToast(
-            "Could not load image."
-        );
-
-    }
-
+    render();
 }
 
 
 /* =========================================================
-   IMAGE LOADER
-   ========================================================= */
+   RESET
+========================================================= */
 
-function loadImage(
-    source
-) {
+function resetApplication() {
+
+    if (state.imageURL) {
+
+        URL.revokeObjectURL(
+            state.imageURL
+        );
+
+    }
+
+    if (state.videoURL) {
+
+        URL.revokeObjectURL(
+            state.videoURL
+        );
+
+    }
+
+    state.image = null;
+
+    state.imageURL = null;
+
+    state.videoURL = null;
+
+    state.mediaType = null;
+
+    state.annotations = [];
+
+    state.frameAnnotations.clear();
+
+    state.selectedId = null;
+
+    state.currentFrame = 0;
+
+    state.currentTime = 0;
+
+    state.scale = 1;
+
+    state.offsetX = 0;
+
+    state.offsetY = 0;
+
+    updateCounts();
+
+    renderClassificationCard();
+
+    renderDetails();
+}
+
+
+/* =========================================================
+   LOAD IMAGE
+========================================================= */
+
+function loadImage(url) {
 
     return new Promise(
-        (
-            resolve,
-            reject
-        ) => {
+        (resolve, reject) => {
 
             const image =
                 new Image();
 
+            image.onload = () => {
 
-            image.onload =
-                () =>
-                    resolve(
-                        image
-                    );
+                state.image =
+                    image;
 
+                state.imageURL =
+                    url;
+
+                resolve();
+
+            };
 
             image.onerror =
-                () =>
-                    reject(
-                        new Error(
-                            "Image could not be decoded."
-                        )
-                    );
+                reject;
 
-
-            image.src =
-                source;
+            image.src = url;
 
         }
     );
+}
+
+
+/* =========================================================
+   LOAD VIDEO
+========================================================= */
+
+function loadVideo(url) {
+
+    return new Promise(
+        (resolve, reject) => {
+
+            state.videoURL =
+                url;
+
+            sourceVideo.src =
+                url;
+
+            sourceVideo.load();
+
+            sourceVideo.onloadedmetadata =
+                () => {
+
+                    state.videoReady =
+                        true;
+
+                    state.videoDuration =
+                        sourceVideo.duration;
+
+                    state.totalFrames =
+                        Math.max(
+                            1,
+                            Math.floor(
+                                state.videoDuration *
+                                state.fps
+                            )
+                        );
+
+                    document.getElementById(
+                        "videoControlsPanel"
+                    ).style.display =
+                        "block";
+
+                    document.getElementById(
+                        "frameSlider"
+                    ).max =
+                        state.totalFrames - 1;
+
+                    document.getElementById(
+                        "totalFrames"
+                    ).textContent =
+                        state.totalFrames;
+
+                    seekFrame(0);
+
+                    resolve();
+
+                };
+
+            sourceVideo.onerror =
+                reject;
+
+        }
+    );
+}
+
+
+/* =========================================================
+   VIDEO FRAME NAVIGATION
+========================================================= */
+
+document.getElementById(
+    "previousFrame"
+).addEventListener(
+    "click",
+    () => stepFrame(-1)
+);
+
+
+document.getElementById(
+    "nextFrame"
+).addEventListener(
+    "click",
+    () => stepFrame(1)
+);
+
+
+document.getElementById(
+    "playVideo"
+).addEventListener(
+    "click",
+    toggleVideo
+);
+
+
+document.getElementById(
+    "frameSlider"
+).addEventListener(
+    "input",
+    event => {
+
+        seekFrame(
+            Number(event.target.value)
+        );
+
+    }
+);
+
+
+function stepFrame(direction) {
+
+    if (
+        state.mediaType !== "video" ||
+        !state.videoReady
+    ) {
+        return;
+    }
+
+    stopVideo();
+
+    const next =
+        Math.max(
+            0,
+            Math.min(
+                state.totalFrames - 1,
+                state.currentFrame + direction
+            )
+        );
+
+    seekFrame(next);
+}
+
+
+function seekFrame(frame) {
+
+    if (
+        state.mediaType !== "video" ||
+        !state.videoReady
+    ) {
+        return;
+    }
+
+    frame =
+        Math.max(
+            0,
+            Math.min(
+                state.totalFrames - 1,
+                frame
+            )
+        );
+
+    state.currentFrame =
+        frame;
+
+    const time =
+        frame / state.fps;
+
+    state.currentTime =
+        Math.min(
+            time,
+            state.videoDuration
+        );
+
+    sourceVideo.currentTime =
+        state.currentTime;
+
+    sourceVideo.onseeked =
+        () => {
+
+            captureVideoFrame();
+
+        };
 
 }
+
+
+function captureVideoFrame() {
+
+    if (
+        !state.videoReady
+    ) {
+        return;
+    }
+
+    const frameCanvas =
+        document.createElement(
+            "canvas"
+        );
+
+    frameCanvas.width =
+        sourceVideo.videoWidth;
+
+    frameCanvas.height =
+        sourceVideo.videoHeight;
+
+    const frameContext =
+        frameCanvas.getContext("2d");
+
+    frameContext.drawImage(
+        sourceVideo,
+        0,
+        0,
+        frameCanvas.width,
+        frameCanvas.height
+    );
+
+    const image =
+        new Image();
+
+    image.onload =
+        () => {
+
+            state.image =
+                image;
+
+            state.currentTime =
+                sourceVideo.currentTime;
+
+            loadFrameAnnotations();
+
+            updateVideoUI();
+
+            fitView();
+
+            render();
+
+        };
+
+    image.src =
+        frameCanvas.toDataURL(
+            "image/jpeg",
+            0.92
+        );
+}
+
+
+function toggleVideo() {
+
+    if (
+        state.mediaType !== "video"
+    ) {
+        return;
+    }
+
+    if (
+        sourceVideo.paused
+    ) {
+
+        sourceVideo.play();
+
+    } else {
+
+        sourceVideo.pause();
+
+    }
+
+}
+
+
+sourceVideo.addEventListener(
+    "play",
+    () => {
+
+        state.isPlaying =
+            true;
+
+        document.getElementById(
+            "playVideo"
+        ).textContent =
+            "❚❚";
+
+    }
+);
+
+
+sourceVideo.addEventListener(
+    "pause",
+    () => {
+
+        state.isPlaying =
+            false;
+
+        document.getElementById(
+            "playVideo"
+        ).textContent =
+            "▶";
+
+    }
+);
+
+
+sourceVideo.addEventListener(
+    "timeupdate",
+    () => {
+
+        if (
+            state.mediaType !== "video"
+        ) {
+            return;
+        }
+
+        state.currentTime =
+            sourceVideo.currentTime;
+
+        state.currentFrame =
+            Math.round(
+                sourceVideo.currentTime *
+                state.fps
+            );
+
+        captureVideoFrame();
+
+    }
+);
+
+
+function stopVideo() {
+
+    if (
+        !sourceVideo.paused
+    ) {
+
+        sourceVideo.pause();
+
+    }
+
+}
+
+
+function updateVideoUI() {
+
+    document.getElementById(
+        "currentFrame"
+    ).textContent =
+        state.currentFrame;
+
+    document.getElementById(
+        "totalFrames"
+    ).textContent =
+        state.totalFrames;
+
+    document.getElementById(
+        "frameSlider"
+    ).value =
+        state.currentFrame;
+
+    document.getElementById(
+        "videoTime"
+    ).textContent =
+        formatTime(
+            state.currentTime
+        );
+
+}
+
+
+function formatTime(seconds) {
+
+    const min =
+        Math.floor(
+            seconds / 60
+        );
+
+    const sec =
+        Math.floor(
+            seconds % 60
+        );
+
+    const ms =
+        Math.floor(
+            (seconds % 1) * 1000
+        );
+
+    return (
+        String(min).padStart(2, "0")
+        + ":" +
+        String(sec).padStart(2, "0")
+        + "." +
+        String(ms).padStart(3, "0")
+    );
+
+}
+
+
+/* =========================================================
+   KEYBOARD FRAME CONTROL
+========================================================= */
+
+window.addEventListener(
+    "keydown",
+    event => {
+
+        const target =
+            event.target;
+
+        if (
+            target instanceof HTMLInputElement ||
+            target instanceof HTMLTextAreaElement ||
+            target instanceof HTMLSelectElement
+        ) {
+            return;
+        }
+
+        if (
+            state.mediaType === "video"
+        ) {
+
+            if (
+                event.key === "ArrowLeft"
+            ) {
+
+                event.preventDefault();
+
+                stepFrame(-1);
+
+                return;
+
+            }
+
+            if (
+                event.key === "ArrowRight"
+            ) {
+
+                event.preventDefault();
+
+                stepFrame(1);
+
+                return;
+
+            }
+
+            if (
+                event.code === "Space"
+            ) {
+
+                event.preventDefault();
+
+                toggleVideo();
+
+                return;
+
+            }
+
+        }
+
+        if (
+            event.key === "+" ||
+            event.key === "="
+        ) {
+
+            zoomAtCenter(1.15);
+
+        }
+
+        if (
+            event.key === "-" ||
+            event.key === "_"
+        ) {
+
+            zoomAtCenter(
+                1 / 1.15
+            );
+
+        }
+
+        if (
+            event.key === "Delete" ||
+            event.key === "Backspace"
+        ) {
+
+            deleteSelected();
+
+        }
+
+        if (
+            event.key.toLowerCase() === "escape"
+        ) {
+
+            cancelDrawing();
+
+        }
+
+    }
+);
 
 
 /* =========================================================
    ANNOTATION TYPE
-   ========================================================= */
+========================================================= */
 
-function setupAnnotationTypes() {
+document
+    .querySelectorAll(".annotation-type")
+    .forEach(button => {
 
-    $$(".annotation-type")
-        .forEach(
-            button => {
+        button.addEventListener(
+            "click",
+            () => {
 
-                button.addEventListener(
-                    "click",
-                    () => {
+                state.annotationType =
+                    button.dataset.tool;
 
-                        $$(".annotation-type")
-                            .forEach(
-                                b =>
-                                    b.classList.remove(
-                                        "active"
-                                    )
-                            );
+                document
+                    .querySelectorAll(
+                        ".annotation-type"
+                    )
+                    .forEach(
+                        b =>
+                            b.classList.remove(
+                                "active"
+                            )
+                    );
 
-
-                        button.classList.add(
-                            "active"
-                        );
-
-
-                        state.annotationType =
-                            button.dataset.type;
-
-
-                        if (
-                            state.annotationType ===
-                            "segmentation" &&
-                            !CONFIG.segmentationModel
-                        ) {
-
-                            showToast(
-                                "Segmentation editor is ready, but a true segmentation AI model still needs to be connected."
-                            );
-
-                        }
-
-                    }
+                button.classList.add(
+                    "active"
                 );
+
+                annotationMode.textContent =
+                    state.annotationType
+                        .toUpperCase();
+
+                /*
+                 * Selecting a different annotation
+                 * type automatically changes the
+                 * active drawing mode.
+                 */
+                setMode(
+                    state.mode === "select"
+                        ? "draw"
+                        : state.mode
+                );
+
+                cancelDrawing();
 
             }
         );
 
-}
+    });
 
 
 /* =========================================================
    TOOLS
-   ========================================================= */
+========================================================= */
 
-function setupTools() {
+document
+    .querySelectorAll(".tool-button")
+    .forEach(button => {
 
-    $$(".tool-button")
-        .forEach(
-            button => {
+        button.addEventListener(
+            "click",
+            () => {
 
-                button.addEventListener(
-                    "click",
-                    () => {
-
-                        $$(".tool-button")
-                            .forEach(
-                                b =>
-                                    b.classList.remove(
-                                        "active"
-                                    )
-                            );
-
-
-                        button.classList.add(
-                            "active"
-                        );
-
-
-                        state.activeTool =
-                            button.dataset.tool;
-
-
-                        updateCursor();
-
-                    }
+                setMode(
+                    button.dataset.mode
                 );
 
             }
         );
 
-}
+    });
 
 
-/* =========================================================
-   CONTROLS
-   ========================================================= */
+function setMode(mode) {
 
-function setupControls() {
+    state.mode =
+        mode;
 
-    const confidence =
-        $("#confidenceSlider");
-
-
-    if (confidence) {
-
-        confidence.addEventListener(
-            "input",
-            event => {
-
-                state.threshold =
-                    Number(
-                        event.target.value
-                    ) / 100;
-
-
-                const value =
-                    $("#thresholdValue");
-
-
-                if (value) {
-
-                    value.textContent =
-                        `${event.target.value}%`;
-
-                }
-
-            }
-        );
-
-    }
-
-
-    const rules =
-        $("#autoRules");
-
-
-    if (rules) {
-
-        rules.addEventListener(
-            "change",
-            event => {
-
-                state.applyRules =
-                    event.target.checked;
-
-            }
-        );
-
-    }
-
-
-    bind(
-        "#annotateBtn",
-        "click",
-        runAIAnnotation
-    );
-
-
-    bind(
-        "#downloadBtn",
-        "click",
-        downloadAnnotatedImage
-    );
-
-
-    bind(
-        "#deleteSelected",
-        "click",
-        deleteSelected
-    );
-
-
-    bind(
-        "#resetBtn",
-        "click",
-        resetAnnotations
-    );
-
-
-    bind(
-        "#undoBtn",
-        "click",
-        undo
-    );
-
-
-    bind(
-        "#redoBtn",
-        "click",
-        redo
-    );
-
-
-    bind(
-        "#zoomIn",
-        "click",
-        () =>
-            setZoom(
-                state.zoom *
-                1.20
-            )
-    );
-
-
-    bind(
-        "#zoomOut",
-        "click",
-        () =>
-            setZoom(
-                state.zoom /
-                1.20
-            )
-    );
-
-
-    bind(
-        "#fitCanvas",
-        "click",
-        calculateFitZoom
-    );
-
-
-    bind(
-        "#saveRules",
-        "click",
-        saveRules
-    );
-
-
-    bind(
-        "#exportTraining",
-        "click",
-        exportTraining
-    );
-
-
-    bind(
-        "#clearHistory",
-        "click",
-        clearHistory
-    );
-
-
-    bind(
-        "#closeModal",
-        "click",
-        () => {
-
-            const modal =
-                $("#annotationModal");
-
-
-            if (modal) {
-
-                modal.classList.add(
-                    "hidden"
-                );
-
-            }
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   SAFE BIND
-   ========================================================= */
-
-function bind(
-    selector,
-    event,
-    callback
-) {
-
-    const element =
-        $(selector);
-
-
-    if (element) {
-
-        element.addEventListener(
-            event,
-            callback
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   AI MODEL
-   ========================================================= */
-
-async function loadDetector() {
-
-    if (
-        state.detector
-    ) {
-
-        return state.detector;
-
-    }
-
-
-    setAIStatus(
-        "Downloading AI model..."
-    );
-
-
-    /*
-     * This is the official Transformers.js
-     * usage pattern for this model.
-     */
-
-    state.detector =
-        await pipeline(
-            "object-detection",
-            CONFIG.detectionModel,
-            {
-                dtype:
-                    "q8"
-            }
-        );
-
-
-    state.detectorReady =
-        true;
-
-
-    setAIStatus(
-        "Detection ready"
-    );
-
-
-    return state.detector;
-
-}
-
-
-/* =========================================================
-   AI ANNOTATION
-   ========================================================= */
-
-async function runAIAnnotation() {
-
-    if (!state.image) {
-
-        showToast(
-            "Upload an image first."
-        );
-
-        return;
-
-    }
-
-
-    if (
-        state.isProcessing
-    ) {
-
-        return;
-
-    }
-
-
-    state.isProcessing =
-        true;
-
-
-    const button =
-        $("#annotateBtn");
-
-
-    if (button) {
-
-        button.disabled =
-            true;
-
-    }
-
-
-    try {
-
-        saveUndoState();
-
-
-        let results =
-            [];
-
-
-        /* -------------------------------------------------
-           BOX
-        ------------------------------------------------- */
-
-        if (
-            state.annotationType ===
-            "bbox"
-        ) {
-
-            setProcessing(
-                "Loading object detection AI..."
-            );
-
-
-            const detector =
-                await loadDetector();
-
-
-            setProcessing(
-                "AI is analysing the image..."
-            );
-
-
-            results =
-                await detector(
-                    state.imageUrl,
-                    {
-                        threshold:
-                            state.threshold
-                    }
-                );
-
-
-            state.annotations =
-                convertDetections(
-                    results
-                );
-
-        }
-
-
-        /* -------------------------------------------------
-           POLYGON
-        ------------------------------------------------- */
-
-        else if (
-            state.annotationType ===
-            "polygon"
-        ) {
-
-            setProcessing(
-                "Detecting objects for editable polygons..."
-            );
-
-
-            const detector =
-                await loadDetector();
-
-
-            results =
-                await detector(
-                    state.imageUrl,
-                    {
-                        threshold:
-                            state.threshold
-                    }
-                );
-
-
-            const boxes =
-                convertDetections(
-                    results
-                );
-
-
-            state.annotations =
-                boxes.map(
-                    convertBoxToPolygon
-                );
-
-        }
-
-
-        /* -------------------------------------------------
-           SEGMENTATION
-        ------------------------------------------------- */
-
-        else if (
-            state.annotationType ===
-            "segmentation"
-        ) {
-
-            if (
-                !CONFIG.segmentationModel
-            ) {
-
-                /*
-                 * Do NOT create fake segmentation.
-                 */
-
-                throw new Error(
-                    "No true segmentation model is configured yet."
-                );
-
-            }
-
-
-            const segmenter =
-                await loadSegmenter();
-
-
-            results =
-                await segmenter(
-                    state.imageUrl
-                );
-
-
-            state.annotations =
-                await convertSegments(
-                    results
-                );
-
-        }
-
-
-        if (
-            state.applyRules
-        ) {
-
-            state.annotations =
-                applyAnnotationRules(
-                    state.annotations
-                );
-
-        }
-
-
-        rebuildClassificationSet();
-
-
-        state.selectedId =
-            state.annotations[0]?.id ||
-            null;
-
-
-        render();
-
-        renderObjects();
-
-        renderClassificationManager();
-
-        updateCanvasInfo();
-
-        updateQuality(
-            state.annotations
-        );
-
-
-        saveTrainingSnapshot();
-
-        saveHistory();
-
-        updateTrainingPage();
-
-        updateHistoryPage();
-
-
-        setProcessing(
-            `${state.annotations.length} annotations created. Review them before export.`
-        );
-
-
-        showModal(
-            `${state.annotations.length} annotation(s) created successfully.`
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "AI ANNOTATION ERROR:",
-            error
-        );
-
-
-        let message =
-            error?.message ||
-            "AI annotation failed.";
-
-
-        if (
-            message.includes(
-                "Unsupported input type"
-            )
-        ) {
-
-            message =
-                "The image input was rejected. The system now sends the uploaded image URL to Transformers.js.";
-
-        }
-
-
-        setProcessing(
-            "AI annotation failed."
-        );
-
-
-        showToast(
-            message
-        );
-
-    } finally {
-
-        state.isProcessing =
-            false;
-
-
-        if (button) {
-
-            button.disabled =
-                false;
-
-        }
-
-
-        setAIStatus(
-            "Ready"
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   DETECTION CONVERTER
-   ========================================================= */
-
-function convertDetections(
-    results
-) {
-
-    if (
-        !Array.isArray(results)
-    ) {
-
-        return [];
-
-    }
-
-
-    return results
-        .filter(
-            item =>
-                item &&
-                item.box
+    document
+        .querySelectorAll(
+            ".tool-button"
         )
-        .map(
-            item => {
-
-                const box =
-                    item.box;
-
-
-                const xmin =
-                    Number(
-                        box.xmin
-                    );
-
-
-                const ymin =
-                    Number(
-                        box.ymin
-                    );
-
-
-                const xmax =
-                    Number(
-                        box.xmax
-                    );
-
-
-                const ymax =
-                    Number(
-                        box.ymax
-                    );
-
-
-                return {
-
-                    id:
-                        createId(),
-
-                    type:
-                        "bbox",
-
-                    label:
-                        normalizeLabel(
-                            item.label
-                        ),
-
-                    confidence:
-                        Number(
-                            item.score ||
-                            0
-                        ),
-
-                    x:
-                        clamp(
-                            xmin,
-                            0,
-                            state.imageWidth
-                        ),
-
-                    y:
-                        clamp(
-                            ymin,
-                            0,
-                            state.imageHeight
-                        ),
-
-                    width:
-                        Math.max(
-                            2,
-                            xmax -
-                            xmin
-                        ),
-
-                    height:
-                        Math.max(
-                            2,
-                            ymax -
-                            ymin
-                        ),
-
-                    points:
-                        null,
-
-                    mask:
-                        null,
-
-                    source:
-                        "ai",
-
-                    review:
-                        false
-
-                };
-
-            }
-        );
-
-}
-
-
-/* =========================================================
-   BOX → POLYGON
-   ========================================================= */
-
-function convertBoxToPolygon(
-    annotation
-) {
-
-    return {
-
-        ...annotation,
-
-        type:
-            "polygon",
-
-        points: [
-
-            {
-                x:
-                    annotation.x,
-
-                y:
-                    annotation.y
-            },
-
-            {
-                x:
-                    annotation.x +
-                    annotation.width,
-
-                y:
-                    annotation.y
-            },
-
-            {
-                x:
-                    annotation.x +
-                    annotation.width,
-
-                y:
-                    annotation.y +
-                    annotation.height
-            },
-
-            {
-                x:
-                    annotation.x,
-
-                y:
-                    annotation.y +
-                    annotation.height
-            }
-
-        ]
-
-    };
-
-}
-
-
-/* =========================================================
-   SEGMENTATION
-   ========================================================= */
-
-async function loadSegmenter() {
-
-    if (
-        state.segmenter
-    ) {
-
-        return state.segmenter;
-
-    }
-
-
-    if (
-        !CONFIG.segmentationModel
-    ) {
-
-        throw new Error(
-            "Segmentation model is not configured."
-        );
-
-    }
-
-
-    state.segmenter =
-        await pipeline(
-            "image-segmentation",
-            CONFIG.segmentationModel,
-            {
-                dtype:
-                    "q8"
-            }
-        );
-
-
-    state.segmenterReady =
-        true;
-
-
-    return state.segmenter;
-
-}
-
-
-async function convertSegments(
-    results
-) {
-
-    if (
-        !Array.isArray(results)
-    ) {
-
-        return [];
-
-    }
-
-
-    const output =
-        [];
-
-
-    for (
-        const item
-        of results
-    ) {
-
-        output.push({
-
-            id:
-                createId(),
-
-            type:
-                "segmentation",
-
-            label:
-                normalizeLabel(
-                    item.label
-                ),
-
-            confidence:
-                Number(
-                    item.score ||
-                    1
-                ),
-
-            x:
-                0,
-
-            y:
-                0,
-
-            width:
-                state.imageWidth,
-
-            height:
-                state.imageHeight,
-
-            points:
-                null,
-
-            mask:
-                null,
-
-            source:
-                "ai",
-
-            review:
-                false
+        .forEach(button => {
+
+            button.classList.toggle(
+                "active",
+                button.dataset.mode === mode
+            );
 
         });
 
-    }
-
-
-    return output;
-
-}
-
-
-/* =========================================================
-   RULE ENGINE
-   ========================================================= */
-
-function applyAnnotationRules(
-    annotations
-) {
-
-    return annotations.map(
-        annotation => {
-
-            const updated =
-                {
-                    ...annotation
-                };
-
-
-            updated.review =
-                false;
-
-
-            if (
-                updated.confidence <
-                state.threshold
-            ) {
-
-                updated.review =
-                    true;
-
-            }
-
-
-            if (
-                updated.type ===
-                "bbox"
-            ) {
-
-                if (
-                    updated.width <
-                    3 ||
-                    updated.height <
-                    3
-                ) {
-
-                    updated.review =
-                        true;
-
-                }
-
-            }
-
-
-            return updated;
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   CANVAS
-   ========================================================= */
-
-function setupCanvas() {
-
-    canvas.addEventListener(
-        "mousedown",
-        canvasMouseDown
-    );
-
-
-    canvas.addEventListener(
-        "mousemove",
-        canvasMouseMove
-    );
-
-
-    canvas.addEventListener(
-        "mouseup",
-        canvasMouseUp
-    );
-
-
-    canvas.addEventListener(
-        "mouseleave",
-        canvasMouseUp
-    );
-
-
-    canvas.addEventListener(
-        "wheel",
-        canvasWheel,
-        {
-            passive:
-                false
-        }
-    );
-
-
-    canvas.addEventListener(
-        "dblclick",
-        canvasDoubleClick
-    );
-
-}
-
-
-/* =========================================================
-   MOUSE DOWN
-   ========================================================= */
-
-function canvasMouseDown(
-    event
-) {
-
-    if (
-        !state.image
-    ) {
-
-        return;
-
-    }
-
+    activeToolLabel.textContent =
+        mode[0].toUpperCase()
+        + mode.slice(1);
 
     /*
-     * Middle mouse = pan
+     * Important:
+     *
+     * Only ONE annotation interaction mode
+     * can be active at a time.
+     *
+     * This prevents another annotation type
+     * from remaining visually active.
      */
 
+    state.resizeHandle = null;
+
+    state.isDrawing = false;
+
+    state.isPanning = false;
+
     if (
-        event.button ===
-        1
+        mode !== "draw"
     ) {
 
-        startPan(
-            event
-        );
+        state.polygonPoints = [];
 
-        event.preventDefault();
+    }
+
+    updateCursor();
+
+    render();
+
+}
+
+
+function updateCursor() {
+
+    if (
+        state.mode === "pan"
+    ) {
+
+        workspace.style.cursor =
+            state.isPanning
+                ? "grabbing"
+                : "grab";
 
         return;
 
     }
 
-
-    /*
-     * Pan tool
-     */
-
     if (
-        state.activeTool ===
-        "pan"
+        state.mode === "erase"
     ) {
 
-        startPan(
-            event
-        );
+        workspace.style.cursor =
+            "not-allowed";
 
         return;
 
     }
 
-
-    const point =
-        screenToImage(
-            event.clientX,
-            event.clientY
-        );
-
-
-    /*
-     * DRAW
-     */
-
     if (
-        state.activeTool ===
-        "draw"
+        state.mode === "select"
     ) {
 
-        startDrawing(
-            point
-        );
+        workspace.style.cursor =
+            "default";
 
         return;
 
     }
 
-
-    /*
-     * ERASE
-     */
-
-    if (
-        state.activeTool ===
-        "erase"
-    ) {
-
-        const hit =
-            findAnnotationAt(
-                point.x,
-                point.y
-            );
-
-
-        if (hit) {
-
-            saveUndoState();
-
-            removeAnnotation(
-                hit.id
-            );
-
-        }
-
-
-        return;
-
-    }
-
-
-    /*
-     * SELECT
-     */
-
-    if (
-        state.activeTool ===
-        "select"
-    ) {
-
-        selectOrResize(
-            point
-        );
-
-    }
+    workspace.style.cursor =
+        "crosshair";
 
 }
 
 
 /* =========================================================
-   MOUSE MOVE
-   ========================================================= */
+   CANVAS SIZE
+========================================================= */
 
-function canvasMouseMove(
-    event
-) {
-
-    if (
-        state.panning
-    ) {
-
-        movePan(
-            event
-        );
-
-        return;
-
-    }
-
-
-    if (
-        !state.drag
-    ) {
-
-        return;
-
-    }
-
-
-    const point =
-        screenToImage(
-            event.clientX,
-            event.clientY
-        );
-
-
-    handleDrag(
-        point
-    );
-
-}
-
-
-/* =========================================================
-   MOUSE UP
-   ========================================================= */
-
-function canvasMouseUp() {
-
-    if (
-        state.panning
-    ) {
-
-        state.panning =
-            false;
-
-
-        canvas.style.cursor =
-            state.activeTool ===
-            "pan"
-                ? "grab"
-                : "default";
-
-    }
-
-
-    if (
-        state.drag
-    ) {
-
-        state.drag =
-            null;
-
-
-        render();
-
-        renderObjects();
-
-        updateCanvasInfo();
-
-        saveTrainingSnapshot();
-
-    }
-
-}
-
-
-/* =========================================================
-   PAN
-   ========================================================= */
-
-function startPan(
-    event
-) {
-
-    state.panning =
-        true;
-
-
-    state.panStartX =
-        event.clientX;
-
-
-    state.panStartY =
-        event.clientY;
-
-
-    state.panOriginX =
-        state.panX;
-
-
-    state.panOriginY =
-        state.panY;
-
-
-    canvas.style.cursor =
-        "grabbing";
-
-}
-
-
-function movePan(
-    event
-) {
-
-    const dx =
-        event.clientX -
-        state.panStartX;
-
-
-    const dy =
-        event.clientY -
-        state.panStartY;
-
-
-    state.panX =
-        state.panOriginX +
-        dx;
-
-
-    state.panY =
-        state.panOriginY +
-        dy;
-
-
-    applyCanvasTransform();
-
-}
-
-
-/* =========================================================
-   ZOOM
-   ========================================================= */
-
-function canvasWheel(
-    event
-) {
-
-    event.preventDefault();
-
-
-    if (
-        !state.image
-    ) {
-
-        return;
-
-    }
-
-
-    const oldZoom =
-        state.zoom;
-
-
-    const direction =
-        event.deltaY < 0
-            ? 1.15
-            : 1 / 1.15;
-
-
-    const newZoom =
-        clamp(
-            oldZoom *
-            direction,
-            state.minZoom,
-            state.maxZoom
-        );
-
-
-    if (
-        newZoom ===
-        oldZoom
-    ) {
-
-        return;
-
-    }
-
-
-    /*
-     * Zoom around mouse position.
-     */
+function resizeCanvas() {
 
     const rect =
-        canvas.getBoundingClientRect();
+        workspace.getBoundingClientRect();
 
+    const dpr =
+        window.devicePixelRatio || 1;
 
-    const mouseX =
-        event.clientX -
-        rect.left;
+    canvas.width =
+        rect.width * dpr;
 
+    canvas.height =
+        rect.height * dpr;
 
-    const mouseY =
-        event.clientY -
-        rect.top;
+    canvas.style.width =
+        rect.width + "px";
 
+    canvas.style.height =
+        rect.height + "px";
 
-    const imageBefore =
-        screenToImage(
-            event.clientX,
-            event.clientY
-        );
+    ctx.setTransform(
+        dpr,
+        0,
+        0,
+        dpr,
+        0,
+        0
+    );
 
-
-    state.zoom =
-        newZoom;
-
-
-    state.panX =
-        mouseX -
-        (
-            imageBefore.x *
-            state.zoom
-        );
-
-
-    state.panY =
-        mouseY -
-        (
-            imageBefore.y *
-            state.zoom
-        );
-
-
-    applyCanvasTransform();
+    render();
 
 }
 
 
 /* =========================================================
-   SET ZOOM
-   ========================================================= */
+   VIEW TRANSFORM
+========================================================= */
 
-function setZoom(
-    zoom
-) {
-
-    state.zoom =
-        clamp(
-            zoom,
-            state.minZoom,
-            state.maxZoom
-        );
-
-
-    applyCanvasTransform();
-
-}
-
-
-/* =========================================================
-   FIT
-   ========================================================= */
-
-function calculateFitZoom() {
-
-    if (
-        !state.image
-    ) {
-
-        return;
-
-    }
-
-
-    const container =
-        $("#canvasContainer");
-
-
-    if (!container) {
-
-        return;
-
-    }
-
-
-    const availableWidth =
-        Math.max(
-            100,
-            container.clientWidth -
-            30
-        );
-
-
-    const availableHeight =
-        Math.max(
-            100,
-            container.clientHeight -
-            30
-        );
-
-
-    const xZoom =
-        availableWidth /
-        state.imageWidth;
-
-
-    const yZoom =
-        availableHeight /
-        state.imageHeight;
-
-
-    state.zoom =
-        clamp(
-            Math.min(
-                xZoom,
-                yZoom
-            ),
-            state.minZoom,
-            1
-        );
-
-
-    state.panX =
-        0;
-
-
-    state.panY =
-        0;
-
-
-    applyCanvasTransform();
-
-}
-
-
-/* =========================================================
-   TRANSFORM
-   ========================================================= */
-
-function applyCanvasTransform() {
-
-    canvas.style.transform =
-        `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
-
-
-    const zoomValue =
-        $("#zoomValue");
-
-
-    if (zoomValue) {
-
-        zoomValue.textContent =
-            `${Math.round(
-                state.zoom *
-                100
-            )}%`;
-
-    }
-
-}
-
-
-/* =========================================================
-   SCREEN → IMAGE
-   ========================================================= */
-
-function screenToImage(
-    clientX,
-    clientY
-) {
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-
-    /*
-     * Because getBoundingClientRect()
-     * already includes transform, we need to
-     * use the transformed top-left.
-     */
-
-    const x =
-        (
-            clientX -
-            rect.left
-        ) /
-        state.zoom;
-
-
-    const y =
-        (
-            clientY -
-            rect.top
-        ) /
-        state.zoom;
-
+function imageToScreen(x, y) {
 
     return {
 
         x:
-            clamp(
-                x,
-                0,
-                state.imageWidth
-            ),
+            x * state.scale
+            + state.offsetX,
 
         y:
-            clamp(
-                y,
-                0,
-                state.imageHeight
-            )
+            y * state.scale
+            + state.offsetY
+
+    };
+
+}
+
+
+function screenToImage(x, y) {
+
+    return {
+
+        x:
+            (x - state.offsetX)
+            / state.scale,
+
+        y:
+            (y - state.offsetY)
+            / state.scale
 
     };
 
@@ -2227,886 +1116,1040 @@ function screenToImage(
 
 
 /* =========================================================
-   START DRAWING
-   ========================================================= */
+   FIT VIEW
+========================================================= */
 
-function startDrawing(
-    point
-) {
-
-    saveUndoState();
-
-
-    const label =
-        state.nextManualClass ||
-        "object";
-
+function fitView() {
 
     if (
-        state.annotationType ===
-        "bbox"
+        !state.image
     ) {
-
-        const annotation = {
-
-            id:
-                createId(),
-
-            type:
-                "bbox",
-
-            label,
-
-            confidence:
-                1,
-
-            x:
-                point.x,
-
-            y:
-                point.y,
-
-            width:
-                1,
-
-            height:
-                1,
-
-            points:
-                null,
-
-            mask:
-                null,
-
-            source:
-                "human",
-
-            review:
-                false
-
-        };
-
-
-        state.annotations.push(
-            annotation
-        );
-
-
-        state.selectedId =
-            annotation.id;
-
-
-        state.drag = {
-
-            mode:
-                "draw",
-
-            id:
-                annotation.id,
-
-            startX:
-                point.x,
-
-            startY:
-                point.y
-
-        };
-
-
         return;
-
     }
 
+    const rect =
+        workspace.getBoundingClientRect();
 
-    if (
-        state.annotationType ===
-        "polygon"
-    ) {
+    const imageWidth =
+        state.image.naturalWidth ||
+        state.image.width;
 
-        const annotation = {
+    const imageHeight =
+        state.image.naturalHeight ||
+        state.image.height;
 
-            id:
-                createId(),
+    const scaleX =
+        (rect.width - 40)
+        / imageWidth;
 
-            type:
-                "polygon",
+    const scaleY =
+        (rect.height - 40)
+        / imageHeight;
 
-            label,
-
-            confidence:
-                1,
-
-            x:
-                point.x,
-
-            y:
-                point.y,
-
-            width:
-                0,
-
-            height:
-                0,
-
-            points: [
-
-                {
-                    x:
-                        point.x,
-
-                    y:
-                        point.y
-                },
-
-                {
-                    x:
-                        point.x +
-                        80,
-
-                    y:
-                        point.y
-                },
-
-                {
-                    x:
-                        point.x +
-                        80,
-
-                    y:
-                        point.y +
-                        80
-                },
-
-                {
-                    x:
-                        point.x,
-
-                    y:
-                        point.y +
-                        80
-                }
-
-            ],
-
-            mask:
-                null,
-
-            source:
-                "human",
-
-            review:
-                false
-
-        };
-
-
-        state.annotations.push(
-            annotation
+    state.scale =
+        Math.min(
+            scaleX,
+            scaleY
         );
 
+    state.scale =
+        Math.max(
+            state.minScale,
+            Math.min(
+                state.maxScale,
+                state.scale
+            )
+        );
 
-        state.selectedId =
-            annotation.id;
+    state.offsetX =
+        (
+            rect.width -
+            imageWidth * state.scale
+        ) / 2;
+
+    state.offsetY =
+        (
+            rect.height -
+            imageHeight * state.scale
+        ) / 2;
+
+    updateZoomUI();
+
+    render();
+
+}
 
 
-        state.drag = {
-
-            mode:
-                "move",
-
-            id:
-                annotation.id,
-
-            offsetX:
-                0,
-
-            offsetY:
-                0
-
-        };
+document
+    .getElementById("fitView")
+    .addEventListener(
+        "click",
+        fitView
+    );
 
 
-        render();
+document
+    .getElementById("resetView")
+    .addEventListener(
+        "click",
+        () => {
 
-        renderObjects();
+            state.scale = 1;
 
-        return;
+            state.offsetX = 0;
 
+            state.offsetY = 0;
+
+            render();
+
+            updateZoomUI();
+
+        }
+    );
+
+
+/* =========================================================
+   ZOOM
+========================================================= */
+
+document
+    .getElementById("zoomIn")
+    .addEventListener(
+        "click",
+        () => zoomAtCenter(1.2)
+    );
+
+
+document
+    .getElementById("zoomOut")
+    .addEventListener(
+        "click",
+        () => zoomAtCenter(1 / 1.2)
+    );
+
+
+workspace.addEventListener(
+    "wheel",
+    event => {
+
+        event.preventDefault();
+
+        const rect =
+            workspace.getBoundingClientRect();
+
+        const mouseX =
+            event.clientX - rect.left;
+
+        const mouseY =
+            event.clientY - rect.top;
+
+        const factor =
+            event.deltaY < 0
+                ? 1.12
+                : 1 / 1.12;
+
+        zoomAt(
+            factor,
+            mouseX,
+            mouseY
+        );
+
+    },
+    {
+        passive: false
     }
+);
 
 
-    /*
-     * Segmentation is normally edited using
-     * a proper mask editor.
-     */
+function zoomAtCenter(factor) {
 
-    showToast(
-        "Use a segmentation model to create masks, then edit/delete them."
+    const rect =
+        workspace.getBoundingClientRect();
+
+    zoomAt(
+        factor,
+        rect.width / 2,
+        rect.height / 2
     );
 
 }
 
 
-/* =========================================================
-   SELECT / RESIZE
-   ========================================================= */
-
-function selectOrResize(
-    point
+function zoomAt(
+    factor,
+    screenX,
+    screenY
 ) {
 
-    const selected =
-        state.selectedId
-            ? state.annotations.find(
-                a =>
-                    a.id ===
-                    state.selectedId
+    const before =
+        screenToImage(
+            screenX,
+            screenY
+        );
+
+    const newScale =
+        Math.max(
+            state.minScale,
+            Math.min(
+                state.maxScale,
+                state.scale * factor
             )
-            : null;
-
-
-    /*
-     * First check resize handles.
-     */
-
-    if (
-        selected &&
-        selected.type ===
-        "bbox"
-    ) {
-
-        const handle =
-            getResizeHandle(
-                selected,
-                point
-            );
-
-
-        if (handle) {
-
-            saveUndoState();
-
-
-            state.drag = {
-
-                mode:
-                    "resize",
-
-                id:
-                    selected.id,
-
-                handle,
-
-                original:
-                    clone(
-                        selected
-                    )
-
-            };
-
-
-            return;
-
-        }
-
-    }
-
-
-    /*
-     * Polygon vertex.
-     */
-
-    if (
-        selected &&
-        selected.type ===
-        "polygon"
-    ) {
-
-        const vertex =
-            getPolygonVertex(
-                selected,
-                point
-            );
-
-
-        if (
-            vertex !==
-            -1
-        ) {
-
-            saveUndoState();
-
-
-            state.drag = {
-
-                mode:
-                    "vertex",
-
-                id:
-                    selected.id,
-
-                vertex
-
-            };
-
-
-            return;
-
-        }
-
-    }
-
-
-    /*
-     * Object body.
-     */
-
-    const hit =
-        findAnnotationAt(
-            point.x,
-            point.y
         );
 
+    state.scale =
+        newScale;
 
-    if (!hit) {
+    state.offsetX =
+        screenX -
+        before.x * state.scale;
 
-        state.selectedId =
-            null;
+    state.offsetY =
+        screenY -
+        before.y * state.scale;
 
-
-        render();
-
-        renderObjects();
-
-        return;
-
-    }
-
-
-    state.selectedId =
-        hit.id;
-
-
-    saveUndoState();
-
-
-    if (
-        hit.type ===
-        "bbox"
-    ) {
-
-        state.drag = {
-
-            mode:
-                "move",
-
-            id:
-                hit.id,
-
-            offsetX:
-                point.x -
-                hit.x,
-
-            offsetY:
-                point.y -
-                hit.y
-
-        };
-
-    }
-
-
-    else if (
-        hit.type ===
-        "polygon"
-    ) {
-
-        state.drag = {
-
-            mode:
-                "polygonMove",
-
-            id:
-                hit.id,
-
-            startX:
-                point.x,
-
-            startY:
-                point.y,
-
-            originalPoints:
-                clone(
-                    hit.points
-                )
-
-        };
-
-    }
-
-
-    render();
-
-    renderObjects();
-
-}
-
-
-/* =========================================================
-   HANDLE DRAG
-   ========================================================= */
-
-function handleDrag(
-    point
-) {
-
-    const drag =
-        state.drag;
-
-
-    if (!drag) {
-        return;
-    }
-
-
-    const annotation =
-        state.annotations.find(
-            a =>
-                a.id ===
-                drag.id
-        );
-
-
-    if (!annotation) {
-        return;
-    }
-
-
-    /*
-     * CREATE BOX
-     */
-
-    if (
-        drag.mode ===
-        "draw"
-    ) {
-
-        annotation.x =
-            Math.min(
-                drag.startX,
-                point.x
-            );
-
-
-        annotation.y =
-            Math.min(
-                drag.startY,
-                point.y
-            );
-
-
-        annotation.width =
-            Math.max(
-                2,
-                Math.abs(
-                    point.x -
-                    drag.startX
-                )
-            );
-
-
-        annotation.height =
-            Math.max(
-                2,
-                Math.abs(
-                    point.y -
-                    drag.startY
-                )
-            );
-
-    }
-
-
-    /*
-     * MOVE BOX
-     */
-
-    else if (
-        drag.mode ===
-        "move"
-    ) {
-
-        annotation.x =
-            clamp(
-                point.x -
-                drag.offsetX,
-                0,
-                state.imageWidth -
-                annotation.width
-            );
-
-
-        annotation.y =
-            clamp(
-                point.y -
-                drag.offsetY,
-                0,
-                state.imageHeight -
-                annotation.height
-            );
-
-
-        annotation.source =
-            "human";
-
-    }
-
-
-    /*
-     * RESIZE BOX
-     */
-
-    else if (
-        drag.mode ===
-        "resize"
-    ) {
-
-        resizeBox(
-            annotation,
-            drag,
-            point
-        );
-
-
-        annotation.source =
-            "human";
-
-    }
-
-
-    /*
-     * MOVE POLYGON
-     */
-
-    else if (
-        drag.mode ===
-        "polygonMove"
-    ) {
-
-        const dx =
-            point.x -
-            drag.startX;
-
-
-        const dy =
-            point.y -
-            drag.startY;
-
-
-        annotation.points =
-            drag.originalPoints.map(
-                p => ({
-
-                    x:
-                        clamp(
-                            p.x +
-                            dx,
-                            0,
-                            state.imageWidth
-                        ),
-
-                    y:
-                        clamp(
-                            p.y +
-                            dy,
-                            0,
-                            state.imageHeight
-                        )
-
-                })
-            );
-
-
-        annotation.source =
-            "human";
-
-    }
-
-
-    /*
-     * MOVE POLYGON VERTEX
-     */
-
-    else if (
-        drag.mode ===
-        "vertex"
-    ) {
-
-        if (
-            annotation.points &&
-            annotation.points[
-                drag.vertex
-            ]
-        ) {
-
-            annotation.points[
-                drag.vertex
-            ] = {
-
-                x:
-                    point.x,
-
-                y:
-                    point.y
-
-            };
-
-
-            annotation.source =
-                "human";
-
-        }
-
-    }
-
+    updateZoomUI();
 
     render();
 
 }
 
 
-/* =========================================================
-   RESIZE BOX
-   ========================================================= */
+function updateZoomUI() {
 
-function resizeBox(
-    box,
-    drag,
-    point
-) {
-
-    const minSize =
-        4;
-
-
-    const original =
-        drag.original;
-
-
-    let left =
-        original.x;
-
-
-    let top =
-        original.y;
-
-
-    let right =
-        original.x +
-        original.width;
-
-
-    let bottom =
-        original.y +
-        original.height;
-
-
-    const handle =
-        drag.handle;
-
-
-    if (
-        handle.includes(
-            "w"
-        )
-    ) {
-
-        left =
-            Math.min(
-                point.x,
-                right -
-                minSize
-            );
-
-    }
-
-
-    if (
-        handle.includes(
-            "e"
-        )
-    ) {
-
-        right =
-            Math.max(
-                point.x,
-                left +
-                minSize
-            );
-
-    }
-
-
-    if (
-        handle.includes(
-            "n"
-        )
-    ) {
-
-        top =
-            Math.min(
-                point.y,
-                bottom -
-                minSize
-            );
-
-    }
-
-
-    if (
-        handle.includes(
-            "s"
-        )
-    ) {
-
-        bottom =
-            Math.max(
-                point.y,
-                top +
-                minSize
-            );
-
-    }
-
-
-    box.x =
-        clamp(
-            left,
-            0,
-            state.imageWidth -
-            minSize
+    const percentage =
+        Math.round(
+            state.scale * 100
         );
 
+    zoomValue.textContent =
+        percentage + "%";
 
-    box.y =
-        clamp(
-            top,
-            0,
-            state.imageHeight -
-            minSize
-        );
-
-
-    box.width =
-        clamp(
-            right -
-            box.x,
-            minSize,
-            state.imageWidth -
-            box.x
-        );
-
-
-    box.height =
-        clamp(
-            bottom -
-            box.y,
-            minSize,
-            state.imageHeight -
-            box.y
-        );
+    footerZoom.textContent =
+        percentage + "%";
 
 }
 
 
 /* =========================================================
-   RESIZE HANDLES
-   ========================================================= */
+   CANVAS MOUSE / POINTER EVENTS
+========================================================= */
 
-function getResizeHandle(
-    box,
-    point
-) {
+canvas.addEventListener(
+    "pointerdown",
+    pointerDown
+);
 
-    const size =
-        12 /
-        state.zoom;
+canvas.addEventListener(
+    "pointermove",
+    pointerMove
+);
+
+canvas.addEventListener(
+    "pointerup",
+    pointerUp
+);
+
+canvas.addEventListener(
+    "pointercancel",
+    pointerUp
+);
+
+canvas.addEventListener(
+    "dblclick",
+    handleDoubleClick
+);
 
 
-    const handles = {
+function getPointer(event) {
 
-        nw: [
-            box.x,
-            box.y
-        ],
+    const rect =
+        canvas.getBoundingClientRect();
 
-        n: [
-            box.x +
-            box.width / 2,
-            box.y
-        ],
+    return {
 
-        ne: [
-            box.x +
-            box.width,
-            box.y
-        ],
+        x:
+            event.clientX - rect.left,
 
-        e: [
-            box.x +
-            box.width,
-            box.y +
-            box.height / 2
-        ],
-
-        se: [
-            box.x +
-            box.width,
-            box.y +
-            box.height
-        ],
-
-        s: [
-            box.x +
-            box.width / 2,
-            box.y +
-            box.height
-        ],
-
-        sw: [
-            box.x,
-            box.y +
-            box.height
-        ],
-
-        w: [
-            box.x,
-            box.y +
-            box.height / 2
-        ]
+        y:
+            event.clientY - rect.top
 
     };
 
+}
+
+
+/* =========================================================
+   POINTER DOWN
+========================================================= */
+
+function pointerDown(event) {
+
+    const p =
+        getPointer(event);
+
+    canvas.setPointerCapture(
+        event.pointerId
+    );
+
+    state.isPointerDown =
+        true;
+
+    state.dragStart =
+        p;
+
+    /* -----------------------------------------------------
+       PAN
+    ----------------------------------------------------- */
+
+    if (
+        state.mode === "pan" ||
+        event.button === 1 ||
+        event.shiftKey
+    ) {
+
+        state.isPanning =
+            true;
+
+        state.panStart = {
+
+            x:
+                p.x,
+
+            y:
+                p.y,
+
+            offsetX:
+                state.offsetX,
+
+            offsetY:
+                state.offsetY
+
+        };
+
+        updateCursor();
+
+        return;
+
+    }
+
+
+    /* -----------------------------------------------------
+       SELECT
+    ----------------------------------------------------- */
+
+    if (
+        state.mode === "select"
+    ) {
+
+        const hit =
+            hitTest(
+                p.x,
+                p.y
+            );
+
+        if (
+            hit
+        ) {
+
+            state.selectedId =
+                hit.id;
+
+            /*
+             * Determine whether user is
+             * grabbing a resize handle.
+             */
+            if (
+                hit.type === "handle"
+            ) {
+
+                state.resizeHandle =
+                    hit.handle;
+
+            } else {
+
+                state.resizeHandle =
+                    null;
+
+            }
+
+            updateSelectedUI();
+
+        } else {
+
+            state.selectedId =
+                null;
+
+            updateSelectedUI();
+
+        }
+
+        state.dragStart =
+            p;
+
+        render();
+
+        return;
+
+    }
+
+
+    /* -----------------------------------------------------
+       ERASE
+    ----------------------------------------------------- */
+
+    if (
+        state.mode === "erase"
+    ) {
+
+        const hit =
+            hitTest(
+                p.x,
+                p.y
+            );
+
+        if (
+            hit
+        ) {
+
+            state.selectedId =
+                hit.id;
+
+            deleteSelected();
+
+        }
+
+        return;
+
+    }
+
+
+    /* -----------------------------------------------------
+       DRAW
+    ----------------------------------------------------- */
+
+    if (
+        state.mode === "draw"
+    ) {
+
+        beginDrawing(
+            p.x,
+            p.y
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   POINTER MOVE
+========================================================= */
+
+function pointerMove(event) {
+
+    const p =
+        getPointer(event);
+
+    /* -----------------------------------------------------
+       PAN
+    ----------------------------------------------------- */
+
+    if (
+        state.isPanning
+    ) {
+
+        const dx =
+            p.x -
+            state.panStart.x;
+
+        const dy =
+            p.y -
+            state.panStart.y;
+
+        state.offsetX =
+            state.panStart.offsetX + dx;
+
+        state.offsetY =
+            state.panStart.offsetY + dy;
+
+        render();
+
+        return;
+
+    }
+
+
+    /* -----------------------------------------------------
+       SELECT / RESIZE
+    ----------------------------------------------------- */
+
+    if (
+        state.mode === "select" &&
+        state.isPointerDown &&
+        state.selectedId
+    ) {
+
+        const annotation =
+            getSelectedAnnotation();
+
+        if (!annotation) {
+            return;
+        }
+
+        const current =
+            screenToImage(
+                p.x,
+                p.y
+            );
+
+        const start =
+            screenToImage(
+                state.dragStart.x,
+                state.dragStart.y
+            );
+
+        const dx =
+            current.x - start.x;
+
+        const dy =
+            current.y - start.y;
+
+        if (
+            state.resizeHandle
+        ) {
+
+            resizeAnnotation(
+                annotation,
+                state.resizeHandle,
+                current
+            );
+
+        } else {
+
+            moveAnnotation(
+                annotation,
+                dx,
+                dy
+            );
+
+        }
+
+        state.dragStart =
+            p;
+
+        saveCurrentFrame();
+
+        render();
+
+        renderDetails();
+
+        return;
+
+    }
+
+
+    /* -----------------------------------------------------
+       DRAW
+    ----------------------------------------------------- */
+
+    if (
+        state.mode === "draw" &&
+        state.isDrawing
+    ) {
+
+        const current =
+            screenToImage(
+                p.x,
+                p.y
+            );
+
+        state.currentDrawPoint =
+            current;
+
+        render();
+
+    }
+
+
+    /* Hover */
+
+    const hit =
+        hitTest(
+            p.x,
+            p.y
+        );
+
+    state.hoveredId =
+        hit?.id || null;
+
+}
+
+
+/* =========================================================
+   POINTER UP
+========================================================= */
+
+function pointerUp(event) {
+
+    if (
+        state.mode === "draw" &&
+        state.isDrawing
+    ) {
+
+        finishDrawing();
+
+    }
+
+    state.isPointerDown =
+        false;
+
+    state.isPanning =
+        false;
+
+    state.resizeHandle =
+        null;
+
+    updateCursor();
+
+}
+
+
+/* =========================================================
+   DRAWING
+========================================================= */
+
+function beginDrawing(x, y) {
+
+    const point =
+        screenToImage(
+            x,
+            y
+        );
+
+    state.isDrawing =
+        true;
+
+    state.drawStart =
+        point;
+
+    state.currentDrawPoint =
+        point;
+
+    if (
+        state.annotationType === "polygon" ||
+        state.annotationType === "segmentation"
+    ) {
+
+        state.polygonPoints = [
+            point
+        ];
+
+    }
+
+}
+
+
+function finishDrawing() {
+
+    if (
+        !state.isDrawing
+    ) {
+        return;
+    }
+
+    const start =
+        state.drawStart;
+
+    const end =
+        state.currentDrawPoint;
+
+    if (
+        state.annotationType === "box"
+    ) {
+
+        const x =
+            Math.min(
+                start.x,
+                end.x
+            );
+
+        const y =
+            Math.min(
+                start.y,
+                end.y
+            );
+
+        const width =
+            Math.abs(
+                end.x -
+                start.x
+            );
+
+        const height =
+            Math.abs(
+                end.y -
+                start.y
+            );
+
+        if (
+            width >= 5 &&
+            height >= 5
+        ) {
+
+            createAnnotation({
+
+                type: "box",
+
+                x,
+                y,
+                width,
+                height,
+
+                label: "unknown",
+
+                score: null,
+
+                occlusion: 0,
+
+                truncation: "NONE"
+
+            });
+
+        }
+
+    } else {
+
+        /*
+         * For polygon/segmentation, clicking points
+         * and double-clicking finishes the shape.
+         */
+
+        if (
+            state.polygonPoints.length >= 3
+        ) {
+
+            createAnnotation({
+
+                type:
+                    state.annotationType,
+
+                points:
+                    [...state.polygonPoints],
+
+                label:
+                    "unknown",
+
+                score:
+                    null,
+
+                occlusion:
+                    0,
+
+                truncation:
+                    "NONE"
+
+            });
+
+        }
+
+    }
+
+    state.isDrawing =
+        false;
+
+    state.polygonPoints =
+        [];
+
+    state.currentDrawPoint =
+        null;
+
+    saveCurrentFrame();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+/* =========================================================
+   DOUBLE CLICK POLYGON
+========================================================= */
+
+function handleDoubleClick(event) {
+
+    if (
+        state.mode !== "draw"
+    ) {
+        return;
+    }
+
+    if (
+        state.annotationType !== "polygon" &&
+        state.annotationType !== "segmentation"
+    ) {
+        return;
+    }
+
+    if (
+        state.polygonPoints.length >= 3
+    ) {
+
+        finishDrawing();
+
+    }
+
+}
+
+
+/* =========================================================
+   CREATE ANNOTATION
+========================================================= */
+
+function createAnnotation(data) {
+
+    const annotation = {
+
+        id:
+            "ann_" +
+            state.nextAnnotationId++,
+
+        ...data,
+
+        export:
+            true,
+
+        corrected:
+            true,
+
+        createdAt:
+            new Date().toISOString()
+
+    };
+
+    state.annotations.push(
+        annotation
+    );
+
+    if (
+        annotation.label &&
+        annotation.label !== "unknown"
+    ) {
+
+        state.classes.add(
+            annotation.label
+        );
+
+    }
+
+    state.selectedId =
+        annotation.id;
+
+    updateCounts();
+
+    updateSelectedUI();
+
+}
+
+
+/* =========================================================
+   HIT TEST
+========================================================= */
+
+function hitTest(
+    screenX,
+    screenY
+) {
+
+    const point =
+        screenToImage(
+            screenX,
+            screenY
+        );
+
+    /*
+     * Reverse order means the top-most
+     * annotation gets selected first.
+     */
 
     for (
-        const [
-            name,
-            position
-        ]
-        of Object.entries(
-            handles
-        )
+        let i =
+            state.annotations.length - 1;
+        i >= 0;
+        i--
+    ) {
+
+        const a =
+            state.annotations[i];
+
+        /* Box */
+
+        if (
+            a.type === "box"
+        ) {
+
+            if (
+                point.x >= a.x &&
+                point.x <=
+                    a.x + a.width &&
+                point.y >= a.y &&
+                point.y <=
+                    a.y + a.height
+            ) {
+
+                const handle =
+                    findBoxHandle(
+                        a,
+                        point
+                    );
+
+                if (
+                    handle
+                ) {
+
+                    return {
+
+                        id: a.id,
+
+                        type: "handle",
+
+                        handle
+
+                    };
+
+                }
+
+                return {
+
+                    id: a.id,
+
+                    type: "annotation"
+
+                };
+
+            }
+
+        }
+
+        /* Polygon */
+
+        if (
+            a.type === "polygon" ||
+            a.type === "segmentation"
+        ) {
+
+            if (
+                pointInPolygon(
+                    point,
+                    a.points
+                )
+            ) {
+
+                return {
+
+                    id: a.id,
+
+                    type: "annotation"
+
+                };
+
+            }
+
+        }
+
+    }
+
+    return null;
+
+}
+
+
+/* =========================================================
+   BOX HANDLES
+========================================================= */
+
+function findBoxHandle(
+    a,
+    p
+) {
+
+    const handles = {
+
+        nw: {
+            x: a.x,
+            y: a.y
+        },
+
+        n: {
+            x: a.x + a.width / 2,
+            y: a.y
+        },
+
+        ne: {
+            x: a.x + a.width,
+            y: a.y
+        },
+
+        e: {
+            x: a.x + a.width,
+            y:
+                a.y +
+                a.height / 2
+        },
+
+        se: {
+            x:
+                a.x +
+                a.width,
+
+            y:
+                a.y +
+                a.height
+        },
+
+        s: {
+            x:
+                a.x +
+                a.width / 2,
+
+            y:
+                a.y +
+                a.height
+        },
+
+        sw: {
+            x: a.x,
+
+            y:
+                a.y +
+                a.height
+        },
+
+        w: {
+            x: a.x,
+
+            y:
+                a.y +
+                a.height / 2
+        }
+
+    };
+
+    const tolerance =
+        10 / state.scale;
+
+    for (
+        const [name, h]
+        of Object.entries(handles)
     ) {
 
         if (
             Math.abs(
-                point.x -
-                position[0]
-            ) <= size &&
+                p.x - h.x
+            ) <= tolerance &&
             Math.abs(
-                point.y -
-                position[1]
-            ) <= size
+                p.y - h.y
+            ) <= tolerance
         ) {
 
             return name;
@@ -3115,289 +2158,378 @@ function getResizeHandle(
 
     }
 
-
     return null;
 
 }
 
 
 /* =========================================================
-   POLYGON VERTEX
-   ========================================================= */
+   MOVE ANNOTATION
+========================================================= */
 
-function getPolygonVertex(
-    polygon,
-    point
+function moveAnnotation(
+    a,
+    dx,
+    dy
 ) {
 
     if (
-        !polygon.points
+        a.type === "box"
     ) {
 
-        return -1;
+        a.x += dx;
 
-    }
-
-
-    const tolerance =
-        14 /
-        state.zoom;
-
-
-    for (
-        let i = 0;
-
-        i <
-        polygon.points.length;
-
-        i++
-    ) {
-
-        const p =
-            polygon.points[i];
-
-
-        const distance =
-            Math.hypot(
-                p.x -
-                point.x,
-                p.y -
-                point.y
-            );
-
-
-        if (
-            distance <=
-            tolerance
-        ) {
-
-            return i;
-
-        }
-
-    }
-
-
-    return -1;
-
-}
-
-
-/* =========================================================
-   DOUBLE CLICK
-   ========================================================= */
-
-function canvasDoubleClick(
-    event
-) {
-
-    const point =
-        screenToImage(
-            event.clientX,
-            event.clientY
-        );
-
-
-    const hit =
-        findAnnotationAt(
-            point.x,
-            point.y
-        );
-
-
-    if (!hit) {
+        a.y += dy;
 
         return;
 
     }
 
-
-    editClassification(
-        hit
-    );
-
-}
-
-
-/* =========================================================
-   FIND ANNOTATION
-   ========================================================= */
-
-function findAnnotationAt(
-    x,
-    y
-) {
-
-    for (
-        let i =
-            state.annotations.length -
-            1;
-
-        i >= 0;
-
-        i--
+    if (
+        a.points
     ) {
 
-        const annotation =
-            state.annotations[i];
+        a.points.forEach(
+            p => {
 
+                p.x += dx;
 
-        if (
-            annotation.type ===
-            "bbox"
-        ) {
-
-            if (
-                x >=
-                    annotation.x &&
-                x <=
-                    annotation.x +
-                    annotation.width &&
-                y >=
-                    annotation.y &&
-                y <=
-                    annotation.y +
-                    annotation.height
-            ) {
-
-                return annotation;
+                p.y += dy;
 
             }
-
-        }
-
-
-        if (
-            annotation.type ===
-            "polygon"
-        ) {
-
-            if (
-                pointInsidePolygon(
-                    x,
-                    y,
-                    annotation.points
-                )
-            ) {
-
-                return annotation;
-
-            }
-
-        }
-
-
-        if (
-            annotation.type ===
-            "segmentation"
-        ) {
-
-            /*
-             * Until actual mask hit testing is
-             * connected, use its bounding region.
-             */
-
-            if (
-                x >=
-                    annotation.x &&
-                x <=
-                    annotation.x +
-                    annotation.width &&
-                y >=
-                    annotation.y &&
-                y <=
-                    annotation.y +
-                    annotation.height
-            ) {
-
-                return annotation;
-
-            }
-
-        }
+        );
 
     }
 
-
-    return null;
-
 }
 
 
 /* =========================================================
-   POLYGON TEST
-   ========================================================= */
+   RESIZE BOX
+========================================================= */
 
-function pointInsidePolygon(
-    x,
-    y,
-    points
+function resizeAnnotation(
+    a,
+    handle,
+    current
 ) {
 
     if (
-        !points ||
-        points.length <
-            3
+        a.type !== "box"
     ) {
+        return;
+    }
 
-        return false;
+    let left =
+        a.x;
+
+    let top =
+        a.y;
+
+    let right =
+        a.x + a.width;
+
+    let bottom =
+        a.y + a.height;
+
+    switch (handle) {
+
+        case "nw":
+
+            left =
+                current.x;
+
+            top =
+                current.y;
+
+            break;
+
+        case "n":
+
+            top =
+                current.y;
+
+            break;
+
+        case "ne":
+
+            right =
+                current.x;
+
+            top =
+                current.y;
+
+            break;
+
+        case "e":
+
+            right =
+                current.x;
+
+            break;
+
+        case "se":
+
+            right =
+                current.x;
+
+            bottom =
+                current.y;
+
+            break;
+
+        case "s":
+
+            bottom =
+                current.y;
+
+            break;
+
+        case "sw":
+
+            left =
+                current.x;
+
+            bottom =
+                current.y;
+
+            break;
+
+        case "w":
+
+            left =
+                current.x;
+
+            break;
 
     }
 
+    if (
+        right - left < 3
+    ) {
 
-    let inside =
-        false;
+        return;
 
+    }
+
+    if (
+        bottom - top < 3
+    ) {
+
+        return;
+
+    }
+
+    a.x =
+        left;
+
+    a.y =
+        top;
+
+    a.width =
+        right - left;
+
+    a.height =
+        bottom - top;
+
+    a.corrected =
+        true;
+
+}
+
+
+/* =========================================================
+   POLYGON POINT EDITING
+========================================================= */
+
+canvas.addEventListener(
+    "pointerdown",
+    event => {
+
+        if (
+            state.mode !== "select"
+        ) {
+            return;
+        }
+
+        const p =
+            getPointer(event);
+
+        const imagePoint =
+            screenToImage(
+                p.x,
+                p.y
+            );
+
+        const selected =
+            getSelectedAnnotation();
+
+        if (
+            !selected ||
+            !selected.points
+        ) {
+            return;
+        }
+
+        let nearest =
+            -1;
+
+        let distance =
+            Infinity;
+
+        selected.points.forEach(
+            (point, index) => {
+
+                const d =
+                    Math.hypot(
+                        point.x -
+                            imagePoint.x,
+
+                        point.y -
+                            imagePoint.y
+                    );
+
+                if (
+                    d <
+                    15 / state.scale &&
+                    d < distance
+                ) {
+
+                    nearest =
+                        index;
+
+                    distance =
+                        d;
+
+                }
+
+            }
+        );
+
+        if (
+            nearest >= 0
+        ) {
+
+            state.vertexIndex =
+                nearest;
+
+        }
+
+    },
+    true
+);
+
+
+canvas.addEventListener(
+    "pointermove",
+    event => {
+
+        if (
+            state.mode !== "select" ||
+            state.vertexIndex === undefined ||
+            state.vertexIndex === null
+        ) {
+            return;
+        }
+
+        if (
+            !state.isPointerDown
+        ) {
+            return;
+        }
+
+        const selected =
+            getSelectedAnnotation();
+
+        if (
+            !selected ||
+            !selected.points
+        ) {
+            return;
+        }
+
+        const p =
+            getPointer(event);
+
+        const imagePoint =
+            screenToImage(
+                p.x,
+                p.y
+            );
+
+        selected.points[
+            state.vertexIndex
+        ] = imagePoint;
+
+        selected.corrected =
+            true;
+
+        saveCurrentFrame();
+
+        render();
+
+    },
+    true
+);
+
+
+canvas.addEventListener(
+    "pointerup",
+    () => {
+
+        state.vertexIndex =
+            null;
+
+    },
+    true
+);
+
+
+/* =========================================================
+   POINT IN POLYGON
+========================================================= */
+
+function pointInPolygon(
+    point,
+    polygon
+) {
+
+    let inside = false;
 
     for (
         let i = 0,
-        j =
-            points.length - 1;
-
-        i <
-        points.length;
-
+            j = polygon.length - 1;
+        i < polygon.length;
         j = i++
     ) {
 
         const xi =
-            points[i].x;
-
+            polygon[i].x;
 
         const yi =
-            points[i].y;
-
+            polygon[i].y;
 
         const xj =
-            points[j].x;
-
+            polygon[j].x;
 
         const yj =
-            points[j].y;
-
+            polygon[j].y;
 
         const intersect =
             (
-                yi > y
+                yi > point.y
             ) !==
             (
-                yj > y
-            ) &&
-            x <
+                yj > point.y
+            )
+            &&
+            point.x <
                 (
-                    xj -
-                    xi
-                ) *
-                (
-                    y -
-                    yi
-                ) /
-                (
-                    yj -
-                    yi
+                    (xj - xi) *
+                    (point.y - yi) /
+                    (yj - yi)
                 ) +
                 xi;
-
 
         if (
             intersect
@@ -3410,17 +2542,1084 @@ function pointInsidePolygon(
 
     }
 
-
     return inside;
 
 }
 
 
 /* =========================================================
+   DELETE
+========================================================= */
+
+document
+    .getElementById(
+        "deleteSelected"
+    )
+    .addEventListener(
+        "click",
+        deleteSelected
+    );
+
+
+function deleteSelected() {
+
+    if (
+        !state.selectedId
+    ) {
+        return;
+    }
+
+    state.annotations =
+        state.annotations.filter(
+            a =>
+                a.id !==
+                state.selectedId
+        );
+
+    state.selectedId =
+        null;
+
+    saveCurrentFrame();
+
+    updateCounts();
+
+    updateSelectedUI();
+
+    render();
+
+}
+
+
+/* =========================================================
+   SELECTED ANNOTATION
+========================================================= */
+
+function getSelectedAnnotation() {
+
+    return state.annotations.find(
+        a =>
+            a.id ===
+            state.selectedId
+    ) || null;
+
+}
+
+
+function updateSelectedUI() {
+
+    const selected =
+        getSelectedAnnotation();
+
+    selectedObjectLabel.textContent =
+        selected
+            ? selected.label
+            : "None";
+
+    renderClassificationCard();
+
+    renderDetails();
+
+    render();
+
+}
+
+
+/* =========================================================
+   CLASSIFICATION CARD
+========================================================= */
+
+function renderClassificationCard() {
+
+    const a =
+        getSelectedAnnotation();
+
+    if (!a) {
+
+        classificationCard.innerHTML = `
+            <div class="empty-card">
+                Select an annotation
+            </div>
+        `;
+
+        return;
+
+    }
+
+    classificationCard.innerHTML = `
+        <div class="class-card">
+
+            <div class="class-title">
+
+                <strong>
+                    Object Classification
+                </strong>
+
+                <span class="class-id">
+                    ${escapeHTML(a.id)}
+                </span>
+
+            </div>
+
+            <div class="class-field">
+
+                <label>
+                    OBJECT CLASS
+                </label>
+
+                <input
+                    id="selectedClass"
+                    value="${escapeHTML(a.label || "")}"
+                    placeholder="car"
+                >
+
+            </div>
+
+            <div class="class-field">
+
+                <label>
+                    OCCLUSION
+                </label>
+
+                <select id="selectedOcclusion">
+
+                    <option value="0"
+                        ${a.occlusion === 0 ? "selected" : ""}>
+                        0% — Fully visible
+                    </option>
+
+                    <option value="25"
+                        ${a.occlusion === 25 ? "selected" : ""}>
+                        25% — Slightly occluded
+                    </option>
+
+                    <option value="50"
+                        ${a.occlusion === 50 ? "selected" : ""}>
+                        50% — Partially occluded
+                    </option>
+
+                    <option value="75"
+                        ${a.occlusion === 75 ? "selected" : ""}>
+                        75% — Heavily occluded
+                    </option>
+
+                    <option value="100"
+                        ${a.occlusion === 100 ? "selected" : ""}>
+                        100% — Fully occluded
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="class-field">
+
+                <label>
+                    TRUNCATION
+                </label>
+
+                <select id="selectedTruncation">
+
+                    <option value="NONE"
+                        ${a.truncation === "NONE" ? "selected" : ""}>
+                        NONE — Fully inside camera
+                    </option>
+
+                    <option value="SLIGHT"
+                        ${a.truncation === "SLIGHT" ? "selected" : ""}>
+                        SLIGHT — Small part outside
+                    </option>
+
+                    <option value="PARTIAL"
+                        ${a.truncation === "PARTIAL" ? "selected" : ""}>
+                        PARTIAL — Object cut by edge
+                    </option>
+
+                    <option value="SEVERE"
+                        ${a.truncation === "SEVERE" ? "selected" : ""}>
+                        SEVERE — Large part outside
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="class-field">
+
+                <label>
+                    INCLUDE IN EXPORT
+                </label>
+
+                <select id="selectedExport">
+
+                    <option value="true"
+                        ${a.export !== false ? "selected" : ""}>
+                        YES
+                    </option>
+
+                    <option value="false"
+                        ${a.export === false ? "selected" : ""}>
+                        NO — Remove classification from export
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <div class="class-buttons">
+
+                <button
+                    id="saveClassification"
+                    class="save"
+                >
+                    SAVE
+                </button>
+
+                <button
+                    id="deleteClassification"
+                >
+                    DELETE
+                </button>
+
+            </div>
+
+        </div>
+    `;
+
+
+    document
+        .getElementById(
+            "saveClassification"
+        )
+        .addEventListener(
+            "click",
+            saveClassification
+        );
+
+
+    document
+        .getElementById(
+            "deleteClassification"
+        )
+        .addEventListener(
+            "click",
+            deleteSelected
+        );
+
+}
+
+
+/* =========================================================
+   SAVE CLASSIFICATION
+========================================================= */
+
+function saveClassification() {
+
+    const a =
+        getSelectedAnnotation();
+
+    if (!a) {
+        return;
+    }
+
+    const classInput =
+        document.getElementById(
+            "selectedClass"
+        );
+
+    const occlusion =
+        document.getElementById(
+            "selectedOcclusion"
+        );
+
+    const truncation =
+        document.getElementById(
+            "selectedTruncation"
+        );
+
+    const exportInput =
+        document.getElementById(
+            "selectedExport"
+        );
+
+    const oldLabel =
+        a.label;
+
+    const newLabel =
+        classInput.value.trim()
+        || "unknown";
+
+    a.label =
+        newLabel;
+
+    a.occlusion =
+        Number(
+            occlusion.value
+        );
+
+    a.truncation =
+        truncation.value;
+
+    a.export =
+        exportInput.value === "true";
+
+    a.corrected =
+        true;
+
+    if (
+        newLabel !== "unknown"
+    ) {
+
+        state.classes.add(
+            newLabel
+        );
+
+    }
+
+    if (
+        oldLabel &&
+        oldLabel !== newLabel
+    ) {
+
+        /*
+         * Do not delete old class globally because
+         * another annotation may still use it.
+         */
+
+    }
+
+    saveCurrentFrame();
+
+    updateCounts();
+
+    renderClassificationCard();
+
+    renderDetails();
+
+    render();
+
+}
+
+
+/* =========================================================
+   DETAILS
+========================================================= */
+
+function renderDetails() {
+
+    const a =
+        getSelectedAnnotation();
+
+    if (!a) {
+
+        annotationDetails.innerHTML = `
+            <div class="details-empty">
+
+                <div class="details-icon">
+                    ◫
+                </div>
+
+                <strong>
+                    No annotation selected
+                </strong>
+
+                <span>
+                    Click an object in the workspace
+                    to edit its classification.
+                </span>
+
+            </div>
+        `;
+
+        return;
+
+    }
+
+    annotationDetails.innerHTML = `
+
+        <div class="class-card">
+
+            <div class="class-title">
+
+                <strong>
+                    ${escapeHTML(
+                        a.label || "unknown"
+                    )}
+                </strong>
+
+                <span class="class-id">
+                    ${escapeHTML(a.id)}
+                </span>
+
+            </div>
+
+            <div class="class-field">
+
+                <label>
+                    ANNOTATION TYPE
+                </label>
+
+                <input
+                    value="${escapeHTML(
+                        a.type.toUpperCase()
+                    )}"
+                    disabled
+                >
+
+            </div>
+
+            <div class="class-field">
+
+                <label>
+                    OCCLUSION
+                </label>
+
+                <input
+                    value="${a.occlusion || 0}%"
+                    disabled
+                >
+
+            </div>
+
+            <div class="class-field">
+
+                <label>
+                    TRUNCATION
+                </label>
+
+                <input
+                    value="${escapeHTML(
+                        a.truncation || "NONE"
+                    )}"
+                    disabled
+                >
+
+            </div>
+
+            <div class="class-field">
+
+                <label>
+                    STATUS
+                </label>
+
+                <input
+                    value="${
+                        a.corrected
+                            ? "Human corrected"
+                            : "AI generated"
+                    }"
+                    disabled
+                >
+
+            </div>
+
+        </div>
+
+    `;
+
+}
+
+
+/* =========================================================
+   UPDATE COUNT
+========================================================= */
+
+function updateCounts() {
+
+    objectCount.textContent =
+        state.annotations.length;
+
+}
+
+
+/* =========================================================
+   AI ENGINE
+========================================================= */
+
+confidence.addEventListener(
+    "input",
+    () => {
+
+        const value =
+            Number(
+                confidence.value
+            );
+
+        confidenceValue.textContent =
+            Math.round(
+                value * 100
+            ) + "%";
+
+    }
+);
+
+
+document
+    .getElementById(
+        "autoAnnotate"
+    )
+    .addEventListener(
+        "click",
+        runAIAnnotation
+    );
+
+
+async function runAIAnnotation() {
+
+    if (
+        !state.image
+    ) {
+
+        setAIStatus(
+            "Upload an image or video first."
+        );
+
+        return;
+
+    }
+
+    if (
+        state.aiBusy
+    ) {
+
+        return;
+
+    }
+
+    state.aiBusy =
+        true;
+
+    const engine =
+        aiEngine.value;
+
+    setAIStatus(
+        `Loading ${engine.toUpperCase()}...`
+    );
+
+
+    try {
+
+        let detector;
+
+        if (
+            engine === "detr"
+        ) {
+
+            if (!state.detr) {
+
+                state.detr =
+                    await pipeline(
+                        "object-detection",
+                        MODELS.detr
+                    );
+
+            }
+
+            detector =
+                state.detr;
+
+        } else {
+
+            if (!state.yolo) {
+
+                state.yolo =
+                    await pipeline(
+                        "object-detection",
+                        MODELS.yolo
+                    );
+
+            }
+
+            detector =
+                state.yolo;
+
+        }
+
+
+        setAIStatus(
+            `Running ${engine.toUpperCase()}...`
+        );
+
+
+        /*
+         * Important:
+         *
+         * Pass the image itself / image source,
+         * not a plain JS object.
+         */
+
+        const output =
+            await detector(
+                state.image,
+                {
+                    threshold:
+                        Number(
+                            confidence.value
+                        )
+                }
+            );
+
+
+        const filtered =
+            applyRules(
+                output || []
+            );
+
+
+        /*
+         * Replace current AI-generated
+         * annotations for this frame.
+         *
+         * Existing human-corrected annotations
+         * are retained.
+         */
+
+        const humanAnnotations =
+            state.annotations.filter(
+                a =>
+                    a.corrected === true &&
+                    a.aiGenerated !== true
+            );
+
+
+        state.annotations =
+            humanAnnotations;
+
+
+        for (
+            const detection
+            of filtered
+        ) {
+
+            const label =
+                normalizeLabel(
+                    detection.label
+                );
+
+            const box =
+                detection.box;
+
+            if (
+                !box
+            ) {
+                continue;
+            }
+
+            createAIAnnotation({
+
+                type: "box",
+
+                x:
+                    box.xmin,
+
+                y:
+                    box.ymin,
+
+                width:
+                    box.xmax -
+                    box.xmin,
+
+                height:
+                    box.ymax -
+                    box.ymin,
+
+                label,
+
+                score:
+                    detection.score
+
+            });
+
+        }
+
+
+        /*
+         * AI annotations start as NOT corrected.
+         *
+         * Once the user changes them,
+         * corrected becomes true.
+         */
+
+        state.annotations.forEach(
+            a => {
+
+                if (
+                    a.aiGenerated
+                ) {
+
+                    a.corrected =
+                        false;
+
+                }
+
+            }
+        );
+
+
+        saveCurrentFrame();
+
+        updateCounts();
+
+        render();
+
+        renderClassificationCard();
+
+        renderDetails();
+
+
+        setAIStatus(
+            `${filtered.length} objects generated.`
+        );
+
+    } catch (error) {
+
+        console.error(
+            "AI annotation error:",
+            error
+        );
+
+        setAIStatus(
+            "AI error: " +
+            error.message
+        );
+
+    } finally {
+
+        state.aiBusy =
+            false;
+
+    }
+
+}
+
+
+/* =========================================================
+   CREATE AI ANNOTATION
+========================================================= */
+
+function createAIAnnotation(data) {
+
+    const annotation = {
+
+        id:
+            "ai_" +
+            state.nextAnnotationId++,
+
+        ...data,
+
+        aiGenerated:
+            true,
+
+        corrected:
+            false,
+
+        /*
+         * Classification defaults.
+         */
+
+        occlusion:
+            0,
+
+        truncation:
+            "NONE",
+
+        export:
+            true,
+
+        createdAt:
+            new Date().toISOString()
+
+    };
+
+    state.annotations.push(
+        annotation
+    );
+
+    if (
+        annotation.label
+    ) {
+
+        state.classes.add(
+            annotation.label
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   RULE ENGINE
+========================================================= */
+
+function applyRules(
+    detections
+) {
+
+    const text =
+        rulesInput.value || "";
+
+    const minConfidence =
+        parseMinConfidence(
+            text,
+            Number(
+                confidence.value
+            )
+        );
+
+    let include =
+        null;
+
+    let exclude =
+        [];
+
+    const rename =
+        {};
+
+
+    const lines =
+        text
+            .split("\n")
+            .map(
+                line =>
+                    line.trim()
+            )
+            .filter(Boolean);
+
+
+    for (
+        const line
+        of lines
+    ) {
+
+        const lower =
+            line.toLowerCase();
+
+        if (
+            lower.startsWith(
+                "include:"
+            )
+        ) {
+
+            include =
+                line
+                    .slice(
+                        line.indexOf(":") + 1
+                    )
+                    .split(",")
+                    .map(
+                        x =>
+                            normalizeLabel(
+                                x.trim()
+                            )
+                    )
+                    .filter(Boolean);
+
+        }
+
+
+        if (
+            lower.startsWith(
+                "exclude:"
+            )
+        ) {
+
+            exclude =
+                line
+                    .slice(
+                        line.indexOf(":") + 1
+                    )
+                    .split(",")
+                    .map(
+                        x =>
+                            normalizeLabel(
+                                x.trim()
+                            )
+                    )
+                    .filter(Boolean);
+
+        }
+
+
+        if (
+            lower.startsWith(
+                "rename:"
+            )
+        ) {
+
+            const pairs =
+                line
+                    .slice(
+                        line.indexOf(":") + 1
+                    )
+                    .split(",");
+
+            pairs.forEach(
+                pair => {
+
+                    const parts =
+                        pair.split("=");
+
+                    if (
+                        parts.length === 2
+                    ) {
+
+                        rename[
+                            normalizeLabel(
+                                parts[0].trim()
+                            )
+                        ] =
+                            normalizeLabel(
+                                parts[1].trim()
+                            );
+
+                    }
+
+                }
+            );
+
+        }
+
+    }
+
+
+    return detections
+        .filter(
+            detection =>
+                detection.score >=
+                minConfidence
+        )
+        .map(
+            detection => {
+
+                let label =
+                    normalizeLabel(
+                        detection.label
+                    );
+
+                if (
+                    rename[label]
+                ) {
+
+                    label =
+                        rename[label];
+
+                }
+
+                return {
+
+                    ...detection,
+
+                    label
+
+                };
+
+            }
+        )
+        .filter(
+            detection => {
+
+                const label =
+                    normalizeLabel(
+                        detection.label
+                    );
+
+                if (
+                    exclude.includes(label)
+                ) {
+
+                    return false;
+
+                }
+
+                if (
+                    include &&
+                    !include.includes(label)
+                ) {
+
+                    return false;
+
+                }
+
+                return true;
+
+            }
+        );
+
+}
+
+
+function parseMinConfidence(
+    text,
+    fallback
+) {
+
+    const match =
+        text.match(
+            /min_confidence\s*:\s*([0-9.]+)/i
+        );
+
+    if (!match) {
+        return fallback;
+    }
+
+    return Math.max(
+        0,
+        Math.min(
+            1,
+            Number(match[1])
+        )
+    );
+
+}
+
+
+/* =========================================================
+   LABEL NORMALIZATION
+========================================================= */
+
+function normalizeLabel(
+    label
+) {
+
+    const clean =
+        String(
+            label || "unknown"
+        )
+        .trim()
+        .toLowerCase();
+
+    return (
+        LABEL_MAP[clean] ||
+        clean
+    );
+
+}
+
+
+/* =========================================================
    RENDER
-   ========================================================= */
+========================================================= */
 
 function render() {
+
+    const rect =
+        workspace.getBoundingClientRect();
+
+    /*
+     * Canvas is already scaled to device pixel
+     * ratio in resizeCanvas().
+     */
+
+    ctx.clearRect(
+        0,
+        0,
+        rect.width,
+        rect.height
+    );
+
 
     if (
         !state.image
@@ -3431,60 +3630,124 @@ function render() {
     }
 
 
-    ctx.clearRect(
-        0,
-        0,
-        canvas.width,
-        canvas.height
+    const imageWidth =
+        state.image.naturalWidth ||
+        state.image.width;
+
+    const imageHeight =
+        state.image.naturalHeight ||
+        state.image.height;
+
+
+    /*
+     * IMAGE
+     *
+     * Notice that there is deliberately NO
+     * boundary clamp here.
+     *
+     * The user can pan past the camera edge
+     * and zoom anywhere.
+     */
+
+    ctx.save();
+
+    ctx.translate(
+        state.offsetX,
+        state.offsetY
     );
 
+    ctx.scale(
+        state.scale,
+        state.scale
+    );
 
     ctx.drawImage(
         state.image,
         0,
-        0
+        0,
+        imageWidth,
+        imageHeight
+    );
+
+    ctx.restore();
+
+
+    /*
+     * ANNOTATIONS
+     */
+
+    state.annotations.forEach(
+        annotation => {
+
+            drawAnnotation(
+                annotation
+            );
+
+        }
     );
 
 
-    for (
-        const annotation
-        of state.annotations
+    /*
+     * Current polygon drawing
+     */
+
+    if (
+        state.isDrawing &&
+        (
+            state.annotationType === "polygon" ||
+            state.annotationType === "segmentation"
+        )
     ) {
 
-        if (
-            annotation.type ===
-            "bbox"
-        ) {
+        drawCurrentPolygon();
 
-            drawBox(
-                annotation
-            );
-
-        }
+    }
 
 
-        else if (
-            annotation.type ===
-            "polygon"
-        ) {
+    updateZoomUI();
 
-            drawPolygon(
-                annotation
-            );
-
-        }
+}
 
 
-        else if (
-            annotation.type ===
-            "segmentation"
-        ) {
+/* =========================================================
+   DRAW ANNOTATION
+========================================================= */
 
-            drawSegmentation(
-                annotation
-            );
+function drawAnnotation(
+    a
+) {
 
-        }
+    if (
+        a.type === "box"
+    ) {
+
+        drawBox(a);
+
+        return;
+
+    }
+
+    if (
+        a.type === "polygon"
+    ) {
+
+        drawPolygon(
+            a,
+            false
+        );
+
+        return;
+
+    }
+
+    if (
+        a.type === "segmentation"
+    ) {
+
+        drawPolygon(
+            a,
+            true
+        );
 
     }
 
@@ -3493,72 +3756,117 @@ function render() {
 
 /* =========================================================
    DRAW BOX
-   ========================================================= */
+========================================================= */
 
-function drawBox(
-    annotation
-) {
+function drawBox(a) {
+
+    const topLeft =
+        imageToScreen(
+            a.x,
+            a.y
+        );
+
+    const width =
+        a.width *
+        state.scale;
+
+    const height =
+        a.height *
+        state.scale;
+
 
     const selected =
-        annotation.id ===
+        a.id ===
         state.selectedId;
 
 
-    ctx.save();
+    /*
+     * Selected annotations are purple.
+     *
+     * AI boxes are green.
+     *
+     * No percentage is rendered.
+     */
 
+    ctx.save();
 
     ctx.lineWidth =
         selected
-            ? 3
-            : 2;
-
+            ? 2.5
+            : 1.5;
 
     ctx.strokeStyle =
         selected
             ? "#a78bfa"
             : "#22c55e";
 
+    ctx.strokeRect(
+        topLeft.x,
+        topLeft.y,
+        width,
+        height
+    );
+
+
+    /*
+     * Label ONLY.
+     *
+     * No 68%, 98%, etc.
+     */
+
+    const label =
+        a.label ||
+        "unknown";
+
+    ctx.font =
+        "bold 12px Arial";
+
+    const textWidth =
+        ctx.measureText(
+            label
+        ).width;
+
+    const labelWidth =
+        textWidth + 12;
+
+    const labelHeight =
+        20;
 
     ctx.fillStyle =
         selected
-            ? "rgba(139,92,246,.08)"
-            : "rgba(34,197,94,.04)";
-
+            ? "#7c3aed"
+            : "#15803d";
 
     ctx.fillRect(
-        annotation.x,
-        annotation.y,
-        annotation.width,
-        annotation.height
+        topLeft.x,
+        topLeft.y - labelHeight,
+        labelWidth,
+        labelHeight
+    );
+
+    ctx.fillStyle =
+        "#ffffff";
+
+    ctx.fillText(
+        label,
+        topLeft.x + 6,
+        topLeft.y - 6
     );
 
 
-    ctx.strokeRect(
-        annotation.x,
-        annotation.y,
-        annotation.width,
-        annotation.height
-    );
-
-
-    drawLabel(
-        annotation.label,
-        annotation.confidence,
-        annotation.x,
-        annotation.y
-    );
-
+    /*
+     * Selected resize handles
+     */
 
     if (
         selected
     ) {
 
-        drawResizeHandles(
-            annotation
+        drawBoxHandles(
+            a
         );
 
     }
-
 
     ctx.restore();
 
@@ -3566,105 +3874,91 @@ function drawBox(
 
 
 /* =========================================================
-   RESIZE HANDLES
-   ========================================================= */
+   BOX HANDLES
+========================================================= */
 
-function drawResizeHandles(
-    box
-) {
-
-    const size =
-        8 /
-        state.zoom;
-
+function drawBoxHandles(a) {
 
     const handles = [
 
+        ["nw", a.x, a.y],
+
         [
-            box.x,
-            box.y
+            "n",
+            a.x + a.width / 2,
+            a.y
         ],
 
         [
-            box.x +
-            box.width / 2,
-            box.y
+            "ne",
+            a.x + a.width,
+            a.y
         ],
 
         [
-            box.x +
-            box.width,
-            box.y
+            "e",
+            a.x + a.width,
+            a.y + a.height / 2
         ],
 
         [
-            box.x +
-            box.width,
-            box.y +
-            box.height / 2
+            "se",
+            a.x + a.width,
+            a.y + a.height
         ],
 
         [
-            box.x +
-            box.width,
-            box.y +
-            box.height
+            "s",
+            a.x + a.width / 2,
+            a.y + a.height
         ],
 
         [
-            box.x +
-            box.width / 2,
-            box.y +
-            box.height
+            "sw",
+            a.x,
+            a.y + a.height
         ],
 
         [
-            box.x,
-            box.y +
-            box.height
-        ],
-
-        [
-            box.x,
-            box.y +
-            box.height / 2
+            "w",
+            a.x,
+            a.y + a.height / 2
         ]
 
     ];
 
 
-    ctx.fillStyle =
-        "#ffffff";
-
-
-    ctx.strokeStyle =
-        "#8b5cf6";
-
-
-    ctx.lineWidth =
-        2 /
-        state.zoom;
-
-
     handles.forEach(
-        position => {
+        ([name, x, y]) => {
 
-            ctx.beginPath();
+            const p =
+                imageToScreen(
+                    x,
+                    y
+                );
 
+            ctx.fillStyle =
+                "#ffffff";
 
-            ctx.rect(
-                position[0] -
-                    size,
-                position[1] -
-                    size,
-                size * 2,
-                size * 2
+            ctx.strokeStyle =
+                "#7c3aed";
+
+            ctx.lineWidth =
+                1.5;
+
+            ctx.fillRect(
+                p.x - 4,
+                p.y - 4,
+                8,
+                8
             );
 
-
-            ctx.fill();
-
-            ctx.stroke();
+            ctx.strokeRect(
+                p.x - 4,
+                p.y - 4,
+                8,
+                8
+            );
 
         }
     );
@@ -3674,55 +3968,47 @@ function drawResizeHandles(
 
 /* =========================================================
    DRAW POLYGON
-   ========================================================= */
+========================================================= */
 
 function drawPolygon(
-    annotation
+    a,
+    segmentation
 ) {
 
     if (
-        !annotation.points ||
-        annotation.points.length <
-            3
+        !a.points ||
+        a.points.length < 2
     ) {
-
         return;
-
     }
-
-
-    const selected =
-        annotation.id ===
-        state.selectedId;
-
 
     ctx.save();
 
-
     ctx.beginPath();
 
+    a.points.forEach(
+        (point, index) => {
 
-    annotation.points.forEach(
-        (
-            point,
-            index
-        ) => {
+            const p =
+                imageToScreen(
+                    point.x,
+                    point.y
+                );
 
             if (
-                index ===
-                0
+                index === 0
             ) {
 
                 ctx.moveTo(
-                    point.x,
-                    point.y
+                    p.x,
+                    p.y
                 );
 
             } else {
 
                 ctx.lineTo(
-                    point.x,
-                    point.y
+                    p.x,
+                    p.y
                 );
 
             }
@@ -3730,14 +4016,24 @@ function drawPolygon(
         }
     );
 
-
     ctx.closePath();
 
 
-    ctx.fillStyle =
-        selected
-            ? "rgba(139,92,246,.20)"
-            : "rgba(34,197,94,.12)";
+    if (
+        segmentation
+    ) {
+
+        ctx.fillStyle =
+            "rgba(139,92,246,0.20)";
+
+        ctx.fill();
+
+    }
+
+
+    const selected =
+        a.id ===
+        state.selectedId;
 
 
     ctx.strokeStyle =
@@ -3745,54 +4041,99 @@ function drawPolygon(
             ? "#a78bfa"
             : "#22c55e";
 
-
     ctx.lineWidth =
         selected
-            ? 3
-            : 2;
-
-
-    ctx.fill();
+            ? 2.5
+            : 1.5;
 
     ctx.stroke();
 
 
-    annotation.points.forEach(
-        point => {
+    /*
+     * Label
+     */
 
-            ctx.beginPath();
+    const first =
+        imageToScreen(
+            a.points[0].x,
+            a.points[0].y
+        );
 
+    ctx.font =
+        "bold 12px Arial";
 
-            ctx.arc(
-                point.x,
-                point.y,
-                selected
-                    ? 6
-                    : 4,
-                0,
-                Math.PI * 2
-            );
+    const label =
+        a.label ||
+        "unknown";
 
+    const width =
+        ctx.measureText(
+            label
+        ).width + 12;
 
-            ctx.fillStyle =
-                selected
-                    ? "#a78bfa"
-                    : "#22c55e";
+    ctx.fillStyle =
+        selected
+            ? "#7c3aed"
+            : "#15803d";
 
+    ctx.fillRect(
+        first.x,
+        first.y - 20,
+        width,
+        20
+    );
 
-            ctx.fill();
+    ctx.fillStyle =
+        "#fff";
 
-        }
+    ctx.fillText(
+        label,
+        first.x + 6,
+        first.y - 6
     );
 
 
-    drawLabel(
-        annotation.label,
-        annotation.confidence,
-        annotation.points[0].x,
-        annotation.points[0].y
-    );
+    /*
+     * Vertex handles
+     */
 
+    if (
+        selected
+    ) {
+
+        a.points.forEach(
+            point => {
+
+                const p =
+                    imageToScreen(
+                        point.x,
+                        point.y
+                    );
+
+                ctx.fillStyle =
+                    "#ffffff";
+
+                ctx.strokeStyle =
+                    "#7c3aed";
+
+                ctx.beginPath();
+
+                ctx.arc(
+                    p.x,
+                    p.y,
+                    4,
+                    0,
+                    Math.PI * 2
+                );
+
+                ctx.fill();
+
+                ctx.stroke();
+
+            }
+        );
+
+    }
 
     ctx.restore();
 
@@ -3800,1618 +4141,585 @@ function drawPolygon(
 
 
 /* =========================================================
-   SEGMENTATION
-   ========================================================= */
+   CURRENT POLYGON
+========================================================= */
 
-function drawSegmentation(
-    annotation
-) {
+function drawCurrentPolygon() {
+
+    if (
+        state.polygonPoints.length < 1
+    ) {
+        return;
+    }
+
+    ctx.save();
+
+    ctx.strokeStyle =
+        "#a78bfa";
+
+    ctx.lineWidth =
+        2;
+
+    ctx.setLineDash(
+        [6, 4]
+    );
+
+    ctx.beginPath();
+
+    state.polygonPoints.forEach(
+        (point, index) => {
+
+            const p =
+                imageToScreen(
+                    point.x,
+                    point.y
+                );
+
+            if (
+                index === 0
+            ) {
+
+                ctx.moveTo(
+                    p.x,
+                    p.y
+                );
+
+            } else {
+
+                ctx.lineTo(
+                    p.x,
+                    p.y
+                );
+
+            }
+
+        }
+    );
+
+    if (
+        state.currentDrawPoint
+    ) {
+
+        const last =
+            imageToScreen(
+                state.currentDrawPoint.x,
+                state.currentDrawPoint.y
+            );
+
+        ctx.lineTo(
+            last.x,
+            last.y
+        );
+
+    }
+
+    ctx.stroke();
+
+    ctx.restore();
+
+}
+
+
+/* =========================================================
+   FRAME STORAGE
+========================================================= */
+
+function saveCurrentFrame() {
+
+    if (
+        state.mediaType !== "video"
+    ) {
+        return;
+    }
 
     /*
-     * Actual masks will be drawn here when a proper
-     * segmentation model is connected.
+     * Deep clone so changing a future frame
+     * does not modify this frame.
      */
 
-    if (
-        !annotation.mask
-    ) {
-
-        return;
-
-    }
-
-
-    const mask =
-        new Image();
-
-
-    mask.onload =
-        () => {
-
-            ctx.save();
-
-
-            ctx.globalAlpha =
-                annotation.id ===
-                state.selectedId
-                    ? .45
-                    : .25;
-
-
-            ctx.drawImage(
-                mask,
-                0,
-                0,
-                canvas.width,
-                canvas.height
-            );
-
-
-            ctx.restore();
-
-        };
-
-
-    mask.src =
-        annotation.mask;
-
-}
-
-
-/* =========================================================
-   LABEL
-   ========================================================= */
-
-function drawLabel(
-    label,
-    confidence,
-    x,
-    y
-) {
-
-    const text =
-        `${label} ${
-            Math.round(
-                confidence *
-                100
-            )
-        }%`;
-
-
-    ctx.font =
-        "bold 14px Arial";
-
-
-    const width =
-        ctx.measureText(
-            text
-        ).width +
-        10;
-
-
-    const height =
-        21;
-
-
-    const top =
-        Math.max(
-            0,
-            y -
-            height
+    const copy =
+        structuredClone(
+            state.annotations
         );
 
-
-    ctx.fillStyle =
-        "#111827";
-
-
-    ctx.fillRect(
-        x,
-        top,
-        width,
-        height
-    );
-
-
-    ctx.fillStyle =
-        "#ffffff";
-
-
-    ctx.fillText(
-        text,
-        x +
-            5,
-        top +
-            15
+    state.frameAnnotations.set(
+        state.currentFrame,
+        copy
     );
 
 }
 
 
-/* =========================================================
-   OBJECT LIST
-   ========================================================= */
-
-function renderObjects() {
-
-    const list =
-        $("#objectList");
-
-
-    if (!list) {
-        return;
-    }
-
+function loadFrameAnnotations() {
 
     if (
-        state.annotations.length ===
-        0
+        state.mediaType !== "video"
     ) {
-
-        list.innerHTML =
-            `
-            <div class="no-objects">
-                No annotations yet.
-            </div>
-            `;
-
-
-        updateCanvasInfo();
-
         return;
-
     }
 
-
-    list.innerHTML =
-        state.annotations
-            .map(
-                annotation => {
-
-                    const selected =
-                        annotation.id ===
-                        state.selectedId
-                            ? "selected"
-                            : "";
-
-
-                    const review =
-                        annotation.review
-                            ? " • REVIEW"
-                            : "";
-
-
-                    return `
-
-                    <div
-                        class="object-row ${selected}"
-                        data-id="${annotation.id}"
-                    >
-
-                        <div class="object-color"></div>
-
-                        <div class="object-info">
-
-                            <div class="object-name">
-                                ${escapeHtml(
-                                    annotation.label
-                                )}
-                            </div>
-
-                            <div class="object-meta">
-                                ${annotation.type}
-                                ${review}
-                            </div>
-
-                        </div>
-
-                        <div class="object-confidence">
-                            ${Math.round(
-                                annotation.confidence *
-                                100
-                            )}%
-                        </div>
-
-                        <button
-                            class="object-delete"
-                            data-delete-id="${annotation.id}"
-                            title="Delete annotation"
-                        >
-                            ×
-                        </button>
-
-                    </div>
-
-                    `;
-
-                }
-            )
-            .join("");
-
-
-    list.querySelectorAll(
-        ".object-row"
-    ).forEach(
-        row => {
-
-            row.addEventListener(
-                "click",
-                event => {
-
-                    if (
-                        event.target.closest(
-                            ".object-delete"
-                        )
-                    ) {
-
-                        return;
-
-                    }
-
-
-                    state.selectedId =
-                        row.dataset.id;
-
-
-                    render();
-
-                    renderObjects();
-
-                }
-            );
-
-        }
-    );
-
-
-    list.querySelectorAll(
-        ".object-delete"
-    ).forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                event => {
-
-                    event.stopPropagation();
-
-
-                    saveUndoState();
-
-
-                    removeAnnotation(
-                        button.dataset.deleteId
-                    );
-
-                }
-            );
-
-        }
-    );
-
-
-    updateCanvasInfo();
-
-}
-
-
-/* =========================================================
-   REMOVE ANNOTATION
-   ========================================================= */
-
-function removeAnnotation(
-    id
-) {
+    const saved =
+        state.frameAnnotations.get(
+            state.currentFrame
+        );
 
     state.annotations =
-        state.annotations.filter(
-            annotation =>
-                annotation.id !==
-                id
-        );
-
-
-    if (
-        state.selectedId ===
-        id
-    ) {
-
-        state.selectedId =
-            null;
-
-    }
-
-
-    rebuildClassificationSet();
-
-    render();
-
-    renderObjects();
-
-    renderClassificationManager();
-
-    updateQuality(
-        state.annotations
-    );
-
-
-    updateCanvasInfo();
-
-
-    saveTrainingSnapshot();
-
-
-    showToast(
-        "Annotation deleted."
-    );
-
-}
-
-
-/* =========================================================
-   DELETE SELECTED
-   ========================================================= */
-
-function deleteSelected() {
-
-    if (
-        !state.selectedId
-    ) {
-
-        showToast(
-            "Select an annotation first."
-        );
-
-        return;
-
-    }
-
-
-    saveUndoState();
-
-
-    removeAnnotation(
-        state.selectedId
-    );
-
-}
-
-
-/* =========================================================
-   RESET
-   ========================================================= */
-
-function resetAnnotations() {
-
-    if (
-        state.annotations.length ===
-        0
-    ) {
-
-        return;
-
-    }
-
-
-    saveUndoState();
-
-
-    state.annotations =
-        [];
-
+        saved
+            ? structuredClone(saved)
+            : [];
 
     state.selectedId =
         null;
 
+    updateCounts();
 
-    render();
-
-    renderObjects();
-
-    renderClassificationManager();
-
-    updateQuality(
-        []
-    );
-
-    updateCanvasInfo();
-
-
-    showToast(
-        "Annotations reset."
-    );
+    updateSelectedUI();
 
 }
 
 
 /* =========================================================
-   UNDO
-   ========================================================= */
+   EXPORT IMAGE
+========================================================= */
 
-function saveUndoState() {
-
-    state.undoStack.push(
-        JSON.stringify(
-            state.annotations
-        )
+document
+    .getElementById(
+        "exportImage"
+    )
+    .addEventListener(
+        "click",
+        exportAnnotatedImage
     );
 
 
-    if (
-        state.undoStack.length >
-        CONFIG.maxUndo
-    ) {
-
-        state.undoStack.shift();
-
-    }
-
-
-    state.redoStack =
-        [];
-
-}
-
-
-function undo() {
-
-    if (
-        state.undoStack.length ===
-        0
-    ) {
-
-        return;
-
-    }
-
-
-    state.redoStack.push(
-        JSON.stringify(
-            state.annotations
-        )
-    );
-
-
-    state.annotations =
-        JSON.parse(
-            state.undoStack.pop()
-        );
-
-
-    state.selectedId =
-        null;
-
-
-    rebuildClassificationSet();
-
-    render();
-
-    renderObjects();
-
-    renderClassificationManager();
-
-    updateCanvasInfo();
-
-}
-
-
-/* =========================================================
-   REDO
-   ========================================================= */
-
-function redo() {
-
-    if (
-        state.redoStack.length ===
-        0
-    ) {
-
-        return;
-
-    }
-
-
-    state.undoStack.push(
-        JSON.stringify(
-            state.annotations
-        )
-    );
-
-
-    state.annotations =
-        JSON.parse(
-            state.redoStack.pop()
-        );
-
-
-    state.selectedId =
-        null;
-
-
-    rebuildClassificationSet();
-
-    render();
-
-    renderObjects();
-
-    renderClassificationManager();
-
-    updateCanvasInfo();
-
-}
-
-
-/* =========================================================
-   KEYBOARD
-   ========================================================= */
-
-function setupKeyboard() {
-
-    document.addEventListener(
-        "keydown",
-        event => {
-
-            if (
-                event.ctrlKey &&
-                event.key.toLowerCase() ===
-                    "z"
-            ) {
-
-                event.preventDefault();
-
-                undo();
-
-            }
-
-
-            if (
-                event.ctrlKey &&
-                event.key.toLowerCase() ===
-                    "y"
-            ) {
-
-                event.preventDefault();
-
-                redo();
-
-            }
-
-
-            if (
-                event.key ===
-                "Delete"
-            ) {
-
-                deleteSelected();
-
-            }
-
-
-            /*
-             * ESC clears selection.
-             */
-
-            if (
-                event.key ===
-                "Escape"
-            ) {
-
-                state.selectedId =
-                    null;
-
-
-                state.drag =
-                    null;
-
-
-                render();
-
-                renderObjects();
-
-            }
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   CLASSIFICATION SYSTEM
-   ========================================================= */
-
-function ensureClassificationUI() {
-
-    /*
-     * If the HTML already has a classification
-     * container, use it.
-     *
-     * Otherwise create one.
-     */
-
-    let container =
-        $("#classificationManager");
-
-
-    if (
-        container
-    ) {
-
-        return;
-
-    }
-
-
-    container =
-        document.createElement(
-            "div"
-        );
-
-
-    container.id =
-        "classificationManager";
-
-
-    container.style.cssText = `
-
-        margin-top:20px;
-        padding:14px;
-        border:1px solid #27273a;
-        border-radius:10px;
-        background:#0d0d17;
-        color:#fff;
-
-    `;
-
-
-    container.innerHTML = `
-
-        <div style="
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            margin-bottom:10px;
-        ">
-
-            <strong>
-                CLASSIFICATIONS
-            </strong>
-
-            <button
-                id="addClassification"
-                type="button"
-                style="
-                    border:0;
-                    border-radius:6px;
-                    padding:5px 9px;
-                    cursor:pointer;
-                    background:#7c3aed;
-                    color:#fff;
-                "
-            >
-                + Add
-            </button>
-
-        </div>
-
-
-        <div
-            id="classificationList"
-        ></div>
-
-        <div style="
-            margin-top:9px;
-            font-size:11px;
-            color:#8b8b9a;
-        ">
-            Remove a class to exclude it from export.
-        </div>
-
-    `;
-
-
-    const sidebar =
-        document.querySelector(
-            ".sidebar"
-        ) ||
-        document.querySelector(
-            "aside"
-        );
-
-
-    if (
-        sidebar
-    ) {
-
-        sidebar.appendChild(
-            container
-        );
-
-    } else {
-
-        document.body.appendChild(
-            container
-        );
-
-    }
-
-
-    $("#addClassification")
-        .addEventListener(
-            "click",
-            addClassification
-        );
-
-}
-
-
-function rebuildClassificationSet() {
-
-    state.classifications =
-        new Set(
-            state.annotations
-                .map(
-                    annotation =>
-                        annotation.label
-                )
-                .filter(
-                    Boolean
-                )
-        );
-
-
-    /*
-     * Removed classes remain excluded.
-     */
-
-}
-
-
-function renderClassificationManager() {
-
-    ensureClassificationUI();
-
-
-    const list =
-        $("#classificationList");
-
-
-    if (!list) {
-        return;
-    }
-
-
-    const classes =
-        [...state.classifications]
-            .sort();
-
-
-    if (
-        classes.length ===
-        0
-    ) {
-
-        list.innerHTML =
-            `
-            <div style="
-                color:#777;
-                font-size:12px;
-            ">
-                No classifications yet.
-            </div>
-            `;
-
-        return;
-
-    }
-
-
-    list.innerHTML =
-        classes
-            .map(
-                label => {
-
-                    const excluded =
-                        state.excludedClassifications
-                            .has(
-                                label
-                            );
-
-
-                    const count =
-                        state.annotations
-                            .filter(
-                                annotation =>
-                                    annotation.label ===
-                                    label
-                            )
-                            .length;
-
-
-                    return `
-
-                    <div style="
-                        display:flex;
-                        gap:6px;
-                        align-items:center;
-                        margin-bottom:6px;
-                    ">
-
-                        <input
-                            type="checkbox"
-                            class="classification-export"
-                            data-class="${escapeAttr(
-                                label
-                            )}"
-                            ${
-                                !excluded
-                                    ? "checked"
-                                    : ""
-                            }
-                        >
-
-                        <button
-                            type="button"
-                            class="classification-name"
-                            data-edit-class="${escapeAttr(
-                                label
-                            )}"
-                            style="
-                                flex:1;
-                                text-align:left;
-                                border:0;
-                                background:transparent;
-                                color:${
-                                    excluded
-                                        ? "#666"
-                                        : "#fff"
-                                };
-                                cursor:pointer;
-                            "
-                        >
-                            ${escapeHtml(
-                                label
-                            )}
-                            <span style="
-                                color:#777;
-                            ">
-                                (${count})
-                            </span>
-                        </button>
-
-                        <button
-                            type="button"
-                            class="classification-remove"
-                            data-remove-class="${escapeAttr(
-                                label
-                            )}"
-                            title="Remove classification"
-                            style="
-                                border:0;
-                                background:#2a1520;
-                                color:#ff6b81;
-                                border-radius:5px;
-                                cursor:pointer;
-                            "
-                        >
-                            ×
-                        </button>
-
-                    </div>
-
-                    `;
-
-                }
-            )
-            .join("");
-
-
-    list.querySelectorAll(
-        ".classification-export"
-    ).forEach(
-        checkbox => {
-
-            checkbox.addEventListener(
-                "change",
-                () => {
-
-                    const label =
-                        checkbox.dataset.class;
-
-
-                    if (
-                        checkbox.checked
-                    ) {
-
-                        state.excludedClassifications
-                            .delete(
-                                label
-                            );
-
-                    } else {
-
-                        state.excludedClassifications
-                            .add(
-                                label
-                            );
-
-                    }
-
-                }
-            );
-
-        }
-    );
-
-
-    list.querySelectorAll(
-        ".classification-name"
-    ).forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    const label =
-                        button.dataset.editClass;
-
-
-                    const annotation =
-                        state.annotations.find(
-                            item =>
-                                item.label ===
-                                label
-                        );
-
-
-                    if (
-                        annotation
-                    ) {
-
-                        editClassification(
-                            annotation
-                        );
-
-                    }
-
-                }
-            );
-
-        }
-    );
-
-
-    list.querySelectorAll(
-        ".classification-remove"
-    ).forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    removeClassification(
-                        button.dataset.removeClass
-                    );
-
-                }
-            );
-
-        }
-    );
-
-}
-
-
-/* =========================================================
-   ADD CLASSIFICATION
-   ========================================================= */
-
-function addClassification() {
-
-    const name =
-        prompt(
-            "Enter the new classification name:"
-        );
-
-
-    if (
-        !name ||
-        !name.trim()
-    ) {
-
-        return;
-
-    }
-
-
-    const label =
-        normalizeLabel(
-            name
-        );
-
-
-    state.classifications.add(
-        label
-    );
-
-
-    state.excludedClassifications
-        .delete(
-            label
-        );
-
-
-    state.nextManualClass =
-        label;
-
-
-    renderClassificationManager();
-
-
-    showToast(
-        `Classification "${label}" added.`
-    );
-
-}
-
-
-/* =========================================================
-   REMOVE CLASSIFICATION
-   ========================================================= */
-
-function removeClassification(
-    label
-) {
-
-    const count =
-        state.annotations.filter(
-            annotation =>
-                annotation.label ===
-                label
-        ).length;
-
-
-    const confirmed =
-        confirm(
-            count > 0
-                ? `Remove "${label}" from the project? ${count} annotation(s) will be excluded from export.`
-                : `Remove "${label}"?`
-        );
-
-
-    if (
-        !confirmed
-    ) {
-
-        return;
-
-    }
-
-
-    state.classifications.delete(
-        label
-    );
-
-
-    state.excludedClassifications.add(
-        label
-    );
-
-
-    /*
-     * Keep annotations visually available
-     * for review, but exclude from export.
-     */
-
-    renderClassificationManager();
-
-
-    showToast(
-        `"${label}" excluded from export.`
-    );
-
-}
-
-
-/* =========================================================
-   EDIT CLASSIFICATION
-   ========================================================= */
-
-function editClassification(
-    annotation
-) {
-
-    const newLabel =
-        prompt(
-            "Classification:",
-            annotation.label
-        );
-
-
-    if (
-        !newLabel ||
-        !newLabel.trim()
-    ) {
-
-        return;
-
-    }
-
-
-    const label =
-        normalizeLabel(
-            newLabel
-        );
-
-
-    saveUndoState();
-
-
-    annotation.label =
-        label;
-
-
-    annotation.source =
-        "human";
-
-
-    state.classifications.add(
-        label
-    );
-
-
-    state.excludedClassifications
-        .delete(
-            label
-        );
-
-
-    render();
-
-    renderObjects();
-
-    renderClassificationManager();
-
-    saveTrainingSnapshot();
-
-
-    showToast(
-        "Classification updated."
-    );
-
-}
-
-
-/* =========================================================
-   ADD OBJECT TO SELECTED CLASS
-   ========================================================= */
-
-function addObjectWithClassification() {
-
-    const classes =
-        [
-            ...state.classifications
-        ];
-
-
-    if (
-        classes.length ===
-        0
-    ) {
-
-        showToast(
-            "Add a classification first."
-        );
-
-        return;
-
-    }
-
-
-    const label =
-        prompt(
-            `Classification:\n${classes.join(
-                ", "
-            )}`,
-            classes[0]
-        );
-
-
-    if (
-        !label
-    ) {
-
-        return;
-
-    }
-
-
-    state.nextManualClass =
-        normalizeLabel(
-            label
-        );
-
-
-    state.activeTool =
-        "draw";
-
-
-    updateCursor();
-
-
-    showToast(
-        `Draw a new ${state.nextManualClass} annotation.`
-    );
-
-}
-
-
-/* =========================================================
-   EXPORT
-   ========================================================= */
-
-function getExportAnnotations() {
-
-    return state.annotations
-        .filter(
-            annotation =>
-                !state.excludedClassifications
-                    .has(
-                        annotation.label
-                    )
-        )
-        .map(
-            annotation =>
-                clone(
-                    annotation
-                )
-        );
-
-}
-
-
-function downloadAnnotatedImage() {
+function exportAnnotatedImage() {
 
     if (
         !state.image
     ) {
-
-        showToast(
-            "Upload an image first."
-        );
-
         return;
-
     }
 
+    const imageWidth =
+        state.image.naturalWidth ||
+        state.image.width;
 
-    /*
-     * Create a dedicated export canvas.
-     * This means excluded classifications are
-     * not written onto the downloaded image.
-     */
+    const imageHeight =
+        state.image.naturalHeight ||
+        state.image.height;
 
-    const exportCanvas =
+    const output =
         document.createElement(
             "canvas"
         );
 
+    output.width =
+        imageWidth;
 
-    exportCanvas.width =
-        state.imageWidth;
+    output.height =
+        imageHeight;
 
+    const outputContext =
+        output.getContext("2d");
 
-    exportCanvas.height =
-        state.imageHeight;
-
-
-    const exportCtx =
-        exportCanvas.getContext(
-            "2d"
-        );
-
-
-    exportCtx.drawImage(
+    outputContext.drawImage(
         state.image,
         0,
-        0
+        0,
+        imageWidth,
+        imageHeight
     );
 
 
-    const exportAnnotations =
-        getExportAnnotations();
+    state.annotations
+        .filter(
+            a =>
+                a.export !== false
+        )
+        .forEach(
+            a => {
 
+                drawAnnotationExport(
+                    outputContext,
+                    a
+                );
 
-    drawAnnotationsToContext(
-        exportCtx,
-        exportAnnotations
-    );
-
-
-    const link =
-        document.createElement(
-            "a"
+            }
         );
 
 
-    link.download =
-        `${removeExtension(
-            state.imageName
-        )}_annotated.png`;
+    output.toBlob(
+        blob => {
 
+            downloadBlob(
+                blob,
+                getExportName(
+                    "annotated",
+                    "png"
+                )
+            );
 
-    link.href =
-        exportCanvas.toDataURL(
-            "image/png"
-        );
-
-
-    link.click();
-
-
-    downloadAnnotationJSON(
-        exportAnnotations
-    );
-
-
-    showToast(
-        "Annotated image and JSON downloaded."
+        },
+        "image/png"
     );
 
 }
 
 
 /* =========================================================
-   EXPORT DRAW
-   ========================================================= */
+   EXPORT ANNOTATION
+========================================================= */
 
-function drawAnnotationsToContext(
-    targetCtx,
-    annotations
+function drawAnnotationExport(
+    context,
+    a
 ) {
 
-    annotations.forEach(
-        annotation => {
+    context.save();
 
-            targetCtx.save();
+    context.strokeStyle =
+        "#00ff66";
 
+    context.fillStyle =
+        "rgba(0,255,100,.15)";
 
-            if (
-                annotation.type ===
-                "bbox"
-            ) {
-
-                targetCtx.strokeStyle =
-                    "#22c55e";
+    context.lineWidth =
+        2;
 
 
-                targetCtx.lineWidth =
-                    3;
+    if (
+        a.type === "box"
+    ) {
 
+        context.strokeRect(
+            a.x,
+            a.y,
+            a.width,
+            a.height
+        );
 
-                targetCtx.strokeRect(
-                    annotation.x,
-                    annotation.y,
-                    annotation.width,
-                    annotation.height
-                );
+        context.font =
+            "bold 16px Arial";
 
+        context.fillStyle =
+            "#00ff66";
 
-                drawExportLabel(
-                    targetCtx,
-                    annotation.label,
-                    annotation.confidence,
-                    annotation.x,
-                    annotation.y
-                );
+        context.fillText(
+            a.label || "unknown",
+            a.x,
+            Math.max(
+                16,
+                a.y - 5
+            )
+        );
 
-            }
+    } else {
 
+        context.beginPath();
 
-            else if (
-                annotation.type ===
-                "polygon"
-            ) {
+        a.points.forEach(
+            (p, index) => {
 
                 if (
-                    !annotation.points ||
-                    annotation.points.length <
-                        3
+                    index === 0
                 ) {
 
-                    targetCtx.restore();
+                    context.moveTo(
+                        p.x,
+                        p.y
+                    );
 
-                    return;
+                } else {
+
+                    context.lineTo(
+                        p.x,
+                        p.y
+                    );
 
                 }
 
-
-                targetCtx.beginPath();
-
-
-                annotation.points.forEach(
-                    (
-                        point,
-                        index
-                    ) => {
-
-                        if (
-                            index ===
-                            0
-                        ) {
-
-                            targetCtx.moveTo(
-                                point.x,
-                                point.y
-                            );
-
-                        } else {
-
-                            targetCtx.lineTo(
-                                point.x,
-                                point.y
-                            );
-
-                        }
-
-                    }
-                );
-
-
-                targetCtx.closePath();
-
-
-                targetCtx.fillStyle =
-                    "rgba(34,197,94,.15)";
-
-
-                targetCtx.strokeStyle =
-                    "#22c55e";
-
-
-                targetCtx.lineWidth =
-                    3;
-
-
-                targetCtx.fill();
-
-                targetCtx.stroke();
-
-
-                drawExportLabel(
-                    targetCtx,
-                    annotation.label,
-                    annotation.confidence,
-                    annotation.points[0].x,
-                    annotation.points[0].y
-                );
-
             }
+        );
+
+        context.closePath();
+
+        if (
+            a.type === "segmentation"
+        ) {
+
+            context.fill();
+
+        }
+
+        context.stroke();
+
+    }
+
+    context.restore();
+
+}
 
 
-            targetCtx.restore();
+/* =========================================================
+   EXPORT JSON
+========================================================= */
+
+document
+    .getElementById(
+        "exportJSON"
+    )
+    .addEventListener(
+        "click",
+        exportTrainingData
+    );
+
+
+function exportTrainingData() {
+
+    const data = {
+
+        version:
+            "1.0",
+
+        source:
+            fileName.textContent,
+
+        mediaType:
+            state.mediaType,
+
+        createdAt:
+            new Date().toISOString(),
+
+        annotationPolicy: {
+
+            occlusion:
+                [
+                    0,
+                    25,
+                    50,
+                    75,
+                    100
+                ],
+
+            truncation:
+                [
+                    "NONE",
+                    "SLIGHT",
+                    "PARTIAL",
+                    "SEVERE"
+                ]
+
+        },
+
+        frames:
+            state.mediaType === "video"
+                ? exportAllFrames()
+                : [
+                    {
+                        frame: 0,
+
+                        annotations:
+                            exportAnnotations(
+                                state.annotations
+                            )
+                    }
+                ]
+
+    };
+
+
+    downloadJSON(
+        data,
+        getExportName(
+            "training-data",
+            "json"
+        )
+    );
+
+}
+
+
+function exportAllFrames() {
+
+    const frames = [];
+
+    const keys =
+        [...state.frameAnnotations.keys()]
+            .sort(
+                (a, b) => a - b
+            );
+
+
+    /*
+     * Include current frame too.
+     */
+
+    const currentCopy =
+        structuredClone(
+            state.annotations
+        );
+
+    state.frameAnnotations.set(
+        state.currentFrame,
+        currentCopy
+    );
+
+
+    const allKeys =
+        [
+            ...new Set(
+                [
+                    ...keys,
+                    state.currentFrame
+                ]
+            )
+        ]
+        .sort(
+            (a, b) => a - b
+        );
+
+
+    allKeys.forEach(
+        frame => {
+
+            const annotations =
+                state.frameAnnotations.get(
+                    frame
+                ) || [];
+
+            frames.push({
+
+                frame,
+
+                time:
+                    frame /
+                    state.fps,
+
+                annotations:
+                    exportAnnotations(
+                        annotations
+                    )
+
+            });
 
         }
     );
 
-}
 
-
-/* =========================================================
-   EXPORT LABEL
-   ========================================================= */
-
-function drawExportLabel(
-    targetCtx,
-    label,
-    confidence,
-    x,
-    y
-) {
-
-    const text =
-        `${label} ${
-            Math.round(
-                confidence *
-                100
-            )
-        }%`;
-
-
-    targetCtx.font =
-        "bold 18px Arial";
-
-
-    const width =
-        targetCtx.measureText(
-            text
-        ).width +
-        14;
-
-
-    const height =
-        26;
-
-
-    const top =
-        Math.max(
-            0,
-            y -
-            height
-        );
-
-
-    targetCtx.fillStyle =
-        "#111827";
-
-
-    targetCtx.fillRect(
-        x,
-        top,
-        width,
-        height
-    );
-
-
-    targetCtx.fillStyle =
-        "#ffffff";
-
-
-    targetCtx.fillText(
-        text,
-        x +
-            7,
-        top +
-            19
-    );
+    return frames;
 
 }
 
 
-/* =========================================================
-   JSON EXPORT
-   ========================================================= */
-
-function downloadAnnotationJSON(
+function exportAnnotations(
     annotations
 ) {
 
-    const data = {
+    return annotations
+        .filter(
+            a =>
+                a.export !== false
+        )
+        .map(
+            a => ({
 
-        application:
-            "AI Annotation Studio Pro",
+                id:
+                    a.id,
 
-        version:
-            "2.0",
+                type:
+                    a.type,
 
-        image:
-            state.imageName,
+                class:
+                    a.label,
 
-        imageWidth:
-            state.imageWidth,
+                occlusion:
+                    a.occlusion ?? 0,
 
-        imageHeight:
-            state.imageHeight,
+                truncation:
+                    a.truncation || "NONE",
 
-        annotationType:
-            state.annotationType,
+                corrected:
+                    !!a.corrected,
 
-        classifications:
-            [
-                ...state.classifications
-            ],
+                aiGenerated:
+                    !!a.aiGenerated,
 
-        excludedClassifications:
-            [
-                ...state.excludedClassifications
-            ],
+                box:
+                    a.type === "box"
+                        ? {
+                            x: a.x,
+                            y: a.y,
+                            width: a.width,
+                            height: a.height
+                        }
+                        : undefined,
 
-        annotations
+                points:
+                    a.points
+                        ? a.points.map(
+                            p => ({
+                                x: p.x,
+                                y: p.y
+                            })
+                        )
+                        : undefined
 
-    };
+            })
+        );
 
+}
+
+
+/* =========================================================
+   CURRENT FRAME JSON
+========================================================= */
+
+document
+    .getElementById(
+        "exportFrameJSON"
+    )
+    .addEventListener(
+        "click",
+        () => {
+
+            const data = {
+
+                source:
+                    fileName.textContent,
+
+                frame:
+                    state.currentFrame,
+
+                time:
+                    state.currentTime,
+
+                annotations:
+                    exportAnnotations(
+                        state.annotations
+                    )
+
+            };
+
+            downloadJSON(
+                data,
+                getExportName(
+                    `frame-${state.currentFrame}`,
+                    "json"
+                )
+            );
+
+        }
+    );
+
+
+/* =========================================================
+   DOWNLOAD HELPERS
+========================================================= */
+
+function downloadJSON(
+    data,
+    filename
+) {
 
     const blob =
         new Blob(
@@ -5428,1035 +4736,141 @@ function downloadAnnotationJSON(
             }
         );
 
-
-    const url =
-        URL.createObjectURL(
-            blob
-        );
-
-
-    const link =
-        document.createElement(
-            "a"
-        );
-
-
-    link.href =
-        url;
-
-
-    link.download =
-        `${removeExtension(
-            state.imageName
-        )}_annotations.json`;
-
-
-    link.click();
-
-
-    URL.revokeObjectURL(
-        url
+    downloadBlob(
+        blob,
+        filename
     );
 
 }
 
 
-/* =========================================================
-   TRAINING DATA
-   ========================================================= */
-
-function saveTrainingSnapshot() {
-
-    if (
-        !state.imageName
-    ) {
-
-        return;
-
-    }
-
-
-    const training =
-        loadJSON(
-            CONFIG.storage.training,
-            []
-        );
-
-
-    training.push({
-
-        id:
-            createId(),
-
-        timestamp:
-            new Date()
-                .toISOString(),
-
-        image:
-            state.imageName,
-
-        width:
-            state.imageWidth,
-
-        height:
-            state.imageHeight,
-
-        annotations:
-            clone(
-                state.annotations
-            )
-
-    });
-
-
-    saveJSON(
-        CONFIG.storage.training,
-        training.slice(
-            -CONFIG.maxHistory
-        )
-    );
-
-}
-
-
-function updateTrainingPage() {
-
-    const training =
-        loadJSON(
-            CONFIG.storage.training,
-            []
-        );
-
-
-    const corrections =
-        training.reduce(
-            (
-                total,
-                item
-            ) =>
-                total +
-                item.annotations.filter(
-                    annotation =>
-                        annotation.source ===
-                        "human"
-                ).length,
-            0
-        );
-
-
-    const objects =
-        training.reduce(
-            (
-                total,
-                item
-            ) =>
-                total +
-                item.annotations.length,
-            0
-        );
-
-
-    setText(
-        "#trainingImages",
-        training.length
-    );
-
-
-    setText(
-        "#trainingCorrections",
-        corrections
-    );
-
-
-    setText(
-        "#trainingObjects",
-        objects
-    );
-
-
-    const list =
-        $("#trainingList");
-
-
-    if (!list) {
-        return;
-    }
-
-
-    if (
-        training.length ===
-        0
-    ) {
-
-        list.textContent =
-            "No training examples yet.";
-
-        return;
-
-    }
-
-
-    list.innerHTML =
-        training
-            .slice()
-            .reverse()
-            .slice(
-                0,
-                50
-            )
-            .map(
-                item =>
-                    `
-
-                    <div class="object-row">
-
-                        <div class="object-info">
-
-                            <div class="object-name">
-                                ${escapeHtml(
-                                    item.image
-                                )}
-                            </div>
-
-                            <div class="object-meta">
-                                ${item.annotations.length}
-                                annotations •
-                                ${new Date(
-                                    item.timestamp
-                                ).toLocaleString()}
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                    `
-            )
-            .join("");
-
-}
-
-
-/* =========================================================
-   TRAINING EXPORT
-   ========================================================= */
-
-function exportTraining() {
-
-    const training =
-        loadJSON(
-            CONFIG.storage.training,
-            []
-        );
-
-
-    if (
-        training.length ===
-        0
-    ) {
-
-        showToast(
-            "There is no training data yet."
-        );
-
-        return;
-
-    }
-
-
-    const blob =
-        new Blob(
-            [
-                JSON.stringify(
-                    training,
-                    null,
-                    2
-                )
-            ],
-            {
-                type:
-                    "application/json"
-            }
-        );
-
-
-    const url =
-        URL.createObjectURL(
-            blob
-        );
-
-
-    const link =
-        document.createElement(
-            "a"
-        );
-
-
-    link.href =
-        url;
-
-
-    link.download =
-        "annotation_training_data.json";
-
-
-    link.click();
-
-
-    URL.revokeObjectURL(
-        url
-    );
-
-
-    showToast(
-        "Training data exported."
-    );
-
-}
-
-
-/* =========================================================
-   RULES
-   ========================================================= */
-
-function saveRules() {
-
-    const input =
-        $("#rulesInput");
-
-
-    if (!input) {
-        return;
-    }
-
-
-    localStorage.setItem(
-        CONFIG.storage.rules,
-        input.value.trim()
-    );
-
-
-    showToast(
-        "Annotation rules saved."
-    );
-
-}
-
-
-/* =========================================================
-   LOCAL DATA
-   ========================================================= */
-
-function loadLocalData() {
-
-    const rules =
-        localStorage.getItem(
-            CONFIG.storage.rules
-        );
-
-
-    const input =
-        $("#rulesInput");
-
-
-    if (
-        rules &&
-        input
-    ) {
-
-        input.value =
-            rules;
-
-    }
-
-
-    const savedClasses =
-        loadJSON(
-            CONFIG.storage.classifications,
-            []
-        );
-
-
-    savedClasses.forEach(
-        label =>
-            state.classifications.add(
-                label
-            )
-    );
-
-}
-
-
-/* =========================================================
-   HISTORY
-   ========================================================= */
-
-function saveHistory() {
-
-    const history =
-        loadJSON(
-            CONFIG.storage.history,
-            []
-        );
-
-
-    history.push({
-
-        id:
-            createId(),
-
-        timestamp:
-            new Date()
-                .toISOString(),
-
-        image:
-            state.imageName,
-
-        annotationCount:
-            state.annotations.length,
-
-        annotationType:
-            state.annotationType
-
-    });
-
-
-    saveJSON(
-        CONFIG.storage.history,
-        history.slice(
-            -CONFIG.maxHistory
-        )
-    );
-
-}
-
-
-function updateHistoryPage() {
-
-    const history =
-        loadJSON(
-            CONFIG.storage.history,
-            []
-        );
-
-
-    const list =
-        $("#historyList");
-
-
-    if (!list) {
-        return;
-    }
-
-
-    if (
-        history.length ===
-        0
-    ) {
-
-        list.textContent =
-            "No history.";
-
-        return;
-
-    }
-
-
-    list.innerHTML =
-        history
-            .slice()
-            .reverse()
-            .map(
-                item =>
-                    `
-
-                    <div class="object-row">
-
-                        <div class="object-info">
-
-                            <div class="object-name">
-                                ${escapeHtml(
-                                    item.image
-                                )}
-                            </div>
-
-                            <div class="object-meta">
-                                ${item.annotationCount}
-                                objects •
-                                ${item.annotationType} •
-                                ${new Date(
-                                    item.timestamp
-                                ).toLocaleString()}
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                    `
-            )
-            .join("");
-
-}
-
-
-function clearHistory() {
-
-    if (
-        !confirm(
-            "Clear annotation history?"
-        )
-    ) {
-
-        return;
-
-    }
-
-
-    localStorage.removeItem(
-        CONFIG.storage.history
-    );
-
-
-    updateHistoryPage();
-
-}
-
-
-/* =========================================================
-   QUALITY
-   ========================================================= */
-
-function updateQuality(
-    annotations
+function downloadBlob(
+    blob,
+    filename
 ) {
 
-    const scoreElement =
-        $("#qualityScore");
-
-
-    const messageElement =
-        $("#qualityMessages");
-
-
-    if (
-        annotations.length ===
-        0
-    ) {
-
-        if (scoreElement) {
-
-            scoreElement.textContent =
-                "—";
-
-        }
-
-
-        if (messageElement) {
-
-            messageElement.textContent =
-                "Run annotation to check quality.";
-
-        }
-
-
-        return;
-
-    }
-
-
-    let score =
-        annotations.reduce(
-            (
-                total,
-                annotation
-            ) =>
-                total +
-                annotation.confidence,
-            0
-        ) /
-        annotations.length;
-
-
-    const reviewCount =
-        annotations.filter(
-            annotation =>
-                annotation.review
-        ).length;
-
-
-    score =
-        clamp(
-            score,
-            0,
-            1
+    const url =
+        URL.createObjectURL(
+            blob
         );
 
+    const a =
+        document.createElement(
+            "a"
+        );
 
-    if (
-        scoreElement
-    ) {
+    a.href =
+        url;
 
-        scoreElement.textContent =
-            `${Math.round(
-                score *
-                100
-            )}%`;
+    a.download =
+        filename;
 
-    }
+    document.body.appendChild(
+        a
+    );
+
+    a.click();
+
+    a.remove();
+
+    setTimeout(
+        () => {
+            URL.revokeObjectURL(
+                url
+            );
+        },
+        1000
+    );
+
+}
 
 
-    if (
-        messageElement
-    ) {
+function getExportName(
+    prefix,
+    extension
+) {
 
-        messageElement.innerHTML =
-            `
-            ${annotations.length} objects detected.<br>
-            ${reviewCount} require review.
-            `;
+    const base =
+        fileName.textContent
+            .replace(
+                /\.[^/.]+$/,
+                ""
+            )
+            .replace(
+                /[^a-z0-9_-]/gi,
+                "_"
+            );
 
-    }
+    return (
+        base +
+        "_" +
+        prefix +
+        "." +
+        extension
+    );
 
 }
 
 
 /* =========================================================
-   STATUS
-   ========================================================= */
+   AI STATUS
+========================================================= */
 
 function setAIStatus(
     text
 ) {
 
-    const element =
-        $("#aiStatus");
-
-
-    if (element) {
-
-        element.textContent =
-            text;
-
-    }
-
-}
-
-
-function setProcessing(
-    text
-) {
-
-    const element =
-        $("#processingStatus");
-
-
-    if (element) {
-
-        element.textContent =
-            text;
-
-    }
-
-}
-
-
-function showToast(
-    message
-) {
-
-    const toast =
-        $("#toast");
-
-
-    const text =
-        $("#toastMessage");
-
-
-    if (
-        !toast ||
-        !text
-    ) {
-
-        console.log(
-            message
-        );
-
-        return;
-
-    }
-
-
-    text.textContent =
-        message;
-
-
-    toast.classList.add(
-        "show"
-    );
-
-
-    clearTimeout(
-        showToast.timer
-    );
-
-
-    showToast.timer =
-        setTimeout(
-            () => {
-
-                toast.classList.remove(
-                    "show"
-                );
-
-            },
-            4000
-        );
-
-}
-
-
-function showModal(
-    message
-) {
-
-    const modal =
-        $("#annotationModal");
-
-
-    const text =
-        $("#modalMessage");
-
-
-    if (
-        !modal ||
-        !text
-    ) {
-
-        return;
-
-    }
-
-
-    text.textContent =
-        message;
-
-
-    modal.classList.remove(
-        "hidden"
-    );
+    aiStatus.textContent =
+        text;
 
 }
 
 
 /* =========================================================
-   CURSOR
-   ========================================================= */
+   HTML ESCAPE
+========================================================= */
 
-function updateCursor() {
-
-    if (!canvas) {
-        return;
-    }
-
-
-    if (
-        state.activeTool ===
-        "pan"
-    ) {
-
-        canvas.style.cursor =
-            "grab";
-
-    }
-
-
-    else if (
-        state.activeTool ===
-        "draw"
-    ) {
-
-        canvas.style.cursor =
-            "crosshair";
-
-    }
-
-
-    else if (
-        state.activeTool ===
-        "erase"
-    ) {
-
-        canvas.style.cursor =
-            "not-allowed";
-
-    }
-
-
-    else {
-
-        canvas.style.cursor =
-            "default";
-
-    }
-
-}
-
-
-/* =========================================================
-   CANVAS INFO
-   ========================================================= */
-
-function updateCanvasInfo() {
-
-    setText(
-        "#objectCount",
-        `${state.annotations.length} objects`
-    );
-
-
-    setText(
-        "#objectSummary",
-        `${state.annotations.length} ${
-            state.annotations.length ===
-            1
-                ? "object"
-                : "objects"
-        }`
-    );
-
-}
-
-
-/* =========================================================
-   UTILITIES
-   ========================================================= */
-
-function createId() {
-
-    return (
-        Date.now()
-            .toString(
-                36
-            ) +
-        Math.random()
-            .toString(
-                36
-            )
-            .substring(
-                2,
-                10
-            )
-    );
-
-}
-
-
-function normalizeLabel(
-    label
-) {
-
-    return String(
-        label ||
-        "unknown"
-    )
-        .trim()
-        .toLowerCase();
-
-}
-
-
-function removeExtension(
-    filename
-) {
-
-    return String(
-        filename ||
-        "image"
-    )
-        .replace(
-            /\.[^/.]+$/,
-            ""
-        );
-
-}
-
-
-function escapeHtml(
+function escapeHTML(
     value
 ) {
 
     return String(
-        value
+        value ?? ""
     )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
-
-}
-
-
-function escapeAttr(
-    value
-) {
-
-    return escapeHtml(
-        value
+    .replace(
+        /&/g,
+        "&amp;"
+    )
+    .replace(
+        /</g,
+        "&lt;"
+    )
+    .replace(
+        />/g,
+        "&gt;"
+    )
+    .replace(
+        /"/g,
+        "&quot;"
+    )
+    .replace(
+        /'/g,
+        "&#039;"
     );
-
-}
-
-
-function clone(
-    value
-) {
-
-    return JSON.parse(
-        JSON.stringify(
-            value
-        )
-    );
-
-}
-
-
-function clamp(
-    value,
-    min,
-    max
-) {
-
-    return Math.max(
-        min,
-        Math.min(
-            max,
-            value
-        )
-    );
-
-}
-
-
-function setText(
-    selector,
-    value
-) {
-
-    const element =
-        $(selector);
-
-
-    if (element) {
-
-        element.textContent =
-            value;
-
-    }
-
-}
-
-
-function saveJSON(
-    key,
-    value
-) {
-
-    localStorage.setItem(
-        key,
-        JSON.stringify(
-            value
-        )
-    );
-
-}
-
-
-function loadJSON(
-    key,
-    fallback
-) {
-
-    try {
-
-        return JSON.parse(
-            localStorage.getItem(
-                key
-            ) ||
-            JSON.stringify(
-                fallback
-            )
-        );
-
-    } catch {
-
-        return fallback;
-
-    }
 
 }
 
 
 /* =========================================================
-   SAVE CLASSIFICATIONS
-   ========================================================= */
+   INITIAL STATE
+========================================================= */
 
-window.addEventListener(
-    "beforeunload",
-    () => {
+updateZoomUI();
 
-        saveJSON(
-            CONFIG.storage.classifications,
-            [
-                ...state.classifications
-            ]
-        );
+updateCounts();
 
-    }
-);
+renderClassificationCard();
 
+renderDetails();
 
-/* =========================================================
-   EXTRA GLOBAL ACTIONS
-   ========================================================= */
-
-window.AnnotationStudio = {
-
-    addClassification,
-
-    addObjectWithClassification,
-
-    deleteSelected,
-
-    undo,
-
-    redo,
-
-    setZoom,
-
-    fit:
-        calculateFitZoom,
-
-    getAnnotations:
-        () =>
-            clone(
-                state.annotations
-            )
-
-};
+render();
