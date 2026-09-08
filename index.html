@@ -2,50 +2,69 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Customer Image Annotation AI</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-    <link rel="stylesheet" href="styles.css">
+    <title>Customer Annotation AI</title>
 
-    <script type="importmap">
-    {
-        "imports": {
-            "@huggingface/transformers":
-                "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0"
-        }
-    }
-    </script>
+    <!-- Keep your existing styles.css -->
+    <link rel="stylesheet" href="./styles.css">
 </head>
 
 <body>
 
 <div class="app">
 
-    <!-- ========================================================= -->
-    <!-- LEFT SIDEBAR -->
-    <!-- ========================================================= -->
+    <!-- =====================================================
+         LEFT SIDEBAR
+    ====================================================== -->
 
     <aside class="sidebar">
 
         <div class="brand">
-            <div class="brand-icon">AI</div>
+
+            <div class="brand-icon">
+                AI
+            </div>
 
             <div>
                 <h1>ANNOTATION AI</h1>
                 <span>Customer Data Studio</span>
             </div>
+
         </div>
 
-        <!-- UPLOAD -->
+
+        <!-- =================================================
+             UPLOAD
+        ================================================== -->
+
         <section class="panel">
 
             <div class="section-title">
                 <span>1</span>
-                UPLOAD CUSTOMER DATA
+                CUSTOMER IMAGE / VIDEO
             </div>
 
-            <label class="upload-box">
+            <label
+                class="upload-box"
+                for="mediaInput"
+            >
+
+                <div class="upload-icon">
+                    ↑
+                </div>
+
+                <strong>
+                    Upload Image or Video
+                </strong>
+
+                <small>
+                    JPG • PNG • WEBP • MP4 • MOV • WEBM
+                </small>
 
                 <input
                     id="mediaInput"
@@ -54,24 +73,22 @@
                     hidden
                 >
 
-                <div class="upload-icon">↑</div>
-
-                <strong>Upload Image / Video</strong>
-
-                <small>
-                    JPG, PNG, WEBP, MP4, MOV, WebM
-                </small>
-
             </label>
 
-            <div id="mediaInfo" class="media-info">
-                No media loaded
+            <div
+                id="mediaInfo"
+                class="media-info"
+            >
+                No customer media loaded
             </div>
 
         </section>
 
 
-        <!-- FRAME CONTROLS -->
+        <!-- =================================================
+             VIDEO CONTROLS
+        ================================================== -->
+
         <section
             class="panel"
             id="videoControlsPanel"
@@ -80,24 +97,30 @@
 
             <div class="section-title">
                 <span>2</span>
-                VIDEO FRAMES
+                VIDEO FRAME CONTROL
             </div>
 
             <div class="video-buttons">
 
-                <button id="previousFrame" title="Previous frame">
+                <button
+                    id="previousFrame"
+                    type="button"
+                >
                     ◀
                 </button>
 
                 <button
                     id="playVideo"
                     class="play-button"
-                    title="Play / Pause"
+                    type="button"
                 >
                     ▶
                 </button>
 
-                <button id="nextFrame" title="Next frame">
+                <button
+                    id="nextFrame"
+                    type="button"
+                >
                     ▶
                 </button>
 
@@ -105,16 +128,20 @@
 
             <div class="frame-info">
 
-                <div>
+                <span>
                     Frame
-                    <strong id="currentFrame">0</strong>
+                    <strong id="currentFrame">
+                        0
+                    </strong>
                     /
-                    <strong id="totalFrames">0</strong>
-                </div>
+                    <strong id="totalFrames">
+                        0
+                    </strong>
+                </span>
 
-                <div>
-                    <span id="videoTime">00:00.000</span>
-                </div>
+                <span id="videoTime">
+                    00:00.000
+                </span>
 
             </div>
 
@@ -128,14 +155,18 @@
             >
 
             <small class="keyboard-help">
-                ← Previous frame &nbsp; | &nbsp; →
-                Next frame &nbsp; | &nbsp; Space Play/Pause
+                ← Previous frame |
+                → Next frame |
+                Space Play/Pause
             </small>
 
         </section>
 
 
-        <!-- ANNOTATION TYPE -->
+        <!-- =================================================
+             ANNOTATION TYPE
+        ================================================== -->
+
         <section class="panel">
 
             <div class="section-title">
@@ -146,26 +177,29 @@
             <div class="annotation-types">
 
                 <button
+                    type="button"
                     class="annotation-type active"
                     data-tool="box"
                 >
-                    <span>▣</span>
+                    ▣
                     2D BOX
                 </button>
 
                 <button
+                    type="button"
                     class="annotation-type"
                     data-tool="polygon"
                 >
-                    <span>◇</span>
+                    ◇
                     POLYGON
                 </button>
 
                 <button
+                    type="button"
                     class="annotation-type"
                     data-tool="segmentation"
                 >
-                    <span>◈</span>
+                    ◈
                     SEGMENTATION
                 </button>
 
@@ -174,17 +208,21 @@
         </section>
 
 
-        <!-- TOOLS -->
+        <!-- =================================================
+             EDIT TOOLS
+        ================================================== -->
+
         <section class="panel">
 
             <div class="section-title">
                 <span>4</span>
-                ANNOTATION TOOLS
+                EDIT TOOLS
             </div>
 
             <div class="tool-grid">
 
                 <button
+                    type="button"
                     class="tool-button active"
                     data-mode="select"
                 >
@@ -192,6 +230,7 @@
                 </button>
 
                 <button
+                    type="button"
                     class="tool-button"
                     data-mode="draw"
                 >
@@ -199,6 +238,7 @@
                 </button>
 
                 <button
+                    type="button"
                     class="tool-button"
                     data-mode="pan"
                 >
@@ -206,6 +246,7 @@
                 </button>
 
                 <button
+                    type="button"
                     class="tool-button"
                     data-mode="erase"
                 >
@@ -216,6 +257,7 @@
 
             <button
                 id="deleteSelected"
+                type="button"
                 class="danger-button"
             >
                 DELETE SELECTED
@@ -224,7 +266,10 @@
         </section>
 
 
-        <!-- AI -->
+        <!-- =================================================
+             AI
+        ================================================== -->
+
         <section class="panel">
 
             <div class="section-title">
@@ -236,7 +281,10 @@
                 AI ENGINE
             </label>
 
-            <select id="aiEngine" class="select">
+            <select
+                id="aiEngine"
+                class="select"
+            >
 
                 <option value="detr">
                     DETR — COCO
@@ -248,6 +296,7 @@
 
             </select>
 
+
             <label class="field-label">
                 CONFIDENCE FILTER
             </label>
@@ -257,7 +306,7 @@
                 <input
                     id="confidence"
                     type="range"
-                    min="0.1"
+                    min="0.10"
                     max="0.95"
                     value="0.45"
                     step="0.05"
@@ -268,6 +317,7 @@
                 </span>
 
             </div>
+
 
             <label class="checkbox-row">
 
@@ -281,23 +331,25 @@
 
             </label>
 
+
             <textarea
                 id="rules"
                 class="rules-box"
-                placeholder="Example:
-
-include: car, truck, bus, person
+                placeholder="include: car, truck, bus, person
 exclude: dog
 rename: automobile=car
 min_confidence: 0.45"
             ></textarea>
 
+
             <button
                 id="autoAnnotate"
+                type="button"
                 class="primary-button"
             >
                 ✨ AUTO ANNOTATE
             </button>
+
 
             <div
                 id="aiStatus"
@@ -309,18 +361,21 @@ min_confidence: 0.45"
         </section>
 
 
-        <!-- CLASSIFICATIONS -->
+        <!-- =================================================
+             CLASSIFICATION
+        ================================================== -->
+
         <section class="panel">
 
             <div class="section-title">
                 <span>6</span>
-                CLASSIFICATIONS
+                OBJECT CLASSIFICATION
             </div>
 
             <div id="classificationCard">
 
                 <div class="empty-card">
-                    Select an annotation
+                    Select a box to classify it
                 </div>
 
             </div>
@@ -328,7 +383,10 @@ min_confidence: 0.45"
         </section>
 
 
-        <!-- EXPORT -->
+        <!-- =================================================
+             EXPORT
+        ================================================== -->
+
         <section class="panel">
 
             <div class="section-title">
@@ -338,6 +396,7 @@ min_confidence: 0.45"
 
             <button
                 id="exportImage"
+                type="button"
                 class="export-button"
             >
                 ↓ Annotated Image
@@ -345,6 +404,7 @@ min_confidence: 0.45"
 
             <button
                 id="exportJSON"
+                type="button"
                 class="export-button"
             >
                 ↓ Training JSON
@@ -352,6 +412,7 @@ min_confidence: 0.45"
 
             <button
                 id="exportFrameJSON"
+                type="button"
                 class="export-button"
             >
                 ↓ Current Frame JSON
@@ -362,9 +423,9 @@ min_confidence: 0.45"
     </aside>
 
 
-    <!-- ========================================================= -->
-    <!-- MAIN WORKSPACE -->
-    <!-- ========================================================= -->
+    <!-- =====================================================
+         MAIN WORKSPACE
+    ====================================================== -->
 
     <main class="workspace">
 
@@ -381,10 +442,15 @@ min_confidence: 0.45"
 
                 <div class="workspace-subtitle">
 
-                    <span id="objectCount">0</span>
+                    <span id="objectCount">
+                        0
+                    </span>
+
                     annotations
 
-                    <span class="separator">•</span>
+                    <span class="separator">
+                        •
+                    </span>
 
                     <span id="annotationMode">
                         2D BOX
@@ -397,19 +463,35 @@ min_confidence: 0.45"
 
             <div class="zoom-controls">
 
-                <button id="zoomOut">−</button>
+                <button
+                    id="zoomOut"
+                    type="button"
+                >
+                    −
+                </button>
 
                 <span id="zoomValue">
                     100%
                 </span>
 
-                <button id="zoomIn">+</button>
+                <button
+                    id="zoomIn"
+                    type="button"
+                >
+                    +
+                </button>
 
-                <button id="fitView">
+                <button
+                    id="fitView"
+                    type="button"
+                >
                     FIT
                 </button>
 
-                <button id="resetView">
+                <button
+                    id="resetView"
+                    type="button"
+                >
                     RESET
                 </button>
 
@@ -418,13 +500,19 @@ min_confidence: 0.45"
         </header>
 
 
-        <!-- CANVAS -->
+        <!-- =================================================
+             CANVAS WORKSPACE
+        ================================================== -->
+
         <div
             id="canvasWorkspace"
             class="canvas-workspace"
         >
 
-            <canvas id="annotationCanvas"></canvas>
+            <canvas
+                id="annotationCanvas"
+            ></canvas>
+
 
             <div
                 id="emptyWorkspace"
@@ -440,7 +528,7 @@ min_confidence: 0.45"
                 </h2>
 
                 <p>
-                    Upload an image or video to begin annotation
+                    Upload a photo or video to begin
                 </p>
 
             </div>
@@ -448,34 +536,27 @@ min_confidence: 0.45"
         </div>
 
 
-        <!-- BOTTOM STATUS -->
         <footer class="workspace-footer">
 
             <div>
-
                 Tool:
                 <strong id="activeTool">
                     Select
                 </strong>
-
             </div>
 
             <div>
-
                 Zoom:
                 <strong id="footerZoom">
                     100%
                 </strong>
-
             </div>
 
             <div>
-
                 Selected:
                 <strong id="selectedObject">
                     None
                 </strong>
-
             </div>
 
         </footer>
@@ -483,9 +564,9 @@ min_confidence: 0.45"
     </main>
 
 
-    <!-- ========================================================= -->
-    <!-- RIGHT INFORMATION PANEL -->
-    <!-- ========================================================= -->
+    <!-- =====================================================
+         RIGHT PANEL
+    ====================================================== -->
 
     <aside class="right-panel">
 
@@ -506,8 +587,8 @@ min_confidence: 0.45"
                 </strong>
 
                 <span>
-                    Click an object in the workspace
-                    to edit its classification.
+                    Click an object to edit
+                    its classification.
                 </span>
 
             </div>
@@ -515,7 +596,10 @@ min_confidence: 0.45"
         </div>
 
 
-        <!-- WORKFLOW -->
+        <!-- =================================================
+             CUSTOMER WORKFLOW
+        ================================================== -->
+
         <div class="workflow">
 
             <div class="right-title">
@@ -528,44 +612,67 @@ min_confidence: 0.45"
                     CUSTOMER IMAGE
                 </div>
 
-                <div class="flow-arrow">│</div>
-                <div class="flow-arrow">▼</div>
+                <div class="flow-arrow">
+                    │
+                </div>
+
+                <div class="flow-arrow">
+                    ▼
+                </div>
+
 
                 <div class="flow-node">
                     Annotation AI
                 </div>
 
-                <div class="flow-arrow">│</div>
+                <div class="flow-arrow">
+                    │
+                </div>
+
 
                 <div class="flow-three">
 
                     <div>
-                        <b>2D BOX</b>
+                        2D BOX
                     </div>
 
                     <div>
-                        <b>SEGMENTATION</b>
+                        SEGMENTATION
                     </div>
 
                     <div>
-                        <b>POLYGON</b>
+                        POLYGON
                     </div>
 
                 </div>
 
-                <div class="flow-arrow">│</div>
-                <div class="flow-arrow">▼</div>
+
+                <div class="flow-arrow">
+                    │
+                </div>
+
+                <div class="flow-arrow">
+                    ▼
+                </div>
+
 
                 <div class="flow-node">
                     RULE ENGINE
                 </div>
 
-                <div class="flow-arrow">│</div>
-                <div class="flow-arrow">▼</div>
+                <div class="flow-arrow">
+                    │
+                </div>
+
+                <div class="flow-arrow">
+                    ▼
+                </div>
+
 
                 <div class="flow-node human">
                     HUMAN CORRECTION
                 </div>
+
 
                 <div class="flow-split">
 
@@ -579,15 +686,29 @@ min_confidence: 0.45"
 
                 </div>
 
-                <div class="flow-arrow">│</div>
-                <div class="flow-arrow">▼</div>
+
+                <div class="flow-arrow">
+                    │
+                </div>
+
+                <div class="flow-arrow">
+                    ▼
+                </div>
+
 
                 <div class="flow-node">
                     TRAINING DATA
                 </div>
 
-                <div class="flow-arrow">│</div>
-                <div class="flow-arrow">▼</div>
+
+                <div class="flow-arrow">
+                    │
+                </div>
+
+                <div class="flow-arrow">
+                    ▼
+                </div>
+
 
                 <div class="flow-node model">
                     CUSTOMER MODEL
@@ -602,7 +723,10 @@ min_confidence: 0.45"
 </div>
 
 
-<!-- Hidden video used for extracting frames -->
+<!-- =========================================================
+     HIDDEN VIDEO
+========================================================== -->
+
 <video
     id="sourceVideo"
     muted
@@ -612,7 +736,16 @@ min_confidence: 0.45"
 ></video>
 
 
-<script type="module" src="app.js"></script>
+<!-- =========================================================
+     IMPORTANT:
+     NO IMPORTMAP.
+     app.js imports Transformers.js directly.
+========================================================== -->
+
+<script
+    type="module"
+    src="./app.js"
+></script>
 
 </body>
 </html>
