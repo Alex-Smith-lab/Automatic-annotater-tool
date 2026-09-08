@@ -1,86 +1,92 @@
+/*
+==============================================================
+ CUSTOMER ANNOTATION AI
+ GitHub Pages / Static Hosting Version
+
+ Supports:
+
+ IMAGE
+ VIDEO
+
+ 2D BOX
+ POLYGON
+ SEGMENTATION
+
+ DETR
+ YOLO
+
+ VIDEO FRAME NAVIGATION
+ ARROW KEYS
+ PLAY / PAUSE
+
+ ZOOM
+ PAN
+ CAMERA EDGE ANNOTATION
+
+ BOX RESIZE
+ POLYGON EDIT
+ DELETE
+
+ OBJECT CLASS
+ OCCLUSION
+ TRUNCATION
+
+ JSON EXPORT
+ ANNOTATED IMAGE EXPORT
+==============================================================
+*/
+
+
+/* ============================================================
+   TRANSFORMERS.JS
+
+   Direct CDN import.
+   This avoids import-map/deployment problems.
+============================================================ */
+
 import {
     pipeline,
-    env,
-    RawImage
-} from "@huggingface/transformers";
+    env
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
 
 
-/* =========================================================
-   TRANSFORMERS.JS SETTINGS
-========================================================= */
-
+/*
+ * Models are downloaded from Hugging Face.
+ */
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
 
 
-/* =========================================================
+/* ============================================================
    DOM
-========================================================= */
+============================================================ */
+
+const $ = id =>
+    document.getElementById(id);
+
 
 const canvas =
-    document.getElementById("annotationCanvas");
+    $("annotationCanvas");
 
 const ctx =
     canvas.getContext("2d");
 
 const workspace =
-    document.getElementById("canvasWorkspace");
+    $("canvasWorkspace");
 
 const mediaInput =
-    document.getElementById("mediaInput");
+    $("mediaInput");
 
 const sourceVideo =
-    document.getElementById("sourceVideo");
+    $("sourceVideo");
 
 const emptyWorkspace =
-    document.getElementById("emptyWorkspace");
-
-const fileName =
-    document.getElementById("fileName");
-
-const objectCount =
-    document.getElementById("objectCount");
-
-const annotationMode =
-    document.getElementById("annotationMode");
-
-const activeToolLabel =
-    document.getElementById("activeTool");
-
-const selectedObjectLabel =
-    document.getElementById("selectedObject");
-
-const zoomValue =
-    document.getElementById("zoomValue");
-
-const footerZoom =
-    document.getElementById("footerZoom");
-
-const classificationCard =
-    document.getElementById("classificationCard");
-
-const annotationDetails =
-    document.getElementById("annotationDetails");
-
-const aiStatus =
-    document.getElementById("aiStatus");
-
-const confidence =
-    document.getElementById("confidence");
-
-const confidenceValue =
-    document.getElementById("confidenceValue");
-
-const aiEngine =
-    document.getElementById("aiEngine");
-
-const rulesInput =
-    document.getElementById("rules");
+    $("emptyWorkspace");
 
 
-/* =========================================================
-   APPLICATION STATE
-========================================================= */
+/* ============================================================
+   STATE
+============================================================ */
 
 const state = {
 
@@ -102,11 +108,18 @@ const state = {
 
     currentTime: 0,
 
-    isPlaying: false,
+    videoPlaying: false,
 
-    /* -----------------------------------------------------
-       View
-    ----------------------------------------------------- */
+    videoSeeking: false,
+
+    frameCaptureBusy: false,
+
+    animationFrame: null,
+
+
+    /* -------------------------
+       VIEW
+    ------------------------- */
 
     scale: 1,
 
@@ -114,285 +127,313 @@ const state = {
 
     offsetY: 0,
 
-    minScale: 0.05,
+    minScale: 0.03,
 
-    maxScale: 20,
+    maxScale: 25,
 
-    /* -----------------------------------------------------
-       Tools
-    ----------------------------------------------------- */
+
+    /* -------------------------
+       ANNOTATION
+    ------------------------- */
 
     annotationType: "box",
 
     mode: "select",
 
+    annotations: [],
+
     selectedId: null,
 
     hoveredId: null,
 
-    isPointerDown: false,
+    nextId: 1,
 
-    isPanning: false,
 
-    isDrawing: false,
+    /* -------------------------
+       DRAWING
+    ------------------------- */
 
-    resizeHandle: null,
+    drawing: false,
 
-    dragStart: null,
+    drawStart: null,
+
+    drawCurrent: null,
 
     polygonPoints: [],
 
-    /* -----------------------------------------------------
-       Annotations
-    ----------------------------------------------------- */
 
-    annotations: [],
+    /* -------------------------
+       DRAGGING
+    ------------------------- */
+
+    pointerDown: false,
+
+    dragging: false,
+
+    panning: false,
+
+    resizeHandle: null,
+
+    dragStartImage: null,
+
+    dragLastImage: null,
+
+    panStart: null,
+
+
+    /* -------------------------
+       VIDEO ANNOTATIONS
+    ------------------------- */
 
     frameAnnotations: new Map(),
 
-    nextAnnotationId: 1,
 
-    /* -----------------------------------------------------
+    /* -------------------------
        AI
-    ----------------------------------------------------- */
+    ------------------------- */
 
     detr: null,
 
     yolo: null,
 
-    aiBusy: false,
-
-    /* -----------------------------------------------------
-       Video
-    ----------------------------------------------------- */
-
-    videoReady: false,
-
-    videoFrameRequest: null,
-
-    /* -----------------------------------------------------
-       Classification
-    ----------------------------------------------------- */
-
-    classes: new Set()
+    aiRunning: false
 
 };
 
 
-/* =========================================================
-   MODEL CONFIGURATION
-========================================================= */
+/* ============================================================
+   MODEL NAMES
+============================================================ */
 
 const MODELS = {
 
     detr:
         "Xenova/detr-resnet-50",
 
-    /*
-     * YOLO model supplied through Transformers.js.
-     *
-     * This is a COCO object detector.
-     */
     yolo:
         "Xenova/yolov9-c"
 
 };
 
 
-/* =========================================================
-   COCO LABEL NORMALIZATION
-========================================================= */
+/* ============================================================
+   NORMALIZATION
+============================================================ */
 
-const LABEL_MAP = {
+const LABEL_ALIASES = {
 
     automobile: "car",
 
-    "motor vehicle":
-        "car",
+    vehicle: "car",
 
-    vehicle:
-        "car",
+    "motor vehicle": "car",
 
-    "human":
-        "person",
+    human: "person",
 
-    cyclist:
-        "bicycle",
+    cyclist: "bicycle",
 
-    bike:
-        "bicycle"
+    bike: "bicycle"
 
 };
 
 
-/* =========================================================
-   INITIALIZE
-========================================================= */
-
-resizeCanvas();
+/* ============================================================
+   INITIALIZATION
+============================================================ */
 
 window.addEventListener(
     "resize",
     resizeCanvas
 );
 
+resizeCanvas();
 
-/* =========================================================
+updateZoomUI();
+
+updateCounts();
+
+renderClassification();
+
+renderDetails();
+
+
+/* ============================================================
    UPLOAD
-========================================================= */
+============================================================ */
 
 mediaInput.addEventListener(
     "change",
-    handleMediaUpload
+    async event => {
+
+        const file =
+            event.target.files &&
+            event.target.files[0];
+
+        if (!file) {
+            return;
+        }
+
+        try {
+
+            await loadCustomerMedia(
+                file
+            );
+
+        } catch (error) {
+
+            console.error(
+                error
+            );
+
+            alert(
+                "Could not load this media file.\n\n" +
+                error.message
+            );
+
+        }
+
+    }
 );
 
 
-async function handleMediaUpload(event) {
+/* ============================================================
+   LOAD CUSTOMER MEDIA
+============================================================ */
 
-    const file =
-        event.target.files?.[0];
+async function loadCustomerMedia(
+    file
+) {
 
-    if (!file) {
-        return;
-    }
-
-    resetApplication();
-
-    fileName.textContent =
-        file.name;
-
-    const sizeMB =
-        (file.size / 1024 / 1024)
-        .toFixed(2);
-
-    document.getElementById(
-        "mediaInfo"
-    ).textContent =
-        `${file.type || "media"} • ${sizeMB} MB`;
+    cleanupMedia();
 
     state.mediaType =
-        file.type.startsWith("video/")
+        file.type.startsWith(
+            "video/"
+        )
             ? "video"
             : "image";
 
-    const url =
-        URL.createObjectURL(file);
 
-    if (state.mediaType === "image") {
+    $("fileName").textContent =
+        file.name;
 
-        await loadImage(url);
 
-    } else {
+    $("mediaInfo").textContent =
+        `${file.type || "media"} • ` +
+        `${formatMB(file.size)} MB`;
 
-        await loadVideo(url);
-
-    }
 
     emptyWorkspace.style.display =
         "none";
 
+
+    if (
+        state.mediaType === "image"
+    ) {
+
+        await loadImageFile(
+            file
+        );
+
+    } else {
+
+        await loadVideoFile(
+            file
+        );
+
+    }
+
+
     fitView();
 
     render();
+
 }
 
 
-/* =========================================================
-   RESET
-========================================================= */
+/* ============================================================
+   IMAGE
+============================================================ */
 
-function resetApplication() {
-
-    if (state.imageURL) {
-
-        URL.revokeObjectURL(
-            state.imageURL
-        );
-
-    }
-
-    if (state.videoURL) {
-
-        URL.revokeObjectURL(
-            state.videoURL
-        );
-
-    }
-
-    state.image = null;
-
-    state.imageURL = null;
-
-    state.videoURL = null;
-
-    state.mediaType = null;
-
-    state.annotations = [];
-
-    state.frameAnnotations.clear();
-
-    state.selectedId = null;
-
-    state.currentFrame = 0;
-
-    state.currentTime = 0;
-
-    state.scale = 1;
-
-    state.offsetX = 0;
-
-    state.offsetY = 0;
-
-    updateCounts();
-
-    renderClassificationCard();
-
-    renderDetails();
-}
-
-
-/* =========================================================
-   LOAD IMAGE
-========================================================= */
-
-function loadImage(url) {
+function loadImageFile(
+    file
+) {
 
     return new Promise(
         (resolve, reject) => {
+
+            const url =
+                URL.createObjectURL(
+                    file
+                );
 
             const image =
                 new Image();
 
-            image.onload = () => {
+            image.onload =
+                () => {
 
-                state.image =
-                    image;
+                    state.image =
+                        image;
 
-                state.imageURL =
-                    url;
+                    state.imageURL =
+                        url;
 
-                resolve();
+                    state.annotations =
+                        [];
 
-            };
+                    state.selectedId =
+                        null;
+
+                    updateCounts();
+
+                    renderClassification();
+
+                    renderDetails();
+
+                    resolve();
+
+                };
 
             image.onerror =
-                reject;
+                () => {
 
-            image.src = url;
+                    URL.revokeObjectURL(
+                        url
+                    );
+
+                    reject(
+                        new Error(
+                            "The image could not be decoded."
+                        )
+                    );
+
+                };
+
+            image.src =
+                url;
 
         }
     );
+
 }
 
 
-/* =========================================================
-   LOAD VIDEO
-========================================================= */
+/* ============================================================
+   VIDEO
+============================================================ */
 
-function loadVideo(url) {
+function loadVideoFile(
+    file
+) {
 
     return new Promise(
         (resolve, reject) => {
+
+            const url =
+                URL.createObjectURL(
+                    file
+                );
 
             state.videoURL =
                 url;
@@ -402,229 +443,361 @@ function loadVideo(url) {
 
             sourceVideo.load();
 
+
             sourceVideo.onloadedmetadata =
                 () => {
-
-                    state.videoReady =
-                        true;
 
                     state.videoDuration =
                         sourceVideo.duration;
 
+                    /*
+                     * Browser video FPS is not always exposed.
+                     *
+                     * 30 FPS is used for frame navigation.
+                     *
+                     * This gives predictable:
+                     *
+                     * ←
+                     * →
+                     *
+                     * behaviour.
+                     */
+
+                    state.fps =
+                        30;
+
+
                     state.totalFrames =
                         Math.max(
                             1,
-                            Math.floor(
+                            Math.ceil(
                                 state.videoDuration *
                                 state.fps
                             )
                         );
 
-                    document.getElementById(
-                        "videoControlsPanel"
-                    ).style.display =
+
+                    $("videoControlsPanel")
+                        .style.display =
                         "block";
 
-                    document.getElementById(
-                        "frameSlider"
-                    ).max =
-                        state.totalFrames - 1;
 
-                    document.getElementById(
-                        "totalFrames"
-                    ).textContent =
+                    $("totalFrames")
+                        .textContent =
                         state.totalFrames;
 
-                    seekFrame(0);
+
+                    $("frameSlider")
+                        .max =
+                        state.totalFrames - 1;
+
+
+                    state.currentFrame =
+                        0;
+
+
+                    seekVideoFrame(
+                        0
+                    );
+
 
                     resolve();
 
                 };
 
+
             sourceVideo.onerror =
-                reject;
+                () => {
+
+                    reject(
+                        new Error(
+                            "The video could not be loaded by the browser."
+                        )
+                    );
+
+                };
 
         }
     );
-}
-
-
-/* =========================================================
-   VIDEO FRAME NAVIGATION
-========================================================= */
-
-document.getElementById(
-    "previousFrame"
-).addEventListener(
-    "click",
-    () => stepFrame(-1)
-);
-
-
-document.getElementById(
-    "nextFrame"
-).addEventListener(
-    "click",
-    () => stepFrame(1)
-);
-
-
-document.getElementById(
-    "playVideo"
-).addEventListener(
-    "click",
-    toggleVideo
-);
-
-
-document.getElementById(
-    "frameSlider"
-).addEventListener(
-    "input",
-    event => {
-
-        seekFrame(
-            Number(event.target.value)
-        );
-
-    }
-);
-
-
-function stepFrame(direction) {
-
-    if (
-        state.mediaType !== "video" ||
-        !state.videoReady
-    ) {
-        return;
-    }
-
-    stopVideo();
-
-    const next =
-        Math.max(
-            0,
-            Math.min(
-                state.totalFrames - 1,
-                state.currentFrame + direction
-            )
-        );
-
-    seekFrame(next);
-}
-
-
-function seekFrame(frame) {
-
-    if (
-        state.mediaType !== "video" ||
-        !state.videoReady
-    ) {
-        return;
-    }
-
-    frame =
-        Math.max(
-            0,
-            Math.min(
-                state.totalFrames - 1,
-                frame
-            )
-        );
-
-    state.currentFrame =
-        frame;
-
-    const time =
-        frame / state.fps;
-
-    state.currentTime =
-        Math.min(
-            time,
-            state.videoDuration
-        );
-
-    sourceVideo.currentTime =
-        state.currentTime;
-
-    sourceVideo.onseeked =
-        () => {
-
-            captureVideoFrame();
-
-        };
 
 }
 
 
-function captureVideoFrame() {
+/* ============================================================
+   VIDEO FRAME SEEK
+============================================================ */
 
-    if (
-        !state.videoReady
-    ) {
-        return;
-    }
-
-    const frameCanvas =
-        document.createElement(
-            "canvas"
-        );
-
-    frameCanvas.width =
-        sourceVideo.videoWidth;
-
-    frameCanvas.height =
-        sourceVideo.videoHeight;
-
-    const frameContext =
-        frameCanvas.getContext("2d");
-
-    frameContext.drawImage(
-        sourceVideo,
-        0,
-        0,
-        frameCanvas.width,
-        frameCanvas.height
-    );
-
-    const image =
-        new Image();
-
-    image.onload =
-        () => {
-
-            state.image =
-                image;
-
-            state.currentTime =
-                sourceVideo.currentTime;
-
-            loadFrameAnnotations();
-
-            updateVideoUI();
-
-            fitView();
-
-            render();
-
-        };
-
-    image.src =
-        frameCanvas.toDataURL(
-            "image/jpeg",
-            0.92
-        );
-}
-
-
-function toggleVideo() {
+async function seekVideoFrame(
+    frame
+) {
 
     if (
         state.mediaType !== "video"
     ) {
         return;
     }
+
+
+    frame =
+        Math.max(
+            0,
+            Math.min(
+                state.totalFrames - 1,
+                Math.round(frame)
+            )
+        );
+
+
+    state.currentFrame =
+        frame;
+
+
+    const time =
+        Math.min(
+            state.videoDuration,
+            frame / state.fps
+        );
+
+
+    state.currentTime =
+        time;
+
+
+    updateVideoUI();
+
+
+    await seekVideoTime(
+        time
+    );
+
+
+    await captureVideoFrame();
+
+
+    loadFrameAnnotations();
+
+    fitView();
+
+    render();
+
+}
+
+
+/* ============================================================
+   VIDEO SEEK
+============================================================ */
+
+function seekVideoTime(
+    time
+) {
+
+    return new Promise(
+        resolve => {
+
+            state.videoSeeking =
+                true;
+
+
+            const done =
+                () => {
+
+                    sourceVideo.removeEventListener(
+                        "seeked",
+                        done
+                    );
+
+                    state.videoSeeking =
+                        false;
+
+                    resolve();
+
+                };
+
+
+            sourceVideo.addEventListener(
+                "seeked",
+                done
+            );
+
+
+            sourceVideo.currentTime =
+                time;
+
+        }
+    );
+
+}
+
+
+/* ============================================================
+   CAPTURE VIDEO FRAME
+============================================================ */
+
+async function captureVideoFrame() {
+
+    if (
+        !sourceVideo.videoWidth ||
+        !sourceVideo.videoHeight
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        state.frameCaptureBusy
+    ) {
+
+        return;
+
+    }
+
+
+    state.frameCaptureBusy =
+        true;
+
+
+    try {
+
+        const frameCanvas =
+            document.createElement(
+                "canvas"
+            );
+
+
+        frameCanvas.width =
+            sourceVideo.videoWidth;
+
+        frameCanvas.height =
+            sourceVideo.videoHeight;
+
+
+        const frameContext =
+            frameCanvas.getContext(
+                "2d"
+            );
+
+
+        frameContext.drawImage(
+            sourceVideo,
+            0,
+            0,
+            frameCanvas.width,
+            frameCanvas.height
+        );
+
+
+        const image =
+            new Image();
+
+
+        await new Promise(
+            resolve => {
+
+                image.onload =
+                    resolve;
+
+                image.src =
+                    frameCanvas.toDataURL(
+                        "image/jpeg",
+                        0.92
+                    );
+
+            }
+        );
+
+
+        state.image =
+            image;
+
+
+        state.currentTime =
+            sourceVideo.currentTime;
+
+
+    } finally {
+
+        state.frameCaptureBusy =
+            false;
+
+    }
+
+}
+
+
+/* ============================================================
+   VIDEO BUTTONS
+============================================================ */
+
+$("previousFrame")
+    .addEventListener(
+        "click",
+        () => {
+
+            pauseVideo();
+
+            seekVideoFrame(
+                state.currentFrame - 1
+            );
+
+        }
+    );
+
+
+$("nextFrame")
+    .addEventListener(
+        "click",
+        () => {
+
+            pauseVideo();
+
+            seekVideoFrame(
+                state.currentFrame + 1
+            );
+
+        }
+    );
+
+
+$("playVideo")
+    .addEventListener(
+        "click",
+        toggleVideo
+    );
+
+
+$("frameSlider")
+    .addEventListener(
+        "input",
+        event => {
+
+            pauseVideo();
+
+            seekVideoFrame(
+                Number(
+                    event.target.value
+                )
+            );
+
+        }
+    );
+
+
+/* ============================================================
+   PLAY / PAUSE
+============================================================ */
+
+function toggleVideo() {
+
+    if (
+        state.mediaType !== "video"
+    ) {
+
+        return;
+
+    }
+
 
     if (
         sourceVideo.paused
@@ -641,64 +814,7 @@ function toggleVideo() {
 }
 
 
-sourceVideo.addEventListener(
-    "play",
-    () => {
-
-        state.isPlaying =
-            true;
-
-        document.getElementById(
-            "playVideo"
-        ).textContent =
-            "❚❚";
-
-    }
-);
-
-
-sourceVideo.addEventListener(
-    "pause",
-    () => {
-
-        state.isPlaying =
-            false;
-
-        document.getElementById(
-            "playVideo"
-        ).textContent =
-            "▶";
-
-    }
-);
-
-
-sourceVideo.addEventListener(
-    "timeupdate",
-    () => {
-
-        if (
-            state.mediaType !== "video"
-        ) {
-            return;
-        }
-
-        state.currentTime =
-            sourceVideo.currentTime;
-
-        state.currentFrame =
-            Math.round(
-                sourceVideo.currentTime *
-                state.fps
-            );
-
-        captureVideoFrame();
-
-    }
-);
-
-
-function stopVideo() {
+function pauseVideo() {
 
     if (
         !sourceVideo.paused
@@ -711,64 +827,226 @@ function stopVideo() {
 }
 
 
-function updateVideoUI() {
+/* ============================================================
+   VIDEO PLAYBACK
+============================================================ */
 
-    document.getElementById(
-        "currentFrame"
-    ).textContent =
-        state.currentFrame;
+sourceVideo.addEventListener(
+    "play",
+    () => {
 
-    document.getElementById(
-        "totalFrames"
-    ).textContent =
-        state.totalFrames;
+        state.videoPlaying =
+            true;
 
-    document.getElementById(
-        "frameSlider"
-    ).value =
-        state.currentFrame;
+        $("playVideo")
+            .textContent =
+            "❚❚";
 
-    document.getElementById(
-        "videoTime"
-    ).textContent =
-        formatTime(
-            state.currentTime
-        );
+
+        startVideoRender();
+
+    }
+);
+
+
+sourceVideo.addEventListener(
+    "pause",
+    () => {
+
+        state.videoPlaying =
+            false;
+
+        $("playVideo")
+            .textContent =
+            "▶";
+
+
+        if (
+            state.animationFrame
+        ) {
+
+            cancelAnimationFrame(
+                state.animationFrame
+            );
+
+        }
+
+        /*
+         * Capture the frame where
+         * playback stopped.
+         */
+
+        if (
+            state.mediaType === "video"
+        ) {
+
+            captureVideoFrame()
+                .then(
+                    () => {
+
+                        state.currentFrame =
+                            Math.round(
+                                sourceVideo.currentTime *
+                                state.fps
+                            );
+
+                        updateVideoUI();
+
+                        loadFrameAnnotations();
+
+                        render();
+
+                    }
+                );
+
+        }
+
+    }
+);
+
+
+sourceVideo.addEventListener(
+    "ended",
+    () => {
+
+        state.videoPlaying =
+            false;
+
+        $("playVideo")
+            .textContent =
+            "▶";
+
+    }
+);
+
+
+/* ============================================================
+   LIVE VIDEO DISPLAY
+============================================================ */
+
+function startVideoRender() {
+
+    const loop =
+        async () => {
+
+            if (
+                !state.videoPlaying
+            ) {
+
+                return;
+
+            }
+
+
+            /*
+             * Update frame number while video plays.
+             */
+
+            state.currentTime =
+                sourceVideo.currentTime;
+
+
+            state.currentFrame =
+                Math.floor(
+                    sourceVideo.currentTime *
+                    state.fps
+                );
+
+
+            updateVideoUI();
+
+
+            /*
+             * Draw the live video directly.
+             */
+
+            renderLiveVideo();
+
+
+            state.animationFrame =
+                requestAnimationFrame(
+                    loop
+                );
+
+        };
+
+
+    loop();
 
 }
 
 
-function formatTime(seconds) {
+/* ============================================================
+   LIVE VIDEO CANVAS
+============================================================ */
 
-    const min =
-        Math.floor(
-            seconds / 60
-        );
+function renderLiveVideo() {
 
-    const sec =
-        Math.floor(
-            seconds % 60
-        );
+    const rect =
+        workspace.getBoundingClientRect();
 
-    const ms =
-        Math.floor(
-            (seconds % 1) * 1000
-        );
+    clearCanvas(
+        rect.width,
+        rect.height
+    );
 
-    return (
-        String(min).padStart(2, "0")
-        + ":" +
-        String(sec).padStart(2, "0")
-        + "." +
-        String(ms).padStart(3, "0")
+
+    if (
+        !sourceVideo.videoWidth
+    ) {
+
+        return;
+
+    }
+
+
+    const imageWidth =
+        sourceVideo.videoWidth;
+
+    const imageHeight =
+        sourceVideo.videoHeight;
+
+
+    ctx.save();
+
+    ctx.translate(
+        state.offsetX,
+        state.offsetY
+    );
+
+    ctx.scale(
+        state.scale,
+        state.scale
+    );
+
+
+    ctx.drawImage(
+        sourceVideo,
+        0,
+        0,
+        imageWidth,
+        imageHeight
+    );
+
+
+    ctx.restore();
+
+
+    /*
+     * Draw the annotations belonging
+     * to the current frame.
+     */
+
+    state.annotations.forEach(
+        drawAnnotation
     );
 
 }
 
 
-/* =========================================================
-   KEYBOARD FRAME CONTROL
-========================================================= */
+/* ============================================================
+   KEYBOARD
+============================================================ */
 
 window.addEventListener(
     "keydown",
@@ -777,13 +1055,20 @@ window.addEventListener(
         const target =
             event.target;
 
+
         if (
-            target instanceof HTMLInputElement ||
-            target instanceof HTMLTextAreaElement ||
-            target instanceof HTMLSelectElement
+            target instanceof
+            HTMLInputElement ||
+            target instanceof
+            HTMLTextAreaElement ||
+            target instanceof
+            HTMLSelectElement
         ) {
+
             return;
+
         }
+
 
         if (
             state.mediaType === "video"
@@ -795,11 +1080,16 @@ window.addEventListener(
 
                 event.preventDefault();
 
-                stepFrame(-1);
+                pauseVideo();
+
+                seekVideoFrame(
+                    state.currentFrame - 1
+                );
 
                 return;
 
             }
+
 
             if (
                 event.key === "ArrowRight"
@@ -807,11 +1097,16 @@ window.addEventListener(
 
                 event.preventDefault();
 
-                stepFrame(1);
+                pauseVideo();
+
+                seekVideoFrame(
+                    state.currentFrame + 1
+                );
 
                 return;
 
             }
+
 
             if (
                 event.code === "Space"
@@ -827,25 +1122,32 @@ window.addEventListener(
 
         }
 
+
         if (
-            event.key === "+" ||
+            event.key === "+"
+            ||
             event.key === "="
         ) {
 
-            zoomAtCenter(1.15);
-
-        }
-
-        if (
-            event.key === "-" ||
-            event.key === "_"
-        ) {
-
-            zoomAtCenter(
-                1 / 1.15
+            zoomCenter(
+                1.20
             );
 
         }
+
+
+        if (
+            event.key === "-"
+            ||
+            event.key === "_"
+        ) {
+
+            zoomCenter(
+                1 / 1.20
+            );
+
+        }
+
 
         if (
             event.key === "Delete" ||
@@ -856,8 +1158,9 @@ window.addEventListener(
 
         }
 
+
         if (
-            event.key.toLowerCase() === "escape"
+            event.key === "Escape"
         ) {
 
             cancelDrawing();
@@ -868,126 +1171,152 @@ window.addEventListener(
 );
 
 
-/* =========================================================
+/* ============================================================
    ANNOTATION TYPE
-========================================================= */
+============================================================ */
 
 document
-    .querySelectorAll(".annotation-type")
-    .forEach(button => {
+    .querySelectorAll(
+        ".annotation-type"
+    )
+    .forEach(
+        button => {
 
-        button.addEventListener(
-            "click",
-            () => {
+            button.addEventListener(
+                "click",
+                () => {
 
-                state.annotationType =
-                    button.dataset.tool;
+                    document
+                        .querySelectorAll(
+                            ".annotation-type"
+                        )
+                        .forEach(
+                            item =>
+                                item.classList.remove(
+                                    "active"
+                                )
+                        );
 
-                document
-                    .querySelectorAll(
-                        ".annotation-type"
-                    )
-                    .forEach(
-                        b =>
-                            b.classList.remove(
-                                "active"
-                            )
+
+                    button.classList.add(
+                        "active"
                     );
 
-                button.classList.add(
-                    "active"
-                );
 
-                annotationMode.textContent =
-                    state.annotationType
-                        .toUpperCase();
-
-                /*
-                 * Selecting a different annotation
-                 * type automatically changes the
-                 * active drawing mode.
-                 */
-                setMode(
-                    state.mode === "select"
-                        ? "draw"
-                        : state.mode
-                );
-
-                cancelDrawing();
-
-            }
-        );
-
-    });
+                    state.annotationType =
+                        button.dataset.tool;
 
 
-/* =========================================================
+                    $("annotationMode")
+                        .textContent =
+                        state.annotationType
+                            .toUpperCase();
+
+
+                    cancelDrawing();
+
+
+                    /*
+                     * When changing annotation type,
+                     * automatically move to DRAW mode.
+                     *
+                     * This prevents several drawing
+                     * modes from being active.
+                     */
+
+                    setMode(
+                        "draw"
+                    );
+
+                }
+            );
+
+        }
+    );
+
+
+/* ============================================================
    TOOLS
-========================================================= */
+============================================================ */
 
 document
-    .querySelectorAll(".tool-button")
-    .forEach(button => {
+    .querySelectorAll(
+        ".tool-button"
+    )
+    .forEach(
+        button => {
 
-        button.addEventListener(
-            "click",
-            () => {
+            button.addEventListener(
+                "click",
+                () => {
 
-                setMode(
-                    button.dataset.mode
-                );
+                    setMode(
+                        button.dataset.mode
+                    );
 
-            }
-        );
+                }
+            );
 
-    });
+        }
+    );
 
 
-function setMode(mode) {
+function setMode(
+    mode
+) {
 
     state.mode =
         mode;
+
 
     document
         .querySelectorAll(
             ".tool-button"
         )
-        .forEach(button => {
+        .forEach(
+            button => {
 
-            button.classList.toggle(
-                "active",
-                button.dataset.mode === mode
-            );
+                button.classList.toggle(
+                    "active",
+                    button.dataset.mode ===
+                    mode
+                );
 
-        });
+            }
+        );
 
-    activeToolLabel.textContent =
-        mode[0].toUpperCase()
-        + mode.slice(1);
 
-    /*
-     * Important:
-     *
-     * Only ONE annotation interaction mode
-     * can be active at a time.
-     *
-     * This prevents another annotation type
-     * from remaining visually active.
-     */
+    $("activeTool")
+        .textContent =
+        mode
+            .charAt(0)
+            .toUpperCase()
+        +
+        mode.slice(1);
 
-    state.resizeHandle = null;
 
-    state.isDrawing = false;
+    state.resizeHandle =
+        null;
 
-    state.isPanning = false;
+    state.dragging =
+        false;
+
+    state.panning =
+        false;
+
 
     if (
         mode !== "draw"
     ) {
 
-        state.polygonPoints = [];
+        state.drawing =
+            false;
+
+        state.polygonPoints =
+            [];
 
     }
+
 
     updateCursor();
 
@@ -1003,13 +1332,14 @@ function updateCursor() {
     ) {
 
         workspace.style.cursor =
-            state.isPanning
+            state.panning
                 ? "grabbing"
                 : "grab";
 
         return;
 
     }
+
 
     if (
         state.mode === "erase"
@@ -1022,6 +1352,7 @@ function updateCursor() {
 
     }
 
+
     if (
         state.mode === "select"
     ) {
@@ -1033,15 +1364,16 @@ function updateCursor() {
 
     }
 
+
     workspace.style.cursor =
         "crosshair";
 
 }
 
 
-/* =========================================================
-   CANVAS SIZE
-========================================================= */
+/* ============================================================
+   CANVAS RESIZE
+============================================================ */
 
 function resizeCanvas() {
 
@@ -1049,19 +1381,35 @@ function resizeCanvas() {
         workspace.getBoundingClientRect();
 
     const dpr =
-        window.devicePixelRatio || 1;
+        window.devicePixelRatio ||
+        1;
+
 
     canvas.width =
-        rect.width * dpr;
+        Math.max(
+            1,
+            Math.floor(
+                rect.width * dpr
+            )
+        );
+
 
     canvas.height =
-        rect.height * dpr;
+        Math.max(
+            1,
+            Math.floor(
+                rect.height * dpr
+            )
+        );
+
 
     canvas.style.width =
         rect.width + "px";
 
+
     canvas.style.height =
         rect.height + "px";
+
 
     ctx.setTransform(
         dpr,
@@ -1072,106 +1420,179 @@ function resizeCanvas() {
         0
     );
 
+
     render();
 
 }
 
 
-/* =========================================================
-   VIEW TRANSFORM
-========================================================= */
+/* ============================================================
+   CLEAR CANVAS
+============================================================ */
 
-function imageToScreen(x, y) {
+function clearCanvas(
+    width,
+    height
+) {
+
+    ctx.clearRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+}
+
+
+/* ============================================================
+   IMAGE → SCREEN
+============================================================ */
+
+function imageToScreen(
+    x,
+    y
+) {
 
     return {
 
         x:
             x * state.scale
-            + state.offsetX,
+            +
+            state.offsetX,
 
         y:
             y * state.scale
-            + state.offsetY
+            +
+            state.offsetY
 
     };
 
 }
 
 
-function screenToImage(x, y) {
+/* ============================================================
+   SCREEN → IMAGE
+============================================================ */
+
+function screenToImage(
+    x,
+    y
+) {
 
     return {
 
         x:
-            (x - state.offsetX)
-            / state.scale,
+            (
+                x -
+                state.offsetX
+            )
+            /
+            state.scale,
 
         y:
-            (y - state.offsetY)
-            / state.scale
+            (
+                y -
+                state.offsetY
+            )
+            /
+            state.scale
 
     };
 
 }
 
 
-/* =========================================================
-   FIT VIEW
-========================================================= */
+/* ============================================================
+   FIT
+============================================================ */
 
 function fitView() {
 
     if (
-        !state.image
+        !state.image &&
+        state.mediaType !== "video"
     ) {
+
         return;
+
     }
+
 
     const rect =
         workspace.getBoundingClientRect();
 
-    const imageWidth =
-        state.image.naturalWidth ||
-        state.image.width;
 
-    const imageHeight =
-        state.image.naturalHeight ||
-        state.image.height;
+    let width;
+    let height;
 
-    const scaleX =
-        (rect.width - 40)
-        / imageWidth;
 
-    const scaleY =
-        (rect.height - 40)
-        / imageHeight;
+    if (
+        state.mediaType === "video" &&
+        sourceVideo.videoWidth
+    ) {
 
-    state.scale =
-        Math.min(
-            scaleX,
-            scaleY
-        );
+        width =
+            sourceVideo.videoWidth;
+
+        height =
+            sourceVideo.videoHeight;
+
+    } else {
+
+        width =
+            state.image?.naturalWidth ||
+            state.image?.width ||
+            1;
+
+        height =
+            state.image?.naturalHeight ||
+            state.image?.height ||
+            1;
+
+    }
+
+
+    const sx =
+        (rect.width - 40) /
+        width;
+
+
+    const sy =
+        (rect.height - 40) /
+        height;
+
 
     state.scale =
         Math.max(
             state.minScale,
             Math.min(
                 state.maxScale,
-                state.scale
+                Math.min(
+                    sx,
+                    sy
+                )
             )
         );
+
 
     state.offsetX =
         (
             rect.width -
-            imageWidth * state.scale
-        ) / 2;
+            width * state.scale
+        )
+        /
+        2;
+
 
     state.offsetY =
         (
             rect.height -
-            imageHeight * state.scale
-        ) / 2;
+            height * state.scale
+        )
+        /
+        2;
+
 
     updateZoomUI();
 
@@ -1180,88 +1601,66 @@ function fitView() {
 }
 
 
-document
-    .getElementById("fitView")
+/* ============================================================
+   RESET
+============================================================ */
+
+$("fitView")
     .addEventListener(
         "click",
         fitView
     );
 
 
-document
-    .getElementById("resetView")
+$("resetView")
     .addEventListener(
         "click",
         () => {
 
-            state.scale = 1;
+            state.scale =
+                1;
 
-            state.offsetX = 0;
+            state.offsetX =
+                0;
 
-            state.offsetY = 0;
-
-            render();
+            state.offsetY =
+                0;
 
             updateZoomUI();
+
+            render();
 
         }
     );
 
 
-/* =========================================================
-   ZOOM
-========================================================= */
+/* ============================================================
+   ZOOM BUTTONS
+============================================================ */
 
-document
-    .getElementById("zoomIn")
+$("zoomIn")
     .addEventListener(
         "click",
-        () => zoomAtCenter(1.2)
+        () =>
+            zoomCenter(
+                1.20
+            )
     );
 
 
-document
-    .getElementById("zoomOut")
+$("zoomOut")
     .addEventListener(
         "click",
-        () => zoomAtCenter(1 / 1.2)
+        () =>
+            zoomCenter(
+                1 / 1.20
+            )
     );
 
 
-workspace.addEventListener(
-    "wheel",
-    event => {
-
-        event.preventDefault();
-
-        const rect =
-            workspace.getBoundingClientRect();
-
-        const mouseX =
-            event.clientX - rect.left;
-
-        const mouseY =
-            event.clientY - rect.top;
-
-        const factor =
-            event.deltaY < 0
-                ? 1.12
-                : 1 / 1.12;
-
-        zoomAt(
-            factor,
-            mouseX,
-            mouseY
-        );
-
-    },
-    {
-        passive: false
-    }
-);
-
-
-function zoomAtCenter(factor) {
+function zoomCenter(
+    factor
+) {
 
     const rect =
         workspace.getBoundingClientRect();
@@ -1275,37 +1674,89 @@ function zoomAtCenter(factor) {
 }
 
 
-function zoomAt(
-    factor,
-    screenX,
-    screenY
-) {
+/* ============================================================
+   MOUSE WHEEL ZOOM
+============================================================ */
 
-    const before =
-        screenToImage(
-            screenX,
-            screenY
+workspace.addEventListener(
+    "wheel",
+    event => {
+
+        event.preventDefault();
+
+
+        const rect =
+            workspace.getBoundingClientRect();
+
+
+        const x =
+            event.clientX -
+            rect.left;
+
+
+        const y =
+            event.clientY -
+            rect.top;
+
+
+        const factor =
+            event.deltaY < 0
+                ? 1.12
+                : 1 / 1.12;
+
+
+        zoomAt(
+            factor,
+            x,
+            y
         );
 
-    const newScale =
+    },
+    {
+        passive: false
+    }
+);
+
+
+/* ============================================================
+   ZOOM AT POINT
+============================================================ */
+
+function zoomAt(
+    factor,
+    x,
+    y
+) {
+
+    const imagePoint =
+        screenToImage(
+            x,
+            y
+        );
+
+
+    state.scale =
         Math.max(
             state.minScale,
             Math.min(
                 state.maxScale,
-                state.scale * factor
+                state.scale *
+                factor
             )
         );
 
-    state.scale =
-        newScale;
 
     state.offsetX =
-        screenX -
-        before.x * state.scale;
+        x -
+        imagePoint.x *
+        state.scale;
+
 
     state.offsetY =
-        screenY -
-        before.y * state.scale;
+        y -
+        imagePoint.y *
+        state.scale;
+
 
     updateZoomUI();
 
@@ -1314,25 +1765,9 @@ function zoomAt(
 }
 
 
-function updateZoomUI() {
-
-    const percentage =
-        Math.round(
-            state.scale * 100
-        );
-
-    zoomValue.textContent =
-        percentage + "%";
-
-    footerZoom.textContent =
-        percentage + "%";
-
-}
-
-
-/* =========================================================
-   CANVAS MOUSE / POINTER EVENTS
-========================================================= */
+/* ============================================================
+   POINTER
+============================================================ */
 
 canvas.addEventListener(
     "pointerdown",
@@ -1356,50 +1791,59 @@ canvas.addEventListener(
 
 canvas.addEventListener(
     "dblclick",
-    handleDoubleClick
+    doubleClick
 );
 
 
-function getPointer(event) {
+function pointerPosition(
+    event
+) {
 
     const rect =
         canvas.getBoundingClientRect();
 
+
     return {
 
         x:
-            event.clientX - rect.left,
+            event.clientX -
+            rect.left,
 
         y:
-            event.clientY - rect.top
+            event.clientY -
+            rect.top
 
     };
 
 }
 
 
-/* =========================================================
+/* ============================================================
    POINTER DOWN
-========================================================= */
+============================================================ */
 
-function pointerDown(event) {
+function pointerDown(
+    event
+) {
 
     const p =
-        getPointer(event);
+        pointerPosition(
+            event
+        );
+
 
     canvas.setPointerCapture(
         event.pointerId
     );
 
-    state.isPointerDown =
+
+    state.pointerDown =
         true;
 
-    state.dragStart =
-        p;
 
-    /* -----------------------------------------------------
-       PAN
-    ----------------------------------------------------- */
+    /*
+     * PAN
+     */
 
     if (
         state.mode === "pan" ||
@@ -1407,8 +1851,9 @@ function pointerDown(event) {
         event.shiftKey
     ) {
 
-        state.isPanning =
+        state.panning =
             true;
+
 
         state.panStart = {
 
@@ -1426,6 +1871,7 @@ function pointerDown(event) {
 
         };
 
+
         updateCursor();
 
         return;
@@ -1433,9 +1879,9 @@ function pointerDown(event) {
     }
 
 
-    /* -----------------------------------------------------
-       SELECT
-    ----------------------------------------------------- */
+    /*
+     * SELECT
+     */
 
     if (
         state.mode === "select"
@@ -1447,6 +1893,7 @@ function pointerDown(event) {
                 p.y
             );
 
+
         if (
             hit
         ) {
@@ -1454,12 +1901,9 @@ function pointerDown(event) {
             state.selectedId =
                 hit.id;
 
-            /*
-             * Determine whether user is
-             * grabbing a resize handle.
-             */
+
             if (
-                hit.type === "handle"
+                hit.handle
             ) {
 
                 state.resizeHandle =
@@ -1472,19 +1916,37 @@ function pointerDown(event) {
 
             }
 
-            updateSelectedUI();
+
+            const imagePoint =
+                screenToImage(
+                    p.x,
+                    p.y
+                );
+
+
+            state.dragStartImage =
+                imagePoint;
+
+
+            state.dragLastImage =
+                imagePoint;
+
+
+            state.dragging =
+                true;
+
+
+            updateSelected();
 
         } else {
 
             state.selectedId =
                 null;
 
-            updateSelectedUI();
+            updateSelected();
 
         }
 
-        state.dragStart =
-            p;
 
         render();
 
@@ -1493,9 +1955,9 @@ function pointerDown(event) {
     }
 
 
-    /* -----------------------------------------------------
-       ERASE
-    ----------------------------------------------------- */
+    /*
+     * ERASE
+     */
 
     if (
         state.mode === "erase"
@@ -1506,6 +1968,7 @@ function pointerDown(event) {
                 p.x,
                 p.y
             );
+
 
         if (
             hit
@@ -1523,9 +1986,9 @@ function pointerDown(event) {
     }
 
 
-    /* -----------------------------------------------------
-       DRAW
-    ----------------------------------------------------- */
+    /*
+     * DRAW
+     */
 
     if (
         state.mode === "draw"
@@ -1541,36 +2004,47 @@ function pointerDown(event) {
 }
 
 
-/* =========================================================
+/* ============================================================
    POINTER MOVE
-========================================================= */
+============================================================ */
 
-function pointerMove(event) {
+function pointerMove(
+    event
+) {
 
     const p =
-        getPointer(event);
+        pointerPosition(
+            event
+        );
 
-    /* -----------------------------------------------------
-       PAN
-    ----------------------------------------------------- */
+
+    /*
+     * PAN
+     */
 
     if (
-        state.isPanning
+        state.panning
     ) {
 
         const dx =
             p.x -
             state.panStart.x;
 
+
         const dy =
             p.y -
             state.panStart.y;
 
+
         state.offsetX =
-            state.panStart.offsetX + dx;
+            state.panStart.offsetX +
+            dx;
+
 
         state.offsetY =
-            state.panStart.offsetY + dy;
+            state.panStart.offsetY +
+            dy;
+
 
         render();
 
@@ -1579,22 +2053,24 @@ function pointerMove(event) {
     }
 
 
-    /* -----------------------------------------------------
-       SELECT / RESIZE
-    ----------------------------------------------------- */
+    /*
+     * SELECT / MOVE / RESIZE
+     */
 
     if (
         state.mode === "select" &&
-        state.isPointerDown &&
+        state.dragging &&
         state.selectedId
     ) {
 
-        const annotation =
-            getSelectedAnnotation();
+        const a =
+            getSelected();
 
-        if (!annotation) {
+
+        if (!a) {
             return;
         }
+
 
         const current =
             screenToImage(
@@ -1602,123 +2078,133 @@ function pointerMove(event) {
                 p.y
             );
 
-        const start =
-            screenToImage(
-                state.dragStart.x,
-                state.dragStart.y
-            );
 
-        const dx =
-            current.x - start.x;
+        const last =
+            state.dragLastImage;
 
-        const dy =
-            current.y - start.y;
 
         if (
-            state.resizeHandle
+            state.resizeHandle &&
+            a.type === "box"
         ) {
 
-            resizeAnnotation(
-                annotation,
+            resizeBox(
+                a,
                 state.resizeHandle,
                 current
             );
 
         } else {
 
+            const dx =
+                current.x -
+                last.x;
+
+
+            const dy =
+                current.y -
+                last.y;
+
+
             moveAnnotation(
-                annotation,
+                a,
                 dx,
                 dy
             );
 
         }
 
-        state.dragStart =
-            p;
 
-        saveCurrentFrame();
+        state.dragLastImage =
+            current;
+
+
+        a.corrected =
+            true;
+
+
+        saveFrame();
+
 
         render();
 
+        renderClassification();
+
         renderDetails();
+
 
         return;
 
     }
 
 
-    /* -----------------------------------------------------
-       DRAW
-    ----------------------------------------------------- */
+    /*
+     * DRAW
+     */
 
     if (
         state.mode === "draw" &&
-        state.isDrawing
+        state.drawing
     ) {
 
-        const current =
+        state.drawCurrent =
             screenToImage(
                 p.x,
                 p.y
             );
 
-        state.currentDrawPoint =
-            current;
 
         render();
 
     }
 
-
-    /* Hover */
-
-    const hit =
-        hitTest(
-            p.x,
-            p.y
-        );
-
-    state.hoveredId =
-        hit?.id || null;
-
 }
 
 
-/* =========================================================
+/* ============================================================
    POINTER UP
-========================================================= */
+============================================================ */
 
-function pointerUp(event) {
+function pointerUp(
+    event
+) {
 
     if (
         state.mode === "draw" &&
-        state.isDrawing
+        state.drawing
     ) {
 
         finishDrawing();
 
     }
 
-    state.isPointerDown =
+
+    state.pointerDown =
         false;
 
-    state.isPanning =
+    state.dragging =
+        false;
+
+    state.panning =
         false;
 
     state.resizeHandle =
         null;
+
 
     updateCursor();
 
 }
 
 
-/* =========================================================
+/* ============================================================
    DRAWING
-========================================================= */
+============================================================ */
 
-function beginDrawing(x, y) {
+function beginDrawing(
+    x,
+    y
+) {
 
     const point =
         screenToImage(
@@ -1726,23 +2212,30 @@ function beginDrawing(x, y) {
             y
         );
 
-    state.isDrawing =
+
+    state.drawing =
         true;
+
 
     state.drawStart =
         point;
 
-    state.currentDrawPoint =
+
+    state.drawCurrent =
         point;
 
+
     if (
-        state.annotationType === "polygon" ||
-        state.annotationType === "segmentation"
+        state.annotationType ===
+        "polygon" ||
+        state.annotationType ===
+        "segmentation"
     ) {
 
-        state.polygonPoints = [
-            point
-        ];
+        state.polygonPoints =
+            [
+                point
+            ];
 
     }
 
@@ -1752,19 +2245,25 @@ function beginDrawing(x, y) {
 function finishDrawing() {
 
     if (
-        !state.isDrawing
+        !state.drawing
     ) {
+
         return;
+
     }
+
 
     const start =
         state.drawStart;
 
+
     const end =
-        state.currentDrawPoint;
+        state.drawCurrent;
+
 
     if (
-        state.annotationType === "box"
+        state.annotationType ===
+        "box"
     ) {
 
         const x =
@@ -1773,11 +2272,13 @@ function finishDrawing() {
                 end.x
             );
 
+
         const y =
             Math.min(
                 start.y,
                 end.y
             );
+
 
         const width =
             Math.abs(
@@ -1785,11 +2286,13 @@ function finishDrawing() {
                 start.x
             );
 
+
         const height =
             Math.abs(
                 end.y -
                 start.y
             );
+
 
         if (
             width >= 5 &&
@@ -1801,8 +2304,11 @@ function finishDrawing() {
                 type: "box",
 
                 x,
+
                 y,
+
                 width,
+
                 height,
 
                 label: "unknown",
@@ -1820,50 +2326,126 @@ function finishDrawing() {
     } else {
 
         /*
-         * For polygon/segmentation, clicking points
-         * and double-clicking finishes the shape.
+         * Polygon / segmentation
+         *
+         * First click = first point.
+         * Continue clicking.
+         * Double-click finishes.
+         *
+         * For simple drag drawing, a rectangle is
+         * created if the user releases without
+         * enough polygon points.
          */
 
         if (
-            state.polygonPoints.length >= 3
+            state.polygonPoints.length <
+            3
         ) {
 
-            createAnnotation({
+            const x =
+                Math.min(
+                    start.x,
+                    end.x
+                );
 
-                type:
-                    state.annotationType,
 
-                points:
-                    [...state.polygonPoints],
+            const y =
+                Math.min(
+                    start.y,
+                    end.y
+                );
 
-                label:
-                    "unknown",
 
-                score:
-                    null,
+            const width =
+                Math.abs(
+                    end.x -
+                    start.x
+                );
 
-                occlusion:
-                    0,
 
-                truncation:
-                    "NONE"
+            const height =
+                Math.abs(
+                    end.y -
+                    start.y
+                );
 
-            });
+
+            if (
+                width >= 5 &&
+                height >= 5
+            ) {
+
+                createAnnotation({
+
+                    type:
+                        state.annotationType,
+
+                    points: [
+
+                        {
+                            x,
+                            y
+                        },
+
+                        {
+                            x:
+                                x + width,
+                            y
+                        },
+
+                        {
+                            x:
+                                x + width,
+                            y:
+                                y + height
+                        },
+
+                        {
+                            x,
+                            y:
+                                y + height
+                        }
+
+                    ],
+
+                    label:
+                        "unknown",
+
+                    score:
+                        null,
+
+                    occlusion:
+                        0,
+
+                    truncation:
+                        "NONE"
+
+                });
+
+            }
 
         }
 
     }
 
-    state.isDrawing =
+
+    state.drawing =
         false;
+
+
+    state.drawStart =
+        null;
+
+
+    state.drawCurrent =
+        null;
+
 
     state.polygonPoints =
         [];
 
-    state.currentDrawPoint =
-        null;
 
-    saveCurrentFrame();
+    saveFrame();
 
     updateCounts();
 
@@ -1872,52 +2454,132 @@ function finishDrawing() {
 }
 
 
-/* =========================================================
-   DOUBLE CLICK POLYGON
-========================================================= */
+/* ============================================================
+   DOUBLE CLICK
+============================================================ */
 
-function handleDoubleClick(event) {
+function doubleClick(
+    event
+) {
 
     if (
         state.mode !== "draw"
     ) {
+
         return;
+
     }
 
+
     if (
-        state.annotationType !== "polygon" &&
-        state.annotationType !== "segmentation"
+        state.annotationType !==
+        "polygon" &&
+        state.annotationType !==
+        "segmentation"
     ) {
+
         return;
+
     }
+
 
     if (
         state.polygonPoints.length >= 3
     ) {
 
-        finishDrawing();
+        const points =
+            state.polygonPoints
+                .map(
+                    p => ({
+                        x: p.x,
+                        y: p.y
+                    })
+                );
+
+
+        createAnnotation({
+
+            type:
+                state.annotationType,
+
+            points,
+
+            label:
+                "unknown",
+
+            score:
+                null,
+
+            occlusion:
+                0,
+
+            truncation:
+                "NONE"
+
+        });
+
+
+        state.drawing =
+            false;
+
+
+        state.polygonPoints =
+            [];
+
+
+        saveFrame();
+
+        render();
 
     }
 
 }
 
 
-/* =========================================================
-   CREATE ANNOTATION
-========================================================= */
+/* ============================================================
+   CANCEL
+============================================================ */
 
-function createAnnotation(data) {
+function cancelDrawing() {
+
+    state.drawing =
+        false;
+
+    state.drawStart =
+        null;
+
+    state.drawCurrent =
+        null;
+
+    state.polygonPoints =
+        [];
+
+    render();
+
+}
+
+
+/* ============================================================
+   CREATE ANNOTATION
+============================================================ */
+
+function createAnnotation(
+    data
+) {
 
     const annotation = {
 
         id:
             "ann_" +
-            state.nextAnnotationId++,
+            state.nextId++,
 
         ...data,
 
         export:
             true,
+
+        aiGenerated:
+            false,
 
         corrected:
             true,
@@ -1927,103 +2589,96 @@ function createAnnotation(data) {
 
     };
 
+
     state.annotations.push(
         annotation
     );
 
-    if (
-        annotation.label &&
-        annotation.label !== "unknown"
-    ) {
-
-        state.classes.add(
-            annotation.label
-        );
-
-    }
 
     state.selectedId =
         annotation.id;
 
+
     updateCounts();
 
-    updateSelectedUI();
+    updateSelected();
 
 }
 
 
-/* =========================================================
+/* ============================================================
    HIT TEST
-========================================================= */
+============================================================ */
 
 function hitTest(
-    screenX,
-    screenY
+    sx,
+    sy
 ) {
 
-    const point =
+    const p =
         screenToImage(
-            screenX,
-            screenY
+            sx,
+            sy
         );
 
-    /*
-     * Reverse order means the top-most
-     * annotation gets selected first.
-     */
 
     for (
         let i =
             state.annotations.length - 1;
+
         i >= 0;
+
         i--
     ) {
 
         const a =
             state.annotations[i];
 
-        /* Box */
+
+        /*
+         * BOX
+         */
 
         if (
             a.type === "box"
         ) {
 
+            const handle =
+                boxHandle(
+                    a,
+                    p
+                );
+
+
             if (
-                point.x >= a.x &&
-                point.x <=
-                    a.x + a.width &&
-                point.y >= a.y &&
-                point.y <=
-                    a.y + a.height
+                handle
             ) {
-
-                const handle =
-                    findBoxHandle(
-                        a,
-                        point
-                    );
-
-                if (
-                    handle
-                ) {
-
-                    return {
-
-                        id: a.id,
-
-                        type: "handle",
-
-                        handle
-
-                    };
-
-                }
 
                 return {
 
-                    id: a.id,
+                    id:
+                        a.id,
 
-                    type: "annotation"
+                    handle
+
+                };
+
+            }
+
+
+            if (
+                p.x >= a.x &&
+                p.x <=
+                    a.x + a.width &&
+                p.y >= a.y &&
+                p.y <=
+                    a.y + a.height
+            ) {
+
+                return {
+
+                    id:
+                        a.id
 
                 };
 
@@ -2031,25 +2686,34 @@ function hitTest(
 
         }
 
-        /* Polygon */
+
+        /*
+         * POLYGON / SEGMENTATION
+         */
 
         if (
-            a.type === "polygon" ||
-            a.type === "segmentation"
+            (
+                a.type ===
+                "polygon"
+            )
+            ||
+            (
+                a.type ===
+                "segmentation"
+            )
         ) {
 
             if (
                 pointInPolygon(
-                    point,
+                    p,
                     a.points
                 )
             ) {
 
                 return {
 
-                    id: a.id,
-
-                    type: "annotation"
+                    id:
+                        a.id
 
                 };
 
@@ -2059,97 +2723,108 @@ function hitTest(
 
     }
 
+
     return null;
 
 }
 
 
-/* =========================================================
-   BOX HANDLES
-========================================================= */
+/* ============================================================
+   BOX HANDLE
+============================================================ */
 
-function findBoxHandle(
+function boxHandle(
     a,
     p
 ) {
 
     const handles = {
 
-        nw: {
-            x: a.x,
-            y: a.y
-        },
+        nw:
+            [
+                a.x,
+                a.y
+            ],
 
-        n: {
-            x: a.x + a.width / 2,
-            y: a.y
-        },
-
-        ne: {
-            x: a.x + a.width,
-            y: a.y
-        },
-
-        e: {
-            x: a.x + a.width,
-            y:
-                a.y +
-                a.height / 2
-        },
-
-        se: {
-            x:
+        n:
+            [
                 a.x +
-                a.width,
+                    a.width / 2,
+                a.y
+            ],
 
-            y:
-                a.y +
-                a.height
-        },
-
-        s: {
-            x:
+        ne:
+            [
                 a.x +
-                a.width / 2,
+                    a.width,
+                a.y
+            ],
 
-            y:
+        e:
+            [
+                a.x +
+                    a.width,
                 a.y +
-                a.height
-        },
+                    a.height / 2
+            ],
 
-        sw: {
-            x: a.x,
-
-            y:
+        se:
+            [
+                a.x +
+                    a.width,
                 a.y +
-                a.height
-        },
+                    a.height
+            ],
 
-        w: {
-            x: a.x,
-
-            y:
+        s:
+            [
+                a.x +
+                    a.width / 2,
                 a.y +
-                a.height / 2
-        }
+                    a.height
+            ],
+
+        sw:
+            [
+                a.x,
+                a.y +
+                    a.height
+            ],
+
+        w:
+            [
+                a.x,
+                a.y +
+                    a.height / 2
+            ]
 
     };
 
+
     const tolerance =
-        10 / state.scale;
+        12 /
+        state.scale;
+
 
     for (
-        const [name, h]
-        of Object.entries(handles)
+        const [name, point]
+        of Object.entries(
+            handles
+        )
     ) {
 
         if (
             Math.abs(
-                p.x - h.x
-            ) <= tolerance &&
+                p.x -
+                point[0]
+            )
+            <= tolerance
+            &&
             Math.abs(
-                p.y - h.y
-            ) <= tolerance
+                p.y -
+                point[1]
+            )
+            <= tolerance
         ) {
 
             return name;
@@ -2158,14 +2833,169 @@ function findBoxHandle(
 
     }
 
+
     return null;
 
 }
 
 
-/* =========================================================
-   MOVE ANNOTATION
-========================================================= */
+/* ============================================================
+   RESIZE BOX
+============================================================ */
+
+function resizeBox(
+    a,
+    handle,
+    p
+) {
+
+    let left =
+        a.x;
+
+
+    let top =
+        a.y;
+
+
+    let right =
+        a.x +
+        a.width;
+
+
+    let bottom =
+        a.y +
+        a.height;
+
+
+    switch (
+        handle
+    ) {
+
+        case "nw":
+
+            left =
+                p.x;
+
+            top =
+                p.y;
+
+            break;
+
+
+        case "n":
+
+            top =
+                p.y;
+
+            break;
+
+
+        case "ne":
+
+            right =
+                p.x;
+
+            top =
+                p.y;
+
+            break;
+
+
+        case "e":
+
+            right =
+                p.x;
+
+            break;
+
+
+        case "se":
+
+            right =
+                p.x;
+
+            bottom =
+                p.y;
+
+            break;
+
+
+        case "s":
+
+            bottom =
+                p.y;
+
+            break;
+
+
+        case "sw":
+
+            left =
+                p.x;
+
+            bottom =
+                p.y;
+
+            break;
+
+
+        case "w":
+
+            left =
+                p.x;
+
+            break;
+
+    }
+
+
+    if (
+        right <=
+        left + 2
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        bottom <=
+        top + 2
+    ) {
+
+        return;
+
+    }
+
+
+    a.x =
+        left;
+
+
+    a.y =
+        top;
+
+
+    a.width =
+        right -
+        left;
+
+
+    a.height =
+        bottom -
+        top;
+
+
+    a.corrected =
+        true;
+
+}
+
+
+/* ============================================================
+   MOVE
+============================================================ */
 
 function moveAnnotation(
     a,
@@ -2174,7 +3004,8 @@ function moveAnnotation(
 ) {
 
     if (
-        a.type === "box"
+        a.type ===
+        "box"
     ) {
 
         a.x += dx;
@@ -2184,6 +3015,7 @@ function moveAnnotation(
         return;
 
     }
+
 
     if (
         a.points
@@ -2204,332 +3036,71 @@ function moveAnnotation(
 }
 
 
-/* =========================================================
-   RESIZE BOX
-========================================================= */
-
-function resizeAnnotation(
-    a,
-    handle,
-    current
-) {
-
-    if (
-        a.type !== "box"
-    ) {
-        return;
-    }
-
-    let left =
-        a.x;
-
-    let top =
-        a.y;
-
-    let right =
-        a.x + a.width;
-
-    let bottom =
-        a.y + a.height;
-
-    switch (handle) {
-
-        case "nw":
-
-            left =
-                current.x;
-
-            top =
-                current.y;
-
-            break;
-
-        case "n":
-
-            top =
-                current.y;
-
-            break;
-
-        case "ne":
-
-            right =
-                current.x;
-
-            top =
-                current.y;
-
-            break;
-
-        case "e":
-
-            right =
-                current.x;
-
-            break;
-
-        case "se":
-
-            right =
-                current.x;
-
-            bottom =
-                current.y;
-
-            break;
-
-        case "s":
-
-            bottom =
-                current.y;
-
-            break;
-
-        case "sw":
-
-            left =
-                current.x;
-
-            bottom =
-                current.y;
-
-            break;
-
-        case "w":
-
-            left =
-                current.x;
-
-            break;
-
-    }
-
-    if (
-        right - left < 3
-    ) {
-
-        return;
-
-    }
-
-    if (
-        bottom - top < 3
-    ) {
-
-        return;
-
-    }
-
-    a.x =
-        left;
-
-    a.y =
-        top;
-
-    a.width =
-        right - left;
-
-    a.height =
-        bottom - top;
-
-    a.corrected =
-        true;
-
-}
-
-
-/* =========================================================
-   POLYGON POINT EDITING
-========================================================= */
-
-canvas.addEventListener(
-    "pointerdown",
-    event => {
-
-        if (
-            state.mode !== "select"
-        ) {
-            return;
-        }
-
-        const p =
-            getPointer(event);
-
-        const imagePoint =
-            screenToImage(
-                p.x,
-                p.y
-            );
-
-        const selected =
-            getSelectedAnnotation();
-
-        if (
-            !selected ||
-            !selected.points
-        ) {
-            return;
-        }
-
-        let nearest =
-            -1;
-
-        let distance =
-            Infinity;
-
-        selected.points.forEach(
-            (point, index) => {
-
-                const d =
-                    Math.hypot(
-                        point.x -
-                            imagePoint.x,
-
-                        point.y -
-                            imagePoint.y
-                    );
-
-                if (
-                    d <
-                    15 / state.scale &&
-                    d < distance
-                ) {
-
-                    nearest =
-                        index;
-
-                    distance =
-                        d;
-
-                }
-
-            }
-        );
-
-        if (
-            nearest >= 0
-        ) {
-
-            state.vertexIndex =
-                nearest;
-
-        }
-
-    },
-    true
-);
-
-
-canvas.addEventListener(
-    "pointermove",
-    event => {
-
-        if (
-            state.mode !== "select" ||
-            state.vertexIndex === undefined ||
-            state.vertexIndex === null
-        ) {
-            return;
-        }
-
-        if (
-            !state.isPointerDown
-        ) {
-            return;
-        }
-
-        const selected =
-            getSelectedAnnotation();
-
-        if (
-            !selected ||
-            !selected.points
-        ) {
-            return;
-        }
-
-        const p =
-            getPointer(event);
-
-        const imagePoint =
-            screenToImage(
-                p.x,
-                p.y
-            );
-
-        selected.points[
-            state.vertexIndex
-        ] = imagePoint;
-
-        selected.corrected =
-            true;
-
-        saveCurrentFrame();
-
-        render();
-
-    },
-    true
-);
-
-
-canvas.addEventListener(
-    "pointerup",
-    () => {
-
-        state.vertexIndex =
-            null;
-
-    },
-    true
-);
-
-
-/* =========================================================
-   POINT IN POLYGON
-========================================================= */
+/* ============================================================
+   POLYGON TEST
+============================================================ */
 
 function pointInPolygon(
     point,
     polygon
 ) {
 
-    let inside = false;
+    let inside =
+        false;
+
 
     for (
         let i = 0,
             j = polygon.length - 1;
-        i < polygon.length;
+
+        i <
+            polygon.length;
+
         j = i++
     ) {
 
         const xi =
             polygon[i].x;
 
+
         const yi =
             polygon[i].y;
+
 
         const xj =
             polygon[j].x;
 
+
         const yj =
             polygon[j].y;
+
 
         const intersect =
             (
                 yi > point.y
-            ) !==
+            )
+            !==
             (
                 yj > point.y
             )
             &&
             point.x <
                 (
-                    (xj - xi) *
-                    (point.y - yi) /
-                    (yj - yi)
-                ) +
+                    (
+                        xj - xi
+                    )
+                    *
+                    (
+                        point.y - yi
+                    )
+                    /
+                    (
+                        yj - yi
+                    )
+                )
+                +
                 xi;
+
 
         if (
             intersect
@@ -2542,19 +3113,17 @@ function pointInPolygon(
 
     }
 
+
     return inside;
 
 }
 
 
-/* =========================================================
+/* ============================================================
    DELETE
-========================================================= */
+============================================================ */
 
-document
-    .getElementById(
-        "deleteSelected"
-    )
+$("deleteSelected")
     .addEventListener(
         "click",
         deleteSelected
@@ -2566,8 +3135,11 @@ function deleteSelected() {
     if (
         !state.selectedId
     ) {
+
         return;
+
     }
+
 
     state.annotations =
         state.annotations.filter(
@@ -2576,25 +3148,29 @@ function deleteSelected() {
                 state.selectedId
         );
 
+
     state.selectedId =
         null;
 
-    saveCurrentFrame();
+
+    saveFrame();
 
     updateCounts();
 
-    updateSelectedUI();
+    renderClassification();
+
+    renderDetails();
 
     render();
 
 }
 
 
-/* =========================================================
-   SELECTED ANNOTATION
-========================================================= */
+/* ============================================================
+   GET SELECTED
+============================================================ */
 
-function getSelectedAnnotation() {
+function getSelected() {
 
     return state.annotations.find(
         a =>
@@ -2605,17 +3181,24 @@ function getSelectedAnnotation() {
 }
 
 
-function updateSelectedUI() {
+/* ============================================================
+   SELECTED UI
+============================================================ */
 
-    const selected =
-        getSelectedAnnotation();
+function updateSelected() {
 
-    selectedObjectLabel.textContent =
-        selected
-            ? selected.label
+    const a =
+        getSelected();
+
+
+    $("selectedObject")
+        .textContent =
+        a
+            ? a.label || "unknown"
             : "None";
 
-    renderClassificationCard();
+
+    renderClassification();
 
     renderDetails();
 
@@ -2624,28 +3207,33 @@ function updateSelectedUI() {
 }
 
 
-/* =========================================================
+/* ============================================================
    CLASSIFICATION CARD
-========================================================= */
+============================================================ */
 
-function renderClassificationCard() {
+function renderClassification() {
 
     const a =
-        getSelectedAnnotation();
+        getSelected();
+
 
     if (!a) {
 
-        classificationCard.innerHTML = `
-            <div class="empty-card">
-                Select an annotation
-            </div>
-        `;
+        $("classificationCard")
+            .innerHTML = `
+                <div class="empty-card">
+                    Select a box to classify it
+                </div>
+            `;
 
         return;
 
     }
 
-    classificationCard.innerHTML = `
+
+    $("classificationCard")
+        .innerHTML = `
+
         <div class="class-card">
 
             <div class="class-title">
@@ -2660,6 +3248,7 @@ function renderClassificationCard() {
 
             </div>
 
+
             <div class="class-field">
 
                 <label>
@@ -2667,12 +3256,15 @@ function renderClassificationCard() {
                 </label>
 
                 <input
-                    id="selectedClass"
-                    value="${escapeHTML(a.label || "")}"
-                    placeholder="car"
+                    id="objectClass"
+                    value="${escapeHTML(
+                        a.label ||
+                        "unknown"
+                    )}"
                 >
 
             </div>
+
 
             <div class="class-field">
 
@@ -2680,7 +3272,9 @@ function renderClassificationCard() {
                     OCCLUSION
                 </label>
 
-                <select id="selectedOcclusion">
+                <select
+                    id="objectOcclusion"
+                >
 
                     <option value="0"
                         ${a.occlusion === 0 ? "selected" : ""}>
@@ -2718,26 +3312,28 @@ function renderClassificationCard() {
                     TRUNCATION
                 </label>
 
-                <select id="selectedTruncation">
+                <select
+                    id="objectTruncation"
+                >
 
                     <option value="NONE"
                         ${a.truncation === "NONE" ? "selected" : ""}>
-                        NONE — Fully inside camera
+                        NONE
                     </option>
 
                     <option value="SLIGHT"
                         ${a.truncation === "SLIGHT" ? "selected" : ""}>
-                        SLIGHT — Small part outside
+                        SLIGHT
                     </option>
 
                     <option value="PARTIAL"
                         ${a.truncation === "PARTIAL" ? "selected" : ""}>
-                        PARTIAL — Object cut by edge
+                        PARTIAL
                     </option>
 
                     <option value="SEVERE"
                         ${a.truncation === "SEVERE" ? "selected" : ""}>
-                        SEVERE — Large part outside
+                        SEVERE
                     </option>
 
                 </select>
@@ -2751,7 +3347,9 @@ function renderClassificationCard() {
                     INCLUDE IN EXPORT
                 </label>
 
-                <select id="selectedExport">
+                <select
+                    id="objectExport"
+                >
 
                     <option value="true"
                         ${a.export !== false ? "selected" : ""}>
@@ -2760,7 +3358,7 @@ function renderClassificationCard() {
 
                     <option value="false"
                         ${a.export === false ? "selected" : ""}>
-                        NO — Remove classification from export
+                        NO — Remove from export
                     </option>
 
                 </select>
@@ -2771,14 +3369,16 @@ function renderClassificationCard() {
             <div class="class-buttons">
 
                 <button
-                    id="saveClassification"
+                    id="saveClass"
                     class="save"
+                    type="button"
                 >
                     SAVE
                 </button>
 
                 <button
-                    id="deleteClassification"
+                    id="deleteClass"
+                    type="button"
                 >
                     DELETE
                 </button>
@@ -2789,20 +3389,14 @@ function renderClassificationCard() {
     `;
 
 
-    document
-        .getElementById(
-            "saveClassification"
-        )
+    $("saveClass")
         .addEventListener(
             "click",
             saveClassification
         );
 
 
-    document
-        .getElementById(
-            "deleteClassification"
-        )
+    $("deleteClass")
         .addEventListener(
             "click",
             deleteSelected
@@ -2811,110 +3405,76 @@ function renderClassificationCard() {
 }
 
 
-/* =========================================================
+/* ============================================================
    SAVE CLASSIFICATION
-========================================================= */
+============================================================ */
 
 function saveClassification() {
 
     const a =
-        getSelectedAnnotation();
+        getSelected();
+
 
     if (!a) {
+
         return;
+
     }
 
-    const classInput =
-        document.getElementById(
-            "selectedClass"
-        );
-
-    const occlusion =
-        document.getElementById(
-            "selectedOcclusion"
-        );
-
-    const truncation =
-        document.getElementById(
-            "selectedTruncation"
-        );
-
-    const exportInput =
-        document.getElementById(
-            "selectedExport"
-        );
-
-    const oldLabel =
-        a.label;
-
-    const newLabel =
-        classInput.value.trim()
-        || "unknown";
 
     a.label =
-        newLabel;
+        $("objectClass")
+            .value
+            .trim()
+        ||
+        "unknown";
+
 
     a.occlusion =
         Number(
-            occlusion.value
+            $("objectOcclusion")
+                .value
         );
 
+
     a.truncation =
-        truncation.value;
+        $("objectTruncation")
+            .value;
+
 
     a.export =
-        exportInput.value === "true";
+        $("objectExport")
+            .value ===
+        "true";
+
 
     a.corrected =
         true;
 
-    if (
-        newLabel !== "unknown"
-    ) {
 
-        state.classes.add(
-            newLabel
-        );
+    saveFrame();
 
-    }
 
-    if (
-        oldLabel &&
-        oldLabel !== newLabel
-    ) {
-
-        /*
-         * Do not delete old class globally because
-         * another annotation may still use it.
-         */
-
-    }
-
-    saveCurrentFrame();
-
-    updateCounts();
-
-    renderClassificationCard();
-
-    renderDetails();
-
-    render();
+    updateSelected();
 
 }
 
 
-/* =========================================================
+/* ============================================================
    DETAILS
-========================================================= */
+============================================================ */
 
 function renderDetails() {
 
     const a =
-        getSelectedAnnotation();
+        getSelected();
+
 
     if (!a) {
 
-        annotationDetails.innerHTML = `
+        $("annotationDetails")
+            .innerHTML = `
+
             <div class="details-empty">
 
                 <div class="details-icon">
@@ -2931,13 +3491,16 @@ function renderDetails() {
                 </span>
 
             </div>
+
         `;
 
         return;
 
     }
 
-    annotationDetails.innerHTML = `
+
+    $("annotationDetails")
+        .innerHTML = `
 
         <div class="class-card">
 
@@ -2945,7 +3508,8 @@ function renderDetails() {
 
                 <strong>
                     ${escapeHTML(
-                        a.label || "unknown"
+                        a.label ||
+                        "unknown"
                     )}
                 </strong>
 
@@ -2955,20 +3519,22 @@ function renderDetails() {
 
             </div>
 
+
             <div class="class-field">
 
                 <label>
-                    ANNOTATION TYPE
+                    TYPE
                 </label>
 
                 <input
-                    value="${escapeHTML(
-                        a.type.toUpperCase()
-                    )}"
                     disabled
+                    value="${escapeHTML(
+                        a.type
+                    )}"
                 >
 
             </div>
+
 
             <div class="class-field">
 
@@ -2977,11 +3543,15 @@ function renderDetails() {
                 </label>
 
                 <input
-                    value="${a.occlusion || 0}%"
                     disabled
+                    value="${
+                        a.occlusion ??
+                        0
+                    }%"
                 >
 
             </div>
+
 
             <div class="class-field">
 
@@ -2990,27 +3560,29 @@ function renderDetails() {
                 </label>
 
                 <input
-                    value="${escapeHTML(
-                        a.truncation || "NONE"
-                    )}"
                     disabled
+                    value="${escapeHTML(
+                        a.truncation ||
+                        "NONE"
+                    )}"
                 >
 
             </div>
 
+
             <div class="class-field">
 
                 <label>
-                    STATUS
+                    ANNOTATION STATUS
                 </label>
 
                 <input
+                    disabled
                     value="${
                         a.corrected
                             ? "Human corrected"
                             : "AI generated"
                     }"
-                    disabled
                 >
 
             </div>
@@ -3022,92 +3594,110 @@ function renderDetails() {
 }
 
 
-/* =========================================================
-   UPDATE COUNT
-========================================================= */
+/* ============================================================
+   COUNT
+============================================================ */
 
 function updateCounts() {
 
-    objectCount.textContent =
+    $("objectCount")
+        .textContent =
         state.annotations.length;
 
 }
 
 
-/* =========================================================
-   AI ENGINE
-========================================================= */
+/* ============================================================
+   CONFIDENCE
+============================================================ */
 
-confidence.addEventListener(
-    "input",
-    () => {
-
-        const value =
-            Number(
-                confidence.value
-            );
-
-        confidenceValue.textContent =
-            Math.round(
-                value * 100
-            ) + "%";
-
-    }
-);
-
-
-document
-    .getElementById(
-        "autoAnnotate"
-    )
+$("confidence")
     .addEventListener(
-        "click",
-        runAIAnnotation
+        "input",
+        () => {
+
+            $("confidenceValue")
+                .textContent =
+                Math.round(
+                    Number(
+                        $("confidence")
+                            .value
+                    )
+                    *
+                    100
+                )
+                +
+                "%";
+
+        }
     );
 
 
-async function runAIAnnotation() {
+/* ============================================================
+   AI BUTTON
+============================================================ */
+
+$("autoAnnotate")
+    .addEventListener(
+        "click",
+        runAI
+    );
+
+
+/* ============================================================
+   AI
+============================================================ */
+
+async function runAI() {
 
     if (
         !state.image
     ) {
 
         setAIStatus(
-            "Upload an image or video first."
+            "Upload a photo or move to a video frame first."
         );
 
         return;
 
     }
 
+
     if (
-        state.aiBusy
+        state.aiRunning
     ) {
 
         return;
 
     }
 
-    state.aiBusy =
+
+    state.aiRunning =
         true;
 
-    const engine =
-        aiEngine.value;
 
-    setAIStatus(
-        `Loading ${engine.toUpperCase()}...`
-    );
+    const engine =
+        $("aiEngine")
+            .value;
 
 
     try {
 
+        setAIStatus(
+            `Loading ${engine.toUpperCase()}...`
+        );
+
+
         let detector;
+
 
         if (
             engine === "detr"
         ) {
 
-            if (!state.detr) {
+            if (
+                !state.detr
+            ) {
 
                 state.detr =
                     await pipeline(
@@ -3117,12 +3707,15 @@ async function runAIAnnotation() {
 
             }
 
+
             detector =
                 state.detr;
 
         } else {
 
-            if (!state.yolo) {
+            if (
+                !state.yolo
+            ) {
 
                 state.yolo =
                     await pipeline(
@@ -3132,6 +3725,7 @@ async function runAIAnnotation() {
 
             }
 
+
             detector =
                 state.yolo;
 
@@ -3139,155 +3733,170 @@ async function runAIAnnotation() {
 
 
         setAIStatus(
-            `Running ${engine.toUpperCase()}...`
+            "Analysing customer image..."
         );
 
 
         /*
-         * Important:
-         *
-         * Pass the image itself / image source,
-         * not a plain JS object.
+         * Hugging Face's browser example passes
+         * the image source directly to the detector.
          */
 
-        const output =
+        const results =
             await detector(
-                state.image,
+                state.image.src,
                 {
                     threshold:
                         Number(
-                            confidence.value
+                            $("confidence")
+                                .value
                         )
                 }
             );
 
 
-        const filtered =
+        const detections =
             applyRules(
-                output || []
+                results || []
             );
 
 
         /*
-         * Replace current AI-generated
-         * annotations for this frame.
+         * Keep human annotations.
          *
-         * Existing human-corrected annotations
-         * are retained.
+         * Remove previous AI annotations.
          */
-
-        const humanAnnotations =
-            state.annotations.filter(
-                a =>
-                    a.corrected === true &&
-                    a.aiGenerated !== true
-            );
-
 
         state.annotations =
-            humanAnnotations;
+            state.annotations.filter(
+                a =>
+                    !a.aiGenerated
+            );
 
 
-        for (
-            const detection
-            of filtered
-        ) {
-
-            const label =
-                normalizeLabel(
-                    detection.label
-                );
-
-            const box =
-                detection.box;
-
-            if (
-                !box
-            ) {
-                continue;
-            }
-
-            createAIAnnotation({
-
-                type: "box",
-
-                x:
-                    box.xmin,
-
-                y:
-                    box.ymin,
-
-                width:
-                    box.xmax -
-                    box.xmin,
-
-                height:
-                    box.ymax -
-                    box.ymin,
-
-                label,
-
-                score:
-                    detection.score
-
-            });
-
-        }
-
-
-        /*
-         * AI annotations start as NOT corrected.
-         *
-         * Once the user changes them,
-         * corrected becomes true.
-         */
-
-        state.annotations.forEach(
-            a => {
+        detections.forEach(
+            detection => {
 
                 if (
-                    a.aiGenerated
+                    !detection.box
                 ) {
 
-                    a.corrected =
-                        false;
+                    return;
 
                 }
+
+
+                const box =
+                    detection.box;
+
+
+                const annotation = {
+
+                    id:
+                        "ai_" +
+                        state.nextId++,
+
+                    type:
+                        "box",
+
+                    x:
+                        Number(
+                            box.xmin
+                        ),
+
+                    y:
+                        Number(
+                            box.ymin
+                        ),
+
+                    width:
+                        Number(
+                            box.xmax -
+                            box.xmin
+                        ),
+
+                    height:
+                        Number(
+                            box.ymax -
+                            box.ymin
+                        ),
+
+                    label:
+                        normalizeLabel(
+                            detection.label
+                        ),
+
+                    /*
+                     * Score is stored internally
+                     * but NEVER drawn on the box.
+                     */
+
+                    score:
+                        detection.score,
+
+                    occlusion:
+                        0,
+
+                    truncation:
+                        "NONE",
+
+                    export:
+                        true,
+
+                    aiGenerated:
+                        true,
+
+                    corrected:
+                        false,
+
+                    createdAt:
+                        new Date()
+                            .toISOString()
+
+                };
+
+
+                state.annotations.push(
+                    annotation
+                );
 
             }
         );
 
 
-        saveCurrentFrame();
+        saveFrame();
 
         updateCounts();
 
         render();
 
-        renderClassificationCard();
+        renderClassification();
 
         renderDetails();
 
 
         setAIStatus(
-            `${filtered.length} objects generated.`
+            `${detections.length} objects generated.`
         );
+
 
     } catch (error) {
 
         console.error(
-            "AI annotation error:",
+            "AI ERROR:",
             error
         );
 
+
         setAIStatus(
-            "AI error: " +
+            "AI failed: " +
             error.message
         );
 
+
     } finally {
 
-        state.aiBusy =
+        state.aiRunning =
             false;
 
     }
@@ -3295,107 +3904,64 @@ async function runAIAnnotation() {
 }
 
 
-/* =========================================================
-   CREATE AI ANNOTATION
-========================================================= */
-
-function createAIAnnotation(data) {
-
-    const annotation = {
-
-        id:
-            "ai_" +
-            state.nextAnnotationId++,
-
-        ...data,
-
-        aiGenerated:
-            true,
-
-        corrected:
-            false,
-
-        /*
-         * Classification defaults.
-         */
-
-        occlusion:
-            0,
-
-        truncation:
-            "NONE",
-
-        export:
-            true,
-
-        createdAt:
-            new Date().toISOString()
-
-    };
-
-    state.annotations.push(
-        annotation
-    );
-
-    if (
-        annotation.label
-    ) {
-
-        state.classes.add(
-            annotation.label
-        );
-
-    }
-
-}
-
-
-/* =========================================================
+/* ============================================================
    RULE ENGINE
-========================================================= */
+============================================================ */
 
 function applyRules(
     detections
 ) {
 
-    const text =
-        rulesInput.value || "";
-
-    const minConfidence =
-        parseMinConfidence(
-            text,
-            Number(
-                confidence.value
+    const rules =
+        $("rules")
+            .value
+            .split("\n")
+            .map(
+                x =>
+                    x.trim()
             )
-        );
+            .filter(Boolean);
+
+
+    const enabled =
+        $("applyRules")
+            .checked;
+
+
+    if (!enabled) {
+
+        return detections;
+
+    }
+
 
     let include =
         null;
 
+
     let exclude =
         [];
+
 
     const rename =
         {};
 
 
-    const lines =
-        text
-            .split("\n")
-            .map(
-                line =>
-                    line.trim()
-            )
-            .filter(Boolean);
+    let minimum =
+        Number(
+            $("confidence")
+                .value
+        );
 
 
     for (
         const line
-        of lines
+        of rules
     ) {
 
         const lower =
             line.toLowerCase();
+
 
         if (
             lower.startsWith(
@@ -3405,15 +3971,12 @@ function applyRules(
 
             include =
                 line
-                    .slice(
-                        line.indexOf(":") + 1
-                    )
+                    .split(":")
+                    .slice(1)
+                    .join(":")
                     .split(",")
                     .map(
-                        x =>
-                            normalizeLabel(
-                                x.trim()
-                            )
+                        normalizeLabel
                     )
                     .filter(Boolean);
 
@@ -3428,15 +3991,12 @@ function applyRules(
 
             exclude =
                 line
-                    .slice(
-                        line.indexOf(":") + 1
-                    )
+                    .split(":")
+                    .slice(1)
+                    .join(":")
                     .split(",")
                     .map(
-                        x =>
-                            normalizeLabel(
-                                x.trim()
-                            )
+                        normalizeLabel
                     )
                     .filter(Boolean);
 
@@ -3449,30 +4009,33 @@ function applyRules(
             )
         ) {
 
-            const pairs =
+            const values =
                 line
-                    .slice(
-                        line.indexOf(":") + 1
-                    )
+                    .split(":")
+                    .slice(1)
+                    .join(":")
                     .split(",");
 
-            pairs.forEach(
+
+            values.forEach(
                 pair => {
 
-                    const parts =
+                    const pieces =
                         pair.split("=");
 
+
                     if (
-                        parts.length === 2
+                        pieces.length ===
+                        2
                     ) {
 
                         rename[
                             normalizeLabel(
-                                parts[0].trim()
+                                pieces[0]
                             )
                         ] =
                             normalizeLabel(
-                                parts[1].trim()
+                                pieces[1]
                             );
 
                     }
@@ -3482,15 +4045,50 @@ function applyRules(
 
         }
 
+
+        if (
+            lower.startsWith(
+                "min_confidence:"
+            )
+        ) {
+
+            const value =
+                Number(
+                    line
+                        .split(":")
+                        .slice(1)
+                        .join(":")
+                        .trim()
+                );
+
+
+            if (
+                Number.isFinite(
+                    value
+                )
+            ) {
+
+                minimum =
+                    value;
+
+            }
+
+        }
+
     }
 
 
     return detections
+
         .filter(
             detection =>
-                detection.score >=
-                minConfidence
+                Number(
+                    detection.score
+                )
+                >=
+                minimum
         )
+
         .map(
             detection => {
 
@@ -3498,6 +4096,7 @@ function applyRules(
                     normalizeLabel(
                         detection.label
                     );
+
 
                 if (
                     rename[label]
@@ -3507,6 +4106,7 @@ function applyRules(
                         rename[label];
 
                 }
+
 
                 return {
 
@@ -3518,6 +4118,7 @@ function applyRules(
 
             }
         )
+
         .filter(
             detection => {
 
@@ -3526,22 +4127,29 @@ function applyRules(
                         detection.label
                     );
 
+
                 if (
-                    exclude.includes(label)
+                    exclude.includes(
+                        label
+                    )
                 ) {
 
                     return false;
 
                 }
+
 
                 if (
                     include &&
-                    !include.includes(label)
+                    !include.includes(
+                        label
+                    )
                 ) {
 
                     return false;
 
                 }
+
 
                 return true;
 
@@ -3551,71 +4159,54 @@ function applyRules(
 }
 
 
-function parseMinConfidence(
-    text,
-    fallback
-) {
-
-    const match =
-        text.match(
-            /min_confidence\s*:\s*([0-9.]+)/i
-        );
-
-    if (!match) {
-        return fallback;
-    }
-
-    return Math.max(
-        0,
-        Math.min(
-            1,
-            Number(match[1])
-        )
-    );
-
-}
-
-
-/* =========================================================
-   LABEL NORMALIZATION
-========================================================= */
+/* ============================================================
+   LABEL
+============================================================ */
 
 function normalizeLabel(
-    label
+    value
 ) {
 
-    const clean =
+    const label =
         String(
-            label || "unknown"
+            value ||
+            "unknown"
         )
         .trim()
         .toLowerCase();
 
+
     return (
-        LABEL_MAP[clean] ||
-        clean
+        LABEL_ALIASES[label]
+        ||
+        label
     );
 
 }
 
 
-/* =========================================================
+/* ============================================================
    RENDER
-========================================================= */
+============================================================ */
 
 function render() {
+
+    if (
+        state.videoPlaying
+    ) {
+
+        renderLiveVideo();
+
+        return;
+
+    }
+
 
     const rect =
         workspace.getBoundingClientRect();
 
-    /*
-     * Canvas is already scaled to device pixel
-     * ratio in resizeCanvas().
-     */
 
-    ctx.clearRect(
-        0,
-        0,
+    clearCanvas(
         rect.width,
         rect.height
     );
@@ -3630,73 +4221,64 @@ function render() {
     }
 
 
-    const imageWidth =
+    const width =
         state.image.naturalWidth ||
         state.image.width;
 
-    const imageHeight =
+
+    const height =
         state.image.naturalHeight ||
         state.image.height;
 
 
     /*
-     * IMAGE
+     * IMPORTANT:
      *
-     * Notice that there is deliberately NO
-     * boundary clamp here.
+     * There is NO edge clamp.
      *
-     * The user can pan past the camera edge
-     * and zoom anywhere.
+     * User can freely move the camera/image
+     * beyond workspace boundaries.
      */
 
     ctx.save();
+
 
     ctx.translate(
         state.offsetX,
         state.offsetY
     );
 
+
     ctx.scale(
         state.scale,
         state.scale
     );
 
+
     ctx.drawImage(
         state.image,
         0,
         0,
-        imageWidth,
-        imageHeight
+        width,
+        height
     );
+
 
     ctx.restore();
 
 
-    /*
-     * ANNOTATIONS
-     */
-
     state.annotations.forEach(
-        annotation => {
-
-            drawAnnotation(
-                annotation
-            );
-
-        }
+        drawAnnotation
     );
 
 
     /*
-     * Current polygon drawing
+     * Active polygon drawing
      */
 
     if (
-        state.isDrawing &&
-        (
-            state.annotationType === "polygon" ||
-            state.annotationType === "segmentation"
-        )
+        state.drawing &&
+        state.polygonPoints.length
     ) {
 
         drawCurrentPolygon();
@@ -3709,9 +4291,9 @@ function render() {
 }
 
 
-/* =========================================================
+/* ============================================================
    DRAW ANNOTATION
-========================================================= */
+============================================================ */
 
 function drawAnnotation(
     a
@@ -3721,32 +4303,14 @@ function drawAnnotation(
         a.type === "box"
     ) {
 
-        drawBox(a);
-
-        return;
-
-    }
-
-    if (
-        a.type === "polygon"
-    ) {
-
-        drawPolygon(
-            a,
-            false
+        drawBox(
+            a
         );
 
-        return;
-
-    }
-
-    if (
-        a.type === "segmentation"
-    ) {
+    } else {
 
         drawPolygon(
-            a,
-            true
+            a
         );
 
     }
@@ -3754,21 +4318,25 @@ function drawAnnotation(
 }
 
 
-/* =========================================================
-   DRAW BOX
-========================================================= */
+/* ============================================================
+   BOX
+============================================================ */
 
-function drawBox(a) {
+function drawBox(
+    a
+) {
 
-    const topLeft =
+    const p =
         imageToScreen(
             a.x,
             a.y
         );
 
+
     const width =
         a.width *
         state.scale;
+
 
     const height =
         a.height *
@@ -3780,171 +4348,187 @@ function drawBox(a) {
         state.selectedId;
 
 
-    /*
-     * Selected annotations are purple.
-     *
-     * AI boxes are green.
-     *
-     * No percentage is rendered.
-     */
-
     ctx.save();
 
-    ctx.lineWidth =
-        selected
-            ? 2.5
-            : 1.5;
 
     ctx.strokeStyle =
         selected
             ? "#a78bfa"
             : "#22c55e";
 
+
+    ctx.lineWidth =
+        selected
+            ? 3
+            : 2;
+
+
     ctx.strokeRect(
-        topLeft.x,
-        topLeft.y,
+        p.x,
+        p.y,
         width,
         height
     );
 
 
     /*
-     * Label ONLY.
+     * ONLY TYPE/CLASS.
      *
-     * No 68%, 98%, etc.
+     * No percentage.
      */
 
     const label =
         a.label ||
         "unknown";
 
+
     ctx.font =
         "bold 12px Arial";
 
-    const textWidth =
-        ctx.measureText(
-            label
-        ).width;
 
     const labelWidth =
-        textWidth + 12;
+        ctx.measureText(
+            label
+        ).width
+        +
+        12;
 
-    const labelHeight =
-        20;
 
     ctx.fillStyle =
         selected
             ? "#7c3aed"
             : "#15803d";
 
+
     ctx.fillRect(
-        topLeft.x,
-        topLeft.y - labelHeight,
+        p.x,
+        Math.max(
+            0,
+            p.y - 20
+        ),
         labelWidth,
-        labelHeight
+        20
     );
+
 
     ctx.fillStyle =
         "#ffffff";
 
+
     ctx.fillText(
         label,
-        topLeft.x + 6,
-        topLeft.y - 6
+        p.x + 6,
+        Math.max(
+            14,
+            p.y - 6
+        )
     );
 
 
     /*
-     * Selected resize handles
+     * Resize handles
      */
 
     if (
         selected
     ) {
 
-        drawBoxHandles(
+        drawHandles(
             a
         );
 
     }
+
 
     ctx.restore();
 
 }
 
 
-/* =========================================================
-   BOX HANDLES
-========================================================= */
+/* ============================================================
+   HANDLES
+============================================================ */
 
-function drawBoxHandles(a) {
+function drawHandles(
+    a
+) {
 
-    const handles = [
-
-        ["nw", a.x, a.y],
+    const points = [
 
         [
-            "n",
-            a.x + a.width / 2,
+            a.x,
             a.y
         ],
 
         [
-            "ne",
-            a.x + a.width,
+            a.x +
+                a.width / 2,
             a.y
         ],
 
         [
-            "e",
-            a.x + a.width,
-            a.y + a.height / 2
+            a.x +
+                a.width,
+            a.y
         ],
 
         [
-            "se",
-            a.x + a.width,
-            a.y + a.height
+            a.x +
+                a.width,
+            a.y +
+                a.height / 2
         ],
 
         [
-            "s",
-            a.x + a.width / 2,
-            a.y + a.height
+            a.x +
+                a.width,
+            a.y +
+                a.height
         ],
 
         [
-            "sw",
+            a.x +
+                a.width / 2,
+            a.y +
+                a.height
+        ],
+
+        [
             a.x,
-            a.y + a.height
+            a.y +
+                a.height
         ],
 
         [
-            "w",
             a.x,
-            a.y + a.height / 2
+            a.y +
+                a.height / 2
         ]
 
     ];
 
 
-    handles.forEach(
-        ([name, x, y]) => {
+    points.forEach(
+        point => {
 
             const p =
                 imageToScreen(
-                    x,
-                    y
+                    point[0],
+                    point[1]
                 );
+
 
             ctx.fillStyle =
                 "#ffffff";
 
+
             ctx.strokeStyle =
                 "#7c3aed";
 
+
             ctx.lineWidth =
                 1.5;
+
 
             ctx.fillRect(
                 p.x - 4,
@@ -3952,6 +4536,7 @@ function drawBoxHandles(a) {
                 8,
                 8
             );
+
 
             ctx.strokeRect(
                 p.x - 4,
@@ -3966,25 +4551,35 @@ function drawBoxHandles(a) {
 }
 
 
-/* =========================================================
-   DRAW POLYGON
-========================================================= */
+/* ============================================================
+   POLYGON / SEGMENTATION
+============================================================ */
 
 function drawPolygon(
-    a,
-    segmentation
+    a
 ) {
 
     if (
         !a.points ||
-        a.points.length < 2
+        a.points.length <
+        2
     ) {
+
         return;
+
     }
+
+
+    const selected =
+        a.id ===
+        state.selectedId;
+
 
     ctx.save();
 
+
     ctx.beginPath();
+
 
     a.points.forEach(
         (point, index) => {
@@ -3994,6 +4589,7 @@ function drawPolygon(
                     point.x,
                     point.y
                 );
+
 
             if (
                 index === 0
@@ -4016,24 +4612,21 @@ function drawPolygon(
         }
     );
 
+
     ctx.closePath();
 
 
     if (
-        segmentation
+        a.type ===
+        "segmentation"
     ) {
 
         ctx.fillStyle =
-            "rgba(139,92,246,0.20)";
+            "rgba(139,92,246,.22)";
 
         ctx.fill();
 
     }
-
-
-    const selected =
-        a.id ===
-        state.selectedId;
 
 
     ctx.strokeStyle =
@@ -4041,61 +4634,15 @@ function drawPolygon(
             ? "#a78bfa"
             : "#22c55e";
 
+
     ctx.lineWidth =
         selected
-            ? 2.5
-            : 1.5;
+            ? 3
+            : 2;
+
 
     ctx.stroke();
 
-
-    /*
-     * Label
-     */
-
-    const first =
-        imageToScreen(
-            a.points[0].x,
-            a.points[0].y
-        );
-
-    ctx.font =
-        "bold 12px Arial";
-
-    const label =
-        a.label ||
-        "unknown";
-
-    const width =
-        ctx.measureText(
-            label
-        ).width + 12;
-
-    ctx.fillStyle =
-        selected
-            ? "#7c3aed"
-            : "#15803d";
-
-    ctx.fillRect(
-        first.x,
-        first.y - 20,
-        width,
-        20
-    );
-
-    ctx.fillStyle =
-        "#fff";
-
-    ctx.fillText(
-        label,
-        first.x + 6,
-        first.y - 6
-    );
-
-
-    /*
-     * Vertex handles
-     */
 
     if (
         selected
@@ -4110,13 +4657,17 @@ function drawPolygon(
                         point.y
                     );
 
+
                 ctx.fillStyle =
                     "#ffffff";
+
 
                 ctx.strokeStyle =
                     "#7c3aed";
 
+
                 ctx.beginPath();
+
 
                 ctx.arc(
                     p.x,
@@ -4125,6 +4676,7 @@ function drawPolygon(
                     0,
                     Math.PI * 2
                 );
+
 
                 ctx.fill();
 
@@ -4135,36 +4687,108 @@ function drawPolygon(
 
     }
 
+
+    /*
+     * Label
+     */
+
+    const first =
+        imageToScreen(
+            a.points[0].x,
+            a.points[0].y
+        );
+
+
+    const label =
+        a.label ||
+        "unknown";
+
+
+    ctx.font =
+        "bold 12px Arial";
+
+
+    const labelWidth =
+        ctx.measureText(
+            label
+        ).width
+        +
+        12;
+
+
+    ctx.fillStyle =
+        selected
+            ? "#7c3aed"
+            : "#15803d";
+
+
+    ctx.fillRect(
+        first.x,
+        Math.max(
+            0,
+            first.y - 20
+        ),
+        labelWidth,
+        20
+    );
+
+
+    ctx.fillStyle =
+        "#ffffff";
+
+
+    ctx.fillText(
+        label,
+        first.x + 6,
+        Math.max(
+            14,
+            first.y - 6
+        )
+    );
+
+
     ctx.restore();
 
 }
 
 
-/* =========================================================
+/* ============================================================
    CURRENT POLYGON
-========================================================= */
+============================================================ */
 
 function drawCurrentPolygon() {
 
     if (
-        state.polygonPoints.length < 1
+        state.polygonPoints.length <
+        1
     ) {
+
         return;
+
     }
 
+
     ctx.save();
+
 
     ctx.strokeStyle =
         "#a78bfa";
 
+
     ctx.lineWidth =
         2;
 
+
     ctx.setLineDash(
-        [6, 4]
+        [
+            6,
+            4
+        ]
     );
 
+
     ctx.beginPath();
+
 
     state.polygonPoints.forEach(
         (point, index) => {
@@ -4174,6 +4798,7 @@ function drawCurrentPolygon() {
                     point.x,
                     point.y
                 );
+
 
             if (
                 index === 0
@@ -4196,51 +4821,57 @@ function drawCurrentPolygon() {
         }
     );
 
+
     if (
-        state.currentDrawPoint
+        state.drawCurrent
     ) {
 
-        const last =
+        const p =
             imageToScreen(
-                state.currentDrawPoint.x,
-                state.currentDrawPoint.y
+                state.drawCurrent.x,
+                state.drawCurrent.y
             );
 
+
         ctx.lineTo(
-            last.x,
-            last.y
+            p.x,
+            p.y
         );
 
     }
 
+
     ctx.stroke();
+
 
     ctx.restore();
 
 }
 
 
-/* =========================================================
-   FRAME STORAGE
-========================================================= */
+/* ============================================================
+   VIDEO FRAME ANNOTATIONS
+============================================================ */
 
-function saveCurrentFrame() {
+function saveFrame() {
 
     if (
-        state.mediaType !== "video"
+        state.mediaType !==
+        "video"
     ) {
+
         return;
+
     }
 
-    /*
-     * Deep clone so changing a future frame
-     * does not modify this frame.
-     */
 
     const copy =
-        structuredClone(
-            state.annotations
+        JSON.parse(
+            JSON.stringify(
+                state.annotations
+            )
         );
+
 
     state.frameAnnotations.set(
         state.currentFrame,
@@ -4253,39 +4884,182 @@ function saveCurrentFrame() {
 function loadFrameAnnotations() {
 
     if (
-        state.mediaType !== "video"
+        state.mediaType !==
+        "video"
     ) {
+
         return;
+
     }
+
 
     const saved =
         state.frameAnnotations.get(
             state.currentFrame
         );
 
+
     state.annotations =
         saved
-            ? structuredClone(saved)
+            ? JSON.parse(
+                JSON.stringify(
+                    saved
+                )
+            )
             : [];
+
 
     state.selectedId =
         null;
 
+
     updateCounts();
 
-    updateSelectedUI();
+    renderClassification();
+
+    renderDetails();
 
 }
 
 
-/* =========================================================
-   EXPORT IMAGE
-========================================================= */
+/* ============================================================
+   VIDEO UI
+============================================================ */
 
-document
-    .getElementById(
-        "exportImage"
-    )
+function updateVideoUI() {
+
+    $("currentFrame")
+        .textContent =
+        state.currentFrame;
+
+
+    $("totalFrames")
+        .textContent =
+        state.totalFrames;
+
+
+    $("frameSlider")
+        .value =
+        state.currentFrame;
+
+
+    $("videoTime")
+        .textContent =
+        formatTime(
+            state.currentTime
+        );
+
+}
+
+
+/* ============================================================
+   FORMAT TIME
+============================================================ */
+
+function formatTime(
+    seconds
+) {
+
+    const minutes =
+        Math.floor(
+            seconds / 60
+        );
+
+
+    const secs =
+        Math.floor(
+            seconds % 60
+        );
+
+
+    const millis =
+        Math.floor(
+            (
+                seconds %
+                1
+            )
+            *
+            1000
+        );
+
+
+    return (
+        String(
+            minutes
+        ).padStart(
+            2,
+            "0"
+        )
+        +
+        ":"
+        +
+        String(
+            secs
+        ).padStart(
+            2,
+            "0"
+        )
+        +
+        "."
+        +
+        String(
+            millis
+        ).padStart(
+            3,
+            "0"
+        )
+    );
+
+}
+
+
+/* ============================================================
+   ZOOM UI
+============================================================ */
+
+function updateZoomUI() {
+
+    const percent =
+        Math.round(
+            state.scale *
+            100
+        );
+
+
+    $("zoomValue")
+        .textContent =
+        percent +
+        "%";
+
+
+    $("footerZoom")
+        .textContent =
+        percent +
+        "%";
+
+}
+
+
+/* ============================================================
+   AI STATUS
+============================================================ */
+
+function setAIStatus(
+    message
+) {
+
+    $("aiStatus")
+        .textContent =
+        message;
+
+}
+
+
+/* ============================================================
+   EXPORT IMAGE
+============================================================ */
+
+$("exportImage")
     .addEventListener(
         "click",
         exportAnnotatedImage
@@ -4297,37 +5071,52 @@ function exportAnnotatedImage() {
     if (
         !state.image
     ) {
+
+        alert(
+            "Load an image or video frame first."
+        );
+
         return;
+
     }
 
-    const imageWidth =
+
+    const width =
         state.image.naturalWidth ||
         state.image.width;
 
-    const imageHeight =
+
+    const height =
         state.image.naturalHeight ||
         state.image.height;
+
 
     const output =
         document.createElement(
             "canvas"
         );
 
+
     output.width =
-        imageWidth;
+        width;
+
 
     output.height =
-        imageHeight;
+        height;
+
 
     const outputContext =
-        output.getContext("2d");
+        output.getContext(
+            "2d"
+        );
+
 
     outputContext.drawImage(
         state.image,
         0,
         0,
-        imageWidth,
-        imageHeight
+        width,
+        height
     );
 
 
@@ -4337,14 +5126,11 @@ function exportAnnotatedImage() {
                 a.export !== false
         )
         .forEach(
-            a => {
-
-                drawAnnotationExport(
+            a =>
+                drawExportAnnotation(
                     outputContext,
                     a
-                );
-
-            }
+                )
         );
 
 
@@ -4353,9 +5139,8 @@ function exportAnnotatedImage() {
 
             downloadBlob(
                 blob,
-                getExportName(
-                    "annotated",
-                    "png"
+                safeFilename(
+                    "annotated.png"
                 )
             );
 
@@ -4366,29 +5151,33 @@ function exportAnnotatedImage() {
 }
 
 
-/* =========================================================
+/* ============================================================
    EXPORT ANNOTATION
-========================================================= */
+============================================================ */
 
-function drawAnnotationExport(
+function drawExportAnnotation(
     context,
     a
 ) {
 
     context.save();
 
+
     context.strokeStyle =
-        "#00ff66";
+        "#00ff55";
+
 
     context.fillStyle =
-        "rgba(0,255,100,.15)";
+        "rgba(0,255,85,.18)";
+
 
     context.lineWidth =
-        2;
+        3;
 
 
     if (
-        a.type === "box"
+        a.type ===
+        "box"
     ) {
 
         context.strokeRect(
@@ -4398,42 +5187,51 @@ function drawAnnotationExport(
             a.height
         );
 
+
         context.font =
-            "bold 16px Arial";
+            "bold 18px Arial";
+
 
         context.fillStyle =
-            "#00ff66";
+            "#00ff55";
+
 
         context.fillText(
-            a.label || "unknown",
+            a.label ||
+            "unknown",
             a.x,
             Math.max(
-                16,
+                18,
                 a.y - 5
             )
         );
+
 
     } else {
 
         context.beginPath();
 
+
         a.points.forEach(
-            (p, index) => {
+            (
+                point,
+                index
+            ) => {
 
                 if (
                     index === 0
                 ) {
 
                     context.moveTo(
-                        p.x,
-                        p.y
+                        point.x,
+                        point.y
                     );
 
                 } else {
 
                     context.lineTo(
-                        p.x,
-                        p.y
+                        point.x,
+                        point.y
                     );
 
                 }
@@ -4441,243 +5239,162 @@ function drawAnnotationExport(
             }
         );
 
+
         context.closePath();
 
+
         if (
-            a.type === "segmentation"
+            a.type ===
+            "segmentation"
         ) {
 
             context.fill();
 
         }
 
+
         context.stroke();
 
     }
+
 
     context.restore();
 
 }
 
 
-/* =========================================================
-   EXPORT JSON
-========================================================= */
+/* ============================================================
+   TRAINING JSON
+============================================================ */
 
-document
-    .getElementById(
-        "exportJSON"
-    )
+$("exportJSON")
     .addEventListener(
         "click",
-        exportTrainingData
+        exportTrainingJSON
     );
 
 
-function exportTrainingData() {
+function exportTrainingJSON() {
+
+    if (
+        state.mediaType ===
+        "video"
+    ) {
+
+        saveFrame();
+
+
+        const frames = [];
+
+
+        const keys =
+            [
+                ...state.frameAnnotations.keys()
+            ]
+            .sort(
+                (a, b) =>
+                    a - b
+            );
+
+
+        keys.forEach(
+            frame => {
+
+                const annotations =
+                    state.frameAnnotations.get(
+                        frame
+                    )
+                    ||
+                    [];
+
+
+                frames.push({
+
+                    frame,
+
+                    time:
+                        frame /
+                        state.fps,
+
+                    annotations:
+                        exportAnnotations(
+                            annotations
+                        )
+
+                });
+
+            }
+        );
+
+
+        const data = {
+
+            version:
+                "1.0",
+
+            mediaType:
+                "video",
+
+            source:
+                $("fileName")
+                    .textContent,
+
+            fps:
+                state.fps,
+
+            frames
+
+        };
+
+
+        downloadJSON(
+            data,
+            safeFilename(
+                "training-data.json"
+            )
+        );
+
+
+        return;
+
+    }
+
 
     const data = {
 
         version:
             "1.0",
 
-        source:
-            fileName.textContent,
-
         mediaType:
-            state.mediaType,
+            "image",
 
-        createdAt:
-            new Date().toISOString(),
+        source:
+            $("fileName")
+                .textContent,
 
-        annotationPolicy: {
-
-            occlusion:
-                [
-                    0,
-                    25,
-                    50,
-                    75,
-                    100
-                ],
-
-            truncation:
-                [
-                    "NONE",
-                    "SLIGHT",
-                    "PARTIAL",
-                    "SEVERE"
-                ]
-
-        },
-
-        frames:
-            state.mediaType === "video"
-                ? exportAllFrames()
-                : [
-                    {
-                        frame: 0,
-
-                        annotations:
-                            exportAnnotations(
-                                state.annotations
-                            )
-                    }
-                ]
+        annotations:
+            exportAnnotations(
+                state.annotations
+            )
 
     };
 
 
     downloadJSON(
         data,
-        getExportName(
-            "training-data",
-            "json"
+        safeFilename(
+            "training-data.json"
         )
     );
 
 }
 
 
-function exportAllFrames() {
-
-    const frames = [];
-
-    const keys =
-        [...state.frameAnnotations.keys()]
-            .sort(
-                (a, b) => a - b
-            );
-
-
-    /*
-     * Include current frame too.
-     */
-
-    const currentCopy =
-        structuredClone(
-            state.annotations
-        );
-
-    state.frameAnnotations.set(
-        state.currentFrame,
-        currentCopy
-    );
-
-
-    const allKeys =
-        [
-            ...new Set(
-                [
-                    ...keys,
-                    state.currentFrame
-                ]
-            )
-        ]
-        .sort(
-            (a, b) => a - b
-        );
-
-
-    allKeys.forEach(
-        frame => {
-
-            const annotations =
-                state.frameAnnotations.get(
-                    frame
-                ) || [];
-
-            frames.push({
-
-                frame,
-
-                time:
-                    frame /
-                    state.fps,
-
-                annotations:
-                    exportAnnotations(
-                        annotations
-                    )
-
-            });
-
-        }
-    );
-
-
-    return frames;
-
-}
-
-
-function exportAnnotations(
-    annotations
-) {
-
-    return annotations
-        .filter(
-            a =>
-                a.export !== false
-        )
-        .map(
-            a => ({
-
-                id:
-                    a.id,
-
-                type:
-                    a.type,
-
-                class:
-                    a.label,
-
-                occlusion:
-                    a.occlusion ?? 0,
-
-                truncation:
-                    a.truncation || "NONE",
-
-                corrected:
-                    !!a.corrected,
-
-                aiGenerated:
-                    !!a.aiGenerated,
-
-                box:
-                    a.type === "box"
-                        ? {
-                            x: a.x,
-                            y: a.y,
-                            width: a.width,
-                            height: a.height
-                        }
-                        : undefined,
-
-                points:
-                    a.points
-                        ? a.points.map(
-                            p => ({
-                                x: p.x,
-                                y: p.y
-                            })
-                        )
-                        : undefined
-
-            })
-        );
-
-}
-
-
-/* =========================================================
+/* ============================================================
    CURRENT FRAME JSON
-========================================================= */
+============================================================ */
 
-document
-    .getElementById(
-        "exportFrameJSON"
-    )
+$("exportFrameJSON")
     .addEventListener(
         "click",
         () => {
@@ -4685,7 +5402,8 @@ document
             const data = {
 
                 source:
-                    fileName.textContent,
+                    $("fileName")
+                        .textContent,
 
                 frame:
                     state.currentFrame,
@@ -4700,11 +5418,11 @@ document
 
             };
 
+
             downloadJSON(
                 data,
-                getExportName(
-                    `frame-${state.currentFrame}`,
-                    "json"
+                safeFilename(
+                    `frame-${state.currentFrame}.json`
                 )
             );
 
@@ -4712,9 +5430,105 @@ document
     );
 
 
-/* =========================================================
-   DOWNLOAD HELPERS
-========================================================= */
+/* ============================================================
+   EXPORT ANNOTATIONS
+============================================================ */
+
+function exportAnnotations(
+    annotations
+) {
+
+    return annotations
+        .filter(
+            a =>
+                a.export !== false
+        )
+        .map(
+            a => {
+
+                const result = {
+
+                    id:
+                        a.id,
+
+                    type:
+                        a.type,
+
+                    class:
+                        a.label,
+
+                    occlusion:
+                        a.occlusion ??
+                        0,
+
+                    truncation:
+                        a.truncation ||
+                        "NONE",
+
+                    aiGenerated:
+                        !!a.aiGenerated,
+
+                    corrected:
+                        !!a.corrected
+
+                };
+
+
+                if (
+                    a.type ===
+                    "box"
+                ) {
+
+                    result.box = {
+
+                        x:
+                            a.x,
+
+                        y:
+                            a.y,
+
+                        width:
+                            a.width,
+
+                        height:
+                            a.height
+
+                    };
+
+                }
+
+
+                if (
+                    a.points
+                ) {
+
+                    result.points =
+                        a.points.map(
+                            p => ({
+
+                                x:
+                                    p.x,
+
+                                y:
+                                    p.y
+
+                            })
+                        );
+
+                }
+
+
+                return result;
+
+            }
+        );
+
+}
+
+
+/* ============================================================
+   DOWNLOAD JSON
+============================================================ */
 
 function downloadJSON(
     data,
@@ -4736,6 +5550,7 @@ function downloadJSON(
             }
         );
 
+
     downloadBlob(
         blob,
         filename
@@ -4743,6 +5558,10 @@ function downloadJSON(
 
 }
 
+
+/* ============================================================
+   DOWNLOAD
+============================================================ */
 
 function downloadBlob(
     blob,
@@ -4754,30 +5573,39 @@ function downloadBlob(
             blob
         );
 
-    const a =
+
+    const link =
         document.createElement(
             "a"
         );
 
-    a.href =
+
+    link.href =
         url;
 
-    a.download =
+
+    link.download =
         filename;
 
+
     document.body.appendChild(
-        a
+        link
     );
 
-    a.click();
 
-    a.remove();
+    link.click();
+
+
+    link.remove();
+
 
     setTimeout(
         () => {
+
             URL.revokeObjectURL(
                 url
             );
+
         },
         1000
     );
@@ -4785,13 +5613,114 @@ function downloadBlob(
 }
 
 
-function getExportName(
-    prefix,
-    extension
+/* ============================================================
+   CLEANUP
+============================================================ */
+
+function cleanupMedia() {
+
+    pauseVideo();
+
+
+    if (
+        state.imageURL
+    ) {
+
+        URL.revokeObjectURL(
+            state.imageURL
+        );
+
+    }
+
+
+    if (
+        state.videoURL
+    ) {
+
+        URL.revokeObjectURL(
+            state.videoURL
+        );
+
+    }
+
+
+    state.image =
+        null;
+
+
+    state.imageURL =
+        null;
+
+
+    state.videoURL =
+        null;
+
+
+    state.mediaType =
+        null;
+
+
+    state.annotations =
+        [];
+
+
+    state.frameAnnotations.clear();
+
+
+    state.selectedId =
+        null;
+
+
+    state.currentFrame =
+        0;
+
+
+    state.currentTime =
+        0;
+
+
+    state.totalFrames =
+        0;
+
+
+    $("videoControlsPanel")
+        .style.display =
+        "none";
+
+
+    updateCounts();
+
+    renderClassification();
+
+    renderDetails();
+
+}
+
+
+/* ============================================================
+   HELPERS
+============================================================ */
+
+function formatMB(
+    bytes
+) {
+
+    return (
+        bytes /
+        1024 /
+        1024
+    ).toFixed(2);
+
+}
+
+
+function safeFilename(
+    suffix
 ) {
 
     const base =
-        fileName.textContent
+        $("fileName")
+            .textContent
             .replace(
                 /\.[^/.]+$/,
                 ""
@@ -4801,41 +5730,26 @@ function getExportName(
                 "_"
             );
 
+
     return (
-        base +
-        "_" +
-        prefix +
-        "." +
-        extension
-    );
+        base ||
+        "customer"
+    )
+    +
+    "_"
+    +
+    suffix;
 
 }
 
-
-/* =========================================================
-   AI STATUS
-========================================================= */
-
-function setAIStatus(
-    text
-) {
-
-    aiStatus.textContent =
-        text;
-
-}
-
-
-/* =========================================================
-   HTML ESCAPE
-========================================================= */
 
 function escapeHTML(
     value
 ) {
 
     return String(
-        value ?? ""
+        value ??
+        ""
     )
     .replace(
         /&/g,
@@ -4861,16 +5775,8 @@ function escapeHTML(
 }
 
 
-/* =========================================================
-   INITIAL STATE
-========================================================= */
-
-updateZoomUI();
-
-updateCounts();
-
-renderClassificationCard();
-
-renderDetails();
+/* ============================================================
+   FINAL INITIAL RENDER
+============================================================ */
 
 render();
