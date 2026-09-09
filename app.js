@@ -3360,34 +3360,6 @@ function deleteSelected() {
     );
 }
 
-/* ============================================================
-   RENDER
-============================================================ */
-
-function render() {
-    if (!canvas) return;
-
-    const rect =
-        workspace.getBoundingClientRect();
-
-    clearCanvas(
-        rect.width,
-        rect.height
-    );
-
-    if (
-        state.mediaType ===
-            "video" &&
-        state.videoPlaying
-    ) {
-        renderLiveVideo();
-        return;
-    }
-
-    if (!state.image) {
-        renderDrawingPreview();
-        return;
-    }
 
     const width =
         state.image.naturalWidth ||
