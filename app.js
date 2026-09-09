@@ -7001,22 +7001,32 @@ window.CLOUD =
 ============================================================ */
 
 function createSupabaseClient() {
-    if (
-        supabaseClient
-    ) {
+    if (supabaseClient) {
         return supabaseClient;
     }
 
-    if (
-        typeof window.supabase ===
-        "undefined"
-    ) {
-        console.error(
-            "Supabase library was not loaded."
+    try {
+        supabaseClient = createClient(
+            SUPABASE_URL,
+            SUPABASE_PUBLISHABLE_KEY,
+            {
+                auth: {
+                    persistSession: true,
+                    autoRefreshToken: true,
+                    detectSessionInUrl: true
+                }
+            }
         );
 
+        return supabaseClient;
+
+    } catch (error) {
+        console.error("Could not create Supabase client:", error);
         return null;
     }
+}
+
+const supabase = createSupabaseClient();
 
     try {
         supabaseClient =
