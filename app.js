@@ -2267,57 +2267,39 @@ function finishBoxDrawing() {
     }
 
 
-    const annotation =
-        createAnnotation({
+    createAnnotation({
 
-            type:
-                "box",
+        type:
+            "box",
 
-            x,
+        x,
 
-            y,
+        y,
 
-            width,
+        width,
 
-            height,
+        height,
 
-            className:
-                "object",
+        label:
+            "object",
 
-            score:
-                1,
+        score:
+            1,
 
-            occlusion:
-                "none",
+        occlusion:
+            0,
 
-            truncation:
-                "none",
+        truncation:
+            "NONE",
 
-            ai_generated:
-                false,
+        aiGenerated:
+            false,
 
-            corrected:
-                true
+        corrected:
+            true
 
-        });
+    });
 
-
-    state.annotations.push(
-        annotation
-    );
-
-
-    state.selectedId =
-        annotation.id;
-
-
-    pushHistory();
-
-    saveFrame();
-
-    updateCounts();
-
-    updateAnnotationsList();
 
     render();
 
@@ -2457,56 +2439,46 @@ function finishPolygon() {
         );
 
 
-    const annotation =
-        createAnnotation({
+    createAnnotation({
 
-            type:
-                state.annotationType,
+        type:
+            state.annotationType,
 
-            x:
-                minX,
+        x:
+            minX,
 
-            y:
-                minY,
+        y:
+            minY,
 
-            width:
-                maxX -
-                minX,
+        width:
+            maxX -
+            minX,
 
-            height:
-                maxY -
-                minY,
+        height:
+            maxY -
+            minY,
 
-            points,
+        points,
 
-            className:
-                "object",
+        label:
+            "object",
 
-            score:
-                1,
+        score:
+            1,
 
-            occlusion:
-                "none",
+        occlusion:
+            0,
 
-            truncation:
-                "none",
+        truncation:
+            "NONE",
 
-            ai_generated:
-                false,
+        aiGenerated:
+            false,
 
-            corrected:
-                true
+        corrected:
+            true
 
-        });
-
-
-    state.annotations.push(
-        annotation
-    );
-
-
-    state.selectedId =
-        annotation.id;
+    });
 
 
     state.drawing =
@@ -2516,14 +2488,6 @@ function finishPolygon() {
     state.polygonPoints =
         [];
 
-
-    pushHistory();
-
-    saveFrame();
-
-    updateCounts();
-
-    updateAnnotationsList();
 
     render();
 
@@ -2777,38 +2741,15 @@ function render() {
     }
 
 
-    drawAnnotations();
-
-
-    if (
-        state.drawing &&
-        state.annotationType ===
-            "box" &&
-        state.drawStart &&
-        state.drawCurrent
-    ) {
-
-        drawTemporaryBox();
-
-    }
-
-
-    if (
-        state.drawing &&
-        (
-            state.annotationType ===
-                "polygon" ||
-            state.annotationType ===
-                "segmentation"
-        )
-    ) {
-
-        drawTemporaryPolygon();
-
-    }
+    state.annotations.forEach(
+        drawAnnotation
+    );
 
 
     ctx.restore();
+
+
+    renderDrawingPreview();
 
 }
 
@@ -2828,41 +2769,6 @@ function addPolygonPoint(x, y) {
     }
 
     state.drawCurrent = point;
-    render();
-}
-
-function finalizePolygon() {
-    if (
-        state.polygonPoints.length < 3
-    ) {
-        cancelDrawing();
-        return;
-    }
-
-    const points =
-        state.polygonPoints.map(
-            p => ({
-                x: p.x,
-                y: p.y
-            })
-        );
-
-    createAnnotation({
-        type: state.annotationType,
-        points,
-        label: "unknown",
-        score: null,
-        occlusion: 0,
-        truncation: "NONE"
-    });
-
-    state.drawing = false;
-    state.polygonPoints = [];
-    state.drawCurrent = null;
-
-    saveFrame();
-    pushHistory();
-    saveSession();
     render();
 }
 
@@ -3360,42 +3266,9 @@ function deleteSelected() {
     );
 }
 
-
-    const width =
-        state.image.naturalWidth ||
-        state.image.width;
-
-    const height =
-        state.image.naturalHeight ||
-        state.image.height;
-
-    ctx.save();
-
-    ctx.translate(
-        state.offsetX,
-        state.offsetY
-    );
-
-    ctx.scale(
-        state.scale,
-        state.scale
-    );
-
-    ctx.drawImage(
-        state.image,
-        0,
-        0,
-        width,
-        height
-    );
-
-    ctx.restore();
-
-    state.annotations.forEach(
-        drawAnnotation
-    );
-
-    renderDrawingPreview();
+/* ============================================================
+   DRAW ANNOTATION
+============================================================ */
 
 function drawAnnotation(a) {
     ctx.save();
@@ -6514,11 +6387,6 @@ function downloadText(
    CUSTOMER CSV EXPORT
 ============================================================ */
 
-$("exportCSV")?.addEventListener(
-    "click",
-    exportCSV
-);
-
 function exportCSV() {
     const rows =
         annotationsToRows();
@@ -6556,11 +6424,6 @@ function exportCSV() {
 /* ============================================================
    HTML EXPORT
 ============================================================ */
-
-$("exportHTML")?.addEventListener(
-    "click",
-    exportHTML
-);
 
 function exportHTML() {
     const rows =
@@ -6895,37 +6758,6 @@ function createSupabaseClient() {
 
 const supabase = createSupabaseClient();
 
-    try {
-        supabaseClient =
-            window.supabase.createClient(
-                SUPABASE_URL,
-                SUPABASE_PUBLISHABLE_KEY,
-                {
-                    auth: {
-                        persistSession:
-                            true,
-
-                        autoRefreshToken:
-                            true,
-
-                        detectSessionInUrl:
-                            true
-                    }
-                }
-            );
-
-        return supabaseClient;
-
-    } catch (error) {
-        console.error(
-            "Could not create Supabase client:",
-            error
-        );
-
-        return null;
-    }
-}
-
 /* ============================================================
    CLOUD INITIALIZATION
 ============================================================ */
@@ -7039,23 +6871,31 @@ function showAuthGate() {
         $("authLoggedIn");
 
     if (page) {
+
         page.style.display =
             "grid";
+
     }
 
     if (app) {
+
         app.style.display =
             "none";
+
     }
 
     if (loggedOut) {
+
         loggedOut.style.display =
             "block";
+
     }
 
     if (loggedIn) {
+
         loggedIn.style.display =
             "none";
+
     }
 }
 
@@ -7093,6 +6933,9 @@ function hideAuthGate() {
         loggedIn.style.display =
             "block";
     }
+
+    updateGreeting();
+    applyRolePermissions();
 }
 
 /* ============================================================
@@ -7471,7 +7314,7 @@ $("logoutButton")?.addEventListener(
 
 async function signOut() {
     try {
-        await logLogout();
+        await recordLogout();
 
         if (
             CLOUD.channel &&
@@ -7597,21 +7440,21 @@ async function handleSession(
 
         hideAuthGate();
 
-        updateAccountUI();
-
         enforceRoleUI();
+
+        applyRolePermissions();
 
         if (
             shouldLogLogin
         ) {
-            await logLogin();
+            await recordLogin();
         }
 
-        await setupRealtime();
+        subscribeRealtime();
 
         await loadCloudTasks();
 
-        await loadCloudWorkHistory();
+        await loadWorkHistory();
 
         updateWorkspaceGreeting();
 
@@ -7900,6 +7743,13 @@ function isAdmin() {
     return (
         CLOUD.profile?.role ===
         "admin"
+    );
+}
+
+function isReviewer() {
+    return (
+        CLOUD.profile?.role ===
+        "reviewer"
     );
 }
 
@@ -8474,6 +8324,10 @@ async function loadCloudTasks() {
     }
 }
 
+async function refreshMyTasks() {
+    return loadCloudTasks();
+}
+
 /* ============================================================
    TASK QUEUE
 ============================================================ */
@@ -8998,6 +8852,8 @@ async function openCloudTask(
 
     updateCurrentTaskUI();
 
+    updateTaskBar();
+
     await loadTaskAnnotations(
         task.id
     );
@@ -9284,6 +9140,16 @@ async function cloudSaveAnnotation(
     }
 }
 
+async function cloudSaveAllAnnotations() {
+    for (
+        const annotation of state.annotations
+    ) {
+        await cloudSaveAnnotation(
+            annotation
+        );
+    }
+}
+
 async function cloudDeleteAnnotation(
     annotationId
 ) {
@@ -9318,13 +9184,7 @@ async function cloudSaveCurrentFrame() {
         return;
     }
 
-    for (
-        const annotation of state.annotations
-    ) {
-        await cloudSaveAnnotation(
-            annotation
-        );
-    }
+    await cloudSaveAllAnnotations();
 }
 
 /* ============================================================
@@ -10978,220 +10838,6 @@ async function adminExportHTML() {
    CUSTOMER EXPORT
 ============================================================ */
 
-$("exportCSV")
-    ?.addEventListener(
-        "click",
-        exportCurrentCSV
-    );
-
-$("exportHTML")
-    ?.addEventListener(
-        "click",
-        exportCurrentHTML
-    );
-
-async function exportCurrentCSV() {
-    const rows = getExportRows();
-
-    if (!rows.length) {
-        showToast(
-            "There are no annotations to export."
-        );
-        return;
-    }
-
-    const headers = [
-        "task_id",
-        "annotation_id",
-        "frame",
-        "type",
-        "class",
-        "x",
-        "y",
-        "width",
-        "height",
-        "occlusion",
-        "truncation",
-        "score",
-        "ai_generated",
-        "corrected"
-    ];
-
-    const csv = [
-        headers.join(","),
-        ...rows.map(row =>
-            headers
-                .map(key =>
-                    csvEscape(
-                        row[key]
-                    )
-                )
-                .join(",")
-        )
-    ].join("\n");
-
-    downloadBlob(
-        new Blob(
-            [csv],
-            {
-                type:
-                    "text/csv;charset=utf-8"
-            }
-        ),
-        `annotations-${CLOUD.currentTaskId || "export"}.csv`
-    );
-
-    showToast(
-        "CSV exported ✓"
-    );
-}
-
-async function exportCurrentHTML() {
-    const rows = getExportRows();
-
-    if (!rows.length) {
-        showToast(
-            "There are no annotations to export."
-        );
-        return;
-    }
-
-    const headers = [
-        "task_id",
-        "annotation_id",
-        "frame",
-        "type",
-        "class",
-        "x",
-        "y",
-        "width",
-        "height",
-        "occlusion",
-        "truncation",
-        "score",
-        "ai_generated",
-        "corrected"
-    ];
-
-    const html = `
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Annotation Export</title>
-
-<style>
-body {
-    font-family: Arial, sans-serif;
-    padding: 24px;
-    color: #222;
-}
-
-h1 {
-    margin-bottom: 6px;
-}
-
-.meta {
-    color: #666;
-    margin-bottom: 20px;
-}
-
-table {
-    border-collapse: collapse;
-    width: 100%;
-    font-size: 11px;
-}
-
-th,
-td {
-    border: 1px solid #ccc;
-    padding: 7px;
-    text-align: left;
-    vertical-align: top;
-}
-
-th {
-    background: #eee;
-}
-
-td {
-    word-break: break-word;
-}
-</style>
-</head>
-
-<body>
-
-<h1>Annotation Export</h1>
-
-<div class="meta">
-Task:
-${escapeHTML(
-    CLOUD.currentTask?.title ||
-    CLOUD.currentTaskId ||
-    "Current task"
-)}
-
-<br>
-
-Exported:
-${escapeHTML(
-    new Date().toLocaleString()
-)}
-</div>
-
-<table>
-<thead>
-<tr>
-${headers
-    .map(
-        h =>
-            `<th>${escapeHTML(h)}</th>`
-    )
-    .join("")}
-</tr>
-</thead>
-
-<tbody>
-${rows
-    .map(
-        row => `
-<tr>
-${headers
-    .map(
-        key =>
-            `<td>${escapeHTML(
-                row[key]
-            )}</td>`
-    )
-    .join("")}
-</tr>
-`
-    )
-    .join("")}
-</tbody>
-</table>
-
-</body>
-</html>
-`;
-
-    downloadBlob(
-        new Blob(
-            [html],
-            {
-                type:
-                    "text/html;charset=utf-8"
-            }
-        ),
-        `annotations-${CLOUD.currentTaskId || "export"}.html`
-    );
-
-    showToast(
-        "HTML exported ✓"
-    );
-}
-
 function getExportRows() {
     return state.annotations.map(
         annotation => ({
@@ -11290,142 +10936,6 @@ function downloadBlob(blob, filename) {
             ),
         1000
     );
-}
-
-/* ============================================================
-   PROFILE PICTURE
-============================================================ */
-
-$("profilePictureInput")
-    ?.addEventListener(
-        "change",
-        handleAvatarUpload
-    );
-
-async function handleAvatarUpload(event) {
-    const file =
-        event.target.files?.[0];
-
-    if (!file) {
-        return;
-    }
-
-    if (
-        !file.type.startsWith(
-            "image/"
-        )
-    ) {
-        showToast(
-            "Please choose an image."
-        );
-        return;
-    }
-
-    if (
-        file.size >
-        5 * 1024 * 1024
-    ) {
-        showToast(
-            "Profile image must be smaller than 5 MB."
-        );
-        return;
-    }
-
-    if (!CLOUD.session?.user?.id) {
-        showToast(
-            "Please sign in first."
-        );
-        return;
-    }
-
-    const userId =
-        CLOUD.session.user.id;
-
-    const extension =
-        file.name
-            .split(".")
-            .pop()
-            ?.toLowerCase() ||
-        "jpg";
-
-    const path =
-        `${userId}/avatar.${extension}`;
-
-    const { error } =
-        await supabase.storage
-            .from("avatars")
-            .upload(
-                path,
-                file,
-                {
-                    upsert: true,
-                    contentType:
-                        file.type
-                }
-            );
-
-    if (error) {
-        showToast(
-            `Avatar upload failed: ${error.message}`
-        );
-        return;
-    }
-
-    const {
-        data: publicData
-    } =
-        supabase.storage
-            .from("avatars")
-            .getPublicUrl(path);
-
-    const avatarUrl =
-        publicData?.publicUrl;
-
-    if (avatarUrl) {
-        await supabase
-            .from("profiles")
-            .update({
-                avatar_url:
-                    avatarUrl
-            })
-            .eq(
-                "id",
-                userId
-            );
-
-        applyAvatar(
-            avatarUrl
-        );
-    }
-
-    showToast(
-        "Profile picture updated ✓"
-    );
-}
-
-function applyAvatar(url) {
-    document
-        .querySelectorAll(
-            "[data-avatar]"
-        )
-        .forEach(element => {
-            if (
-                element.tagName ===
-                "IMG"
-            ) {
-                element.src = url;
-            } else {
-                element.style.backgroundImage =
-                    `url("${url}")`;
-            }
-        });
-
-    const img =
-        $("profileAvatar");
-
-    if (img) {
-        img.src = url;
-    }
 }
 
 /* ============================================================
@@ -11654,41 +11164,8 @@ function updateGreeting() {
 }
 
 /* ============================================================
-   ROLE / ACCESS HELPERS
+   ROLE-BASED UI
 ============================================================ */
-
-function isAdmin() {
-    return (
-        CLOUD.profile?.role ===
-        "admin"
-    );
-}
-
-function isReviewer() {
-    return (
-        CLOUD.profile?.role ===
-        "reviewer"
-    );
-}
-
-function hasAllAccess() {
-    return [
-        "admin",
-        "staff"
-    ].includes(
-        CLOUD.profile?.role
-    );
-}
-
-function isCoworker() {
-    return [
-        "coworker_2d_box",
-        "coworker_polygon",
-        "coworker_segmentation"
-    ].includes(
-        CLOUD.profile?.role
-    );
-}
 
 function getRequiredWorkRole() {
     const shape =
@@ -11725,10 +11202,6 @@ function canUseManualAnnotation() {
 function canUseAIAnnotation() {
     return !!CLOUD.session;
 }
-
-/* ============================================================
-   ROLE-BASED UI
-============================================================ */
 
 function applyRolePermissions() {
     const role =
@@ -11790,56 +11263,13 @@ function applyRolePermissions() {
         }
     );
 
-    const roleLabel =
+    const roleLabelEl =
         $("currentUserRole");
 
-    if (roleLabel) {
-        roleLabel.textContent =
+    if (roleLabelEl) {
+        roleLabelEl.textContent =
             formatRole(role);
     }
-}
-
-/* ============================================================
-   AUTH GATE
-============================================================ */
-
-function showAuthGate() {
-    const loginPage =
-        $("loginPage");
-
-    const app =
-        document.querySelector(
-            ".app"
-        );
-
-    if (
-        !CLOUD.session
-    ) {
-        if (loginPage) {
-            loginPage.style.display =
-                "grid";
-        }
-
-        if (app) {
-            app.style.display =
-                "none";
-        }
-
-        return;
-    }
-
-    if (loginPage) {
-        loginPage.style.display =
-            "none";
-    }
-
-    if (app) {
-        app.style.display =
-            "";
-    }
-
-    updateGreeting();
-    applyRolePermissions();
 }
 
 /* ============================================================
@@ -11928,6 +11358,17 @@ async function recordLogin() {
             login_at:
                 new Date().toISOString()
         });
+
+    await supabase
+        .from("profiles")
+        .update({
+            last_login_at:
+                new Date().toISOString()
+        })
+        .eq(
+            "id",
+            CLOUD.session.user.id
+        );
 }
 
 async function recordLogout() {
@@ -11947,6 +11388,37 @@ async function recordLogout() {
             "id",
             CLOUD.session.user.id
         );
+}
+
+async function logActivity(
+    eventType,
+    metadata
+) {
+    if (
+        !CLOUD.session?.user?.id
+    ) {
+        return;
+    }
+
+    try {
+        await supabase
+            .from("activity_logs")
+            .insert({
+                user_id:
+                    CLOUD.session.user.id,
+
+                event_type:
+                    eventType,
+
+                metadata:
+                    metadata || {}
+            });
+    } catch (error) {
+        console.warn(
+            "Activity log failed:",
+            error
+        );
+    }
 }
 
 /* ============================================================
@@ -11982,20 +11454,6 @@ function formatRole(role) {
     );
 }
 
-function formatMoney(value) {
-    const amount =
-        Number(value || 0);
-
-    return amount.toLocaleString(
-        undefined,
-        {
-            style: "currency",
-            currency: "USD",
-            minimumFractionDigits: 2
-        }
-    );
-}
-
 function formatDateTime(value) {
     if (!value) {
         return "—";
@@ -12013,32 +11471,6 @@ function formatDateTime(value) {
     }
 
     return date.toLocaleString();
-}
-
-function escapeHTML(value) {
-    return String(
-        value ?? ""
-    )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
 }
 /* ============================================================
    START SUPABASE CLOUD CONNECTION
@@ -12059,9 +11491,7 @@ initCloud().catch(error => {
 ============================================================ */
 
 restoreTheme();
-updateGreeting();
 updateTaskBar();
-applyRolePermissions();
 
 window.addEventListener(
     "beforeunload",
@@ -12073,5 +11503,5 @@ window.addEventListener(
 );
 
 /* ============================================================
-   END OF PART 6
+   END OF FILE (deduplicated / fixed)
 ============================================================ */
