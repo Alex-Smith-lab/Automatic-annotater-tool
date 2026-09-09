@@ -2866,18 +2866,6 @@ function finalizePolygon() {
     render();
 }
 
-function doubleClick() {
-    if (state.mode !== "draw") return;
-
-    if (
-        state.annotationType === "box"
-    ) {
-        return;
-    }
-
-    finalizePolygon();
-}
-
 function cancelDrawing() {
     state.drawing = false;
     state.drawStart = null;
