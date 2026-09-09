@@ -12173,7 +12173,20 @@ function escapeHTML(value) {
             "&#039;"
         );
 }
+/* ============================================================
+   START SUPABASE CLOUD CONNECTION
+============================================================ */
 
+initCloud().catch(error => {
+    console.error("Supabase startup error:", error);
+
+    if (typeof setAuthStatus === "function") {
+        setAuthStatus(
+            error?.message || "Unable to connect to Supabase.",
+            true
+        );
+    }
+});
 /* ============================================================
    INITIAL UI SETUP
 ============================================================ */
