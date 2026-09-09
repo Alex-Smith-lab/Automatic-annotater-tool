@@ -3396,7 +3396,6 @@ function deleteSelected() {
     );
 
     renderDrawingPreview();
-}
 
 function drawAnnotation(a) {
     ctx.save();
