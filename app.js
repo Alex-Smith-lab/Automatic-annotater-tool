@@ -1,9 +1,3 @@
-/*
-==============================================================
- CUSTOMER ANNOTATION AI — GitHub Pages / Static Hosting Version
-==============================================================
-*/
-
 import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
 
 env.allowLocalModels = false;
@@ -38,6 +32,8 @@ const filmstripCurrentLabel = $("filmstripCurrentLabel");
 
 const toastContainer = $("toastContainer");
 
+const SESSION_KEY = "annotationAI_session_v1";
+
 /* ============================================================
    STATE
 ============================================================ */
@@ -57,14 +53,12 @@ const state = {
     frameCaptureBusy: false,
     animationFrame: null,
 
-    // view
     scale: 1,
     offsetX: 0,
     offsetY: 0,
     minScale: 0.03,
     maxScale: 25,
 
-    // annotation
     annotationType: "box",
     mode: "select",
     annotations: [],
@@ -72,13 +66,11 @@ const state = {
     hoveredId: null,
     nextId: 1,
 
-    // drawing
     drawing: false,
     drawStart: null,
     drawCurrent: null,
     polygonPoints: [],
 
-    // dragging
     pointerDown: false,
     dragging: false,
     panning: false,
@@ -88,22 +80,27 @@ const state = {
     dragLastImage: null,
     panStart: null,
 
-    // video annotations
     frameAnnotations: new Map(),
 
-    // ui
     rightPanelOpen: true,
     popupExpanded: false,
+    colorMode: "normal",
 
-    // ai
+    history: [],
+    historyIndex: -1,
+
     detr: null,
     yolo: null,
-    aiRunning: false
+    segmenter: null,
+    aiRunning: false,
+
+    pendingVideoRestore: null
 };
 
 const MODELS = {
     detr: "Xenova/detr-resnet-50",
-    yolo: "Xenova/yolov9-c"
+    yolo: "Xenova/yolov9-c",
+    panoptic: "Xenova/detr-resnet-50-panoptic"
 };
 
 const LABEL_ALIASES = {
@@ -124,7 +121,11 @@ resizeCanvas();
 updateZoomUI();
 updateCounts();
 updateAnnotationsList();
+updateUndoRedoButtons();
+updateAIEngineAvailability();
+updateColorLegend();
 hidePopup();
+loadSessionOnStartup();
 
 /* ============================================================
    UPLOAD
@@ -161,6 +162,7 @@ async function loadCustomerMedia(file) {
 
     fitView();
     render();
+    saveSession();
 }
 
 /* ============================================================
@@ -177,6 +179,7 @@ function loadImageFile(file) {
             state.imageURL = url;
             state.annotations = [];
             state.selectedId = null;
+            resetHistory(state.annotations);
             updateCounts();
             hidePopup();
             updateAnnotationsList();
@@ -213,9 +216,15 @@ function loadVideoFile(file) {
             $("frameSlider").max = state.totalFrames - 1;
             state.currentFrame = 0;
 
+            if (state.pendingVideoRestore && state.pendingVideoRestore.fileName === file.name) {
+                state.frameAnnotations = new Map(state.pendingVideoRestore.frameAnnotations || []);
+                state.pendingVideoRestore = null;
+                $("sessionBanner").style.display = "none";
+                showToast("Video annotations restored");
+            }
+
             buildFilmstrip();
-            seekVideoFrame(0);
-            resolve();
+            seekVideoFrame(0).then(resolve);
         };
 
         sourceVideo.onerror = () => {
@@ -387,12 +396,23 @@ function renderLiveVideo() {
 }
 
 /* ============================================================
-   KEYBOARD (automatic pan via Space, Enter completes annotation)
+   KEYBOARD
 ============================================================ */
 
 window.addEventListener("keydown", event => {
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+        return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        undo();
+        return;
+    }
+    if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === "y" || (event.shiftKey && event.key.toLowerCase() === "z"))) {
+        event.preventDefault();
+        redo();
         return;
     }
 
@@ -447,10 +467,6 @@ window.addEventListener("keyup", event => {
 
 /* ============================================================
    ANNOTATION TYPE
-   Box = click-drag. Polygon/Segmentation = click each vertex,
-   Enter or double-click to finish. Pan (Space/Shift/middle-click)
-   and zoom (scroll wheel) work from any tool, any time, mid-draw
-   included — no need to leave the annotation tool to reposition.
 ============================================================ */
 
 document.querySelectorAll(".annotation-type").forEach(button => {
@@ -461,10 +477,18 @@ document.querySelectorAll(".annotation-type").forEach(button => {
         state.annotationType = button.dataset.tool;
         $("annotationMode").textContent = state.annotationType.toUpperCase();
 
+        updateAIEngineAvailability();
         cancelDrawing();
         setMode("draw");
     });
 });
+
+function updateAIEngineAvailability() {
+    const isBox = state.annotationType === "box";
+    $("aiEngine").disabled = !isBox;
+    $("aiEngineNote").style.display = isBox ? "none" : "block";
+    $("aiEngineNote").textContent = isBox ? "" : "Polygon/Segmentation uses a real segmentation model (DETR panoptic) automatically — the engine dropdown above is only for box mode.";
+}
 
 /* ============================================================
    TOOLS
@@ -579,8 +603,7 @@ $("resetView").addEventListener("click", () => {
 });
 
 /* ============================================================
-   ZOOM — scroll wheel works in every mode, mid-draw included,
-   with no modifier key required.
+   ZOOM
 ============================================================ */
 
 $("zoomIn").addEventListener("click", () => zoomCenter(1.20));
@@ -676,7 +699,6 @@ function pointerDown(event) {
     canvas.setPointerCapture(event.pointerId);
     state.pointerDown = true;
 
-    // PAN — automatic from any tool via Space, Shift, or middle-click. Never blocks zoom.
     if (state.mode === "pan" || event.button === 1 || event.shiftKey || state.spacePan) {
         state.panning = true;
         state.panStart = { x: p.x, y: p.y, offsetX: state.offsetX, offsetY: state.offsetY };
@@ -716,7 +738,6 @@ function pointerDown(event) {
     }
 
     if (state.mode === "draw") {
-        // Overlapping annotations are always allowed — no hit-test guard here.
         if (state.annotationType === "box") beginDrawing(p.x, p.y);
         else addPolygonPoint(p.x, p.y);
     }
@@ -766,10 +787,16 @@ function pointerMove(event) {
 }
 
 function pointerUp() {
-    // Box finishes on release. Polygon/segmentation stay open until
-    // Enter, double-click, or the user presses Escape.
+    const wasDraggingAnnotation = state.mode === "select" && state.dragging && state.selectedId;
+
     if (state.mode === "draw" && state.drawing && state.annotationType === "box") {
         finishBoxDrawing();
+    }
+
+    if (wasDraggingAnnotation) {
+        saveFrame();
+        pushHistory();
+        saveSession();
     }
 
     state.pointerDown = false;
@@ -781,7 +808,7 @@ function pointerUp() {
 }
 
 /* ============================================================
-   DRAWING — BOX (click-drag)
+   DRAWING — BOX
 ============================================================ */
 
 function beginDrawing(x, y) {
@@ -810,12 +837,14 @@ function finishBoxDrawing() {
     state.drawCurrent = null;
 
     saveFrame();
+    pushHistory();
+    saveSession();
     updateCounts();
     render();
 }
 
 /* ============================================================
-   DRAWING — POLYGON / SEGMENTATION (click each vertex)
+   DRAWING — POLYGON / SEGMENTATION
 ============================================================ */
 
 function addPolygonPoint(x, y) {
@@ -846,6 +875,8 @@ function finalizePolygon() {
     state.drawCurrent = null;
 
     saveFrame();
+    pushHistory();
+    saveSession();
     render();
 }
 
@@ -980,6 +1011,8 @@ function deleteSelected() {
     state.selectedId = null;
 
     saveFrame();
+    pushHistory();
+    saveSession();
     updateCounts();
     hidePopup();
     updateAnnotationsList();
@@ -1138,6 +1171,8 @@ function savePopupClassification() {
     a.corrected = true;
 
     saveFrame();
+    pushHistory();
+    saveSession();
     updateSelected();
 
     setTimeout(() => showToast("Saved ✓"), 250);
@@ -1165,6 +1200,63 @@ function showToast(message) {
 }
 
 /* ============================================================
+   UNDO / REDO
+============================================================ */
+
+function resetHistory(initial) {
+    state.history = [JSON.stringify(initial || [])];
+    state.historyIndex = 0;
+    updateUndoRedoButtons();
+}
+
+function pushHistory() {
+    const snap = JSON.stringify(state.annotations);
+    if (state.history[state.historyIndex] === snap) { updateUndoRedoButtons(); return; }
+
+    state.history = state.history.slice(0, state.historyIndex + 1);
+    state.history.push(snap);
+
+    if (state.history.length > 60) state.history.shift();
+
+    state.historyIndex = state.history.length - 1;
+    updateUndoRedoButtons();
+}
+
+function undo() {
+    if (state.historyIndex <= 0) return;
+    state.historyIndex--;
+    state.annotations = JSON.parse(state.history[state.historyIndex]);
+    state.selectedId = null;
+    afterHistoryRestore();
+}
+
+function redo() {
+    if (state.historyIndex >= state.history.length - 1) return;
+    state.historyIndex++;
+    state.annotations = JSON.parse(state.history[state.historyIndex]);
+    state.selectedId = null;
+    afterHistoryRestore();
+}
+
+function afterHistoryRestore() {
+    updateCounts();
+    hidePopup();
+    updateAnnotationsList();
+    render();
+    saveFrame();
+    saveSession();
+    updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+    $("undoBtn").disabled = state.historyIndex <= 0;
+    $("redoBtn").disabled = state.historyIndex >= state.history.length - 1;
+}
+
+$("undoBtn").addEventListener("click", undo);
+$("redoBtn").addEventListener("click", redo);
+
+/* ============================================================
    RIGHT PANEL — ALL ANNOTATIONS LIST
 ============================================================ */
 
@@ -1180,16 +1272,22 @@ function updateAnnotationsList() {
         return;
     }
 
-    annotationsList.innerHTML = state.annotations.map(a => `
+    annotationsList.innerHTML = state.annotations.map(a => {
+        const dotColor = state.colorMode === "occlusion" ? occlusionColor(a.occlusion)
+            : state.colorMode === "truncation" ? truncationColor(a.truncation)
+            : null;
+        const dotStyle = dotColor ? ` style="background:${dotColor}"` : "";
+
+        return `
         <div class="ann-row ${a.id === state.selectedId ? "selected" : ""}" data-id="${escapeHTML(a.id)}">
-            <span class="ann-row-dot"></span>
+            <span class="ann-row-dot"${dotStyle}></span>
             <div class="ann-row-main">
                 <div class="ann-row-label">${escapeHTML(a.label || "unknown")}</div>
                 <div class="ann-row-meta">${escapeHTML(a.type)} • ${a.corrected ? "corrected" : "AI"}</div>
             </div>
             <span class="ann-row-badge">${a.occlusion ?? 0}%</span>
-        </div>
-    `).join("");
+        </div>`;
+    }).join("");
 
     annotationsList.querySelectorAll(".ann-row").forEach(row => {
         row.addEventListener("click", () => {
@@ -1212,7 +1310,61 @@ $("confidence").addEventListener("input", () => {
 });
 
 /* ============================================================
-   AI — SINGLE FRAME + FULL VIDEO BATCH + DETR/YOLO/BOTH
+   QUICK REVIEW — COLOR BY OCCLUSION / TRUNCATION
+============================================================ */
+
+$("colorMode").addEventListener("change", () => {
+    state.colorMode = $("colorMode").value;
+    updateColorLegend();
+    render();
+    updateAnnotationsList();
+});
+
+function occlusionColor(value) {
+    const v = Number(value) || 0;
+    if (v <= 0) return "#22c55e";
+    if (v <= 25) return "#84cc16";
+    if (v <= 50) return "#eab308";
+    if (v <= 75) return "#f97316";
+    return "#ef4444";
+}
+
+function truncationColor(value) {
+    switch (value) {
+        case "NONE": return "#22c55e";
+        case "SLIGHT": return "#84cc16";
+        case "PARTIAL": return "#f97316";
+        case "SEVERE": return "#ef4444";
+        default: return "#8f8fa3";
+    }
+}
+
+function getReviewColor(a) {
+    if (state.colorMode === "occlusion") return occlusionColor(a.occlusion);
+    if (state.colorMode === "truncation") return truncationColor(a.truncation);
+    return null;
+}
+
+function updateColorLegend() {
+    const legend = $("colorLegend");
+    if (state.colorMode === "normal") {
+        legend.style.display = "none";
+        legend.innerHTML = "";
+        return;
+    }
+
+    const items = state.colorMode === "occlusion"
+        ? [["0%", "#22c55e"], ["25%", "#84cc16"], ["50%", "#eab308"], ["75%", "#f97316"], ["100%", "#ef4444"]]
+        : [["NONE", "#22c55e"], ["SLIGHT", "#84cc16"], ["PARTIAL", "#f97316"], ["SEVERE", "#ef4444"]];
+
+    legend.innerHTML = items.map(([label, color]) =>
+        `<span class="legend-chip"><span class="legend-dot" style="background:${color}"></span>${label}</span>`
+    ).join("");
+    legend.style.display = "flex";
+}
+
+/* ============================================================
+   AI — SINGLE FRAME + FULL VIDEO BATCH + DETR/YOLO/BOTH + REAL SEGMENTATION
 ============================================================ */
 
 $("autoAnnotate").addEventListener("click", runAI);
@@ -1224,6 +1376,11 @@ async function getDetector(engine) {
     }
     if (!state.yolo) state.yolo = await pipeline("object-detection", MODELS.yolo);
     return state.yolo;
+}
+
+async function getSegmenter() {
+    if (!state.segmenter) state.segmenter = await pipeline("image-segmentation", MODELS.panoptic);
+    return state.segmenter;
 }
 
 async function loadEngines(engine) {
@@ -1306,6 +1463,89 @@ function detectionsToAnnotations(detections) {
         });
 }
 
+/* --- Real mask -> polygon conversion (radial boundary sampling on the actual model mask) --- */
+
+function maskToPolygonPoints(maskData, width, height, numPoints) {
+    let sumX = 0, sumY = 0, count = 0;
+    let minX = width, minY = height, maxX = 0, maxY = 0;
+
+    for (let y = 0; y < height; y++) {
+        const row = y * width;
+        for (let x = 0; x < width; x++) {
+            if (maskData[row + x] > 127) {
+                sumX += x; sumY += y; count++;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+
+    if (count < 8) return null;
+
+    const cx = sumX / count;
+    const cy = sumY / count;
+    const maxRadius = Math.hypot(Math.max(cx - minX, maxX - cx), Math.max(cy - minY, maxY - cy)) + 2;
+
+    const points = [];
+    for (let i = 0; i < numPoints; i++) {
+        const angle = (i / numPoints) * Math.PI * 2;
+        const dx = Math.cos(angle), dy = Math.sin(angle);
+        let lastFg = 0;
+
+        for (let r = 0; r <= maxRadius; r += 1) {
+            const px = Math.round(cx + dx * r);
+            const py = Math.round(cy + dy * r);
+            if (px < 0 || py < 0 || px >= width || py >= height) break;
+            if (maskData[py * width + px] > 127) lastFg = r;
+        }
+
+        points.push({ x: cx + dx * lastFg, y: cy + dy * lastFg });
+    }
+
+    return points;
+}
+
+async function segmentsToAnnotations(segments, shape) {
+    const withMasks = (segments || []).filter(s => s && s.mask && s.mask.data);
+    const filtered = applyRules(withMasks);
+    const numPoints = shape === "segmentation" ? 48 : 16;
+
+    const imgW = state.image.naturalWidth || state.image.width;
+    const imgH = state.image.naturalHeight || state.image.height;
+
+    const results = [];
+
+    for (const segment of filtered) {
+        const mask = segment.mask;
+        const maskW = mask.width;
+        const maskH = mask.height;
+        const points = maskToPolygonPoints(mask.data, maskW, maskH, numPoints);
+        if (!points) continue;
+
+        const scaleX = imgW / maskW;
+        const scaleY = imgH / maskH;
+        const scaledPoints = points.map(p => ({ x: p.x * scaleX, y: p.y * scaleY }));
+
+        results.push({
+            id: "ai_" + state.nextId++,
+            type: shape,
+            points: scaledPoints,
+            label: normalizeLabel(segment.label),
+            score: segment.score,
+            occlusion: 0,
+            truncation: "NONE",
+            export: true,
+            aiGenerated: true,
+            corrected: false,
+            createdAt: new Date().toISOString()
+        });
+    }
+
+    return results;
+}
+
 async function runAI() {
     if (!state.image) {
         setAIStatus("Upload a photo or move to a video frame first.");
@@ -1323,24 +1563,37 @@ async function runAISingleFrame() {
     state.aiRunning = true;
     $("autoAnnotate").disabled = true;
     const engine = $("aiEngine").value;
+    const shape = state.annotationType;
 
     try {
-        setAIStatus(`Loading ${engine === "both" ? "DETR + YOLO" : engine.toUpperCase()}...`);
-        const engines = await loadEngines(engine);
+        let newAnnotations;
 
-        setAIStatus("Analysing customer image...");
-        const detections = await runDetection(engines, engine);
+        if (shape === "box") {
+            setAIStatus(`Loading ${engine === "both" ? "DETR + YOLO" : engine.toUpperCase()}...`);
+            const engines = await loadEngines(engine);
+            setAIStatus("Analysing customer image...");
+            const detections = await runDetection(engines, engine);
+            newAnnotations = detectionsToAnnotations(detections);
+        } else {
+            setAIStatus("Loading segmentation model (DETR panoptic)...");
+            const segmenter = await getSegmenter();
+            setAIStatus(shape === "polygon" ? "Tracing object outlines from real masks..." : "Generating segmentation masks...");
+            const segments = await segmenter(state.image.src, { threshold: Number($("confidence").value) });
+            newAnnotations = await segmentsToAnnotations(segments, shape);
+        }
 
         state.annotations = state.annotations.filter(a => !a.aiGenerated);
-        state.annotations.push(...detectionsToAnnotations(detections));
+        state.annotations.push(...newAnnotations);
 
         saveFrame();
         updateCounts();
         render();
         updateAnnotationsList();
         updateFilmstripAnnotated();
+        pushHistory();
+        saveSession();
 
-        setAIStatus(`${detections.length} objects generated.`);
+        setAIStatus(`${newAnnotations.length} objects generated (${shape}).`);
     } catch (error) {
         console.error("AI ERROR:", error);
         setAIStatus("AI failed: " + error.message);
@@ -1356,6 +1609,7 @@ async function runAIAllFrames() {
     pauseVideo();
 
     const engine = $("aiEngine").value;
+    const shape = state.annotationType;
     const startFrame = state.currentFrame;
     const total = state.totalFrames;
 
@@ -1363,20 +1617,35 @@ async function runAIAllFrames() {
     setProgress(0);
 
     try {
-        setAIStatus(`Loading ${engine === "both" ? "DETR + YOLO" : engine.toUpperCase()}...`);
-        const engines = await loadEngines(engine);
+        let engines = null, segmenter = null;
+
+        if (shape === "box") {
+            setAIStatus(`Loading ${engine === "both" ? "DETR + YOLO" : engine.toUpperCase()}...`);
+            engines = await loadEngines(engine);
+        } else {
+            setAIStatus("Loading segmentation model (DETR panoptic)...");
+            segmenter = await getSegmenter();
+        }
 
         for (let frame = 0; frame < total; frame++) {
-            setAIStatus(`Annotating frame ${frame + 1} / ${total}...`);
+            setAIStatus(`Annotating frame ${frame + 1} / ${total} (${shape})...`);
             setProgress((frame / total) * 100);
 
             await seekVideoFrame(frame);
-            const detections = await runDetection(engines, engine);
+
+            let newAnnotations;
+            if (shape === "box") {
+                const detections = await runDetection(engines, engine);
+                newAnnotations = detectionsToAnnotations(detections);
+            } else {
+                const segments = await segmenter(state.image.src, { threshold: Number($("confidence").value) });
+                newAnnotations = await segmentsToAnnotations(segments, shape);
+            }
 
             const existing = state.frameAnnotations.get(frame) || [];
             const human = existing.filter(a => !a.aiGenerated);
 
-            state.annotations = [...human, ...detectionsToAnnotations(detections)];
+            state.annotations = [...human, ...newAnnotations];
             saveFrame();
 
             updateFilmstripAnnotated();
@@ -1385,10 +1654,12 @@ async function runAIAllFrames() {
         await seekVideoFrame(startFrame);
 
         setProgress(100);
-        setAIStatus(`Done — annotated all ${total} frames.`);
+        setAIStatus(`Done — annotated all ${total} frames (${shape}).`);
         updateCounts();
         updateAnnotationsList();
         render();
+        resetHistory(state.annotations);
+        saveSession();
     } catch (error) {
         console.error("AI BATCH ERROR:", error);
         setAIStatus("Batch AI failed: " + error.message);
@@ -1461,6 +1732,33 @@ function normalizeLabel(value) {
 }
 
 /* ============================================================
+   COLOR HELPERS
+============================================================ */
+
+function shadeColor(hex, percent) {
+    let clean = hex.replace("#", "");
+    if (clean.length === 3) clean = clean.split("").map(c => c + c).join("");
+    const num = parseInt(clean, 16);
+
+    let r = (num >> 16) + Math.round(255 * (percent / 100));
+    let g = ((num >> 8) & 0x00FF) + Math.round(255 * (percent / 100));
+    let b = (num & 0x0000FF) + Math.round(255 * (percent / 100));
+
+    r = Math.max(0, Math.min(255, r));
+    g = Math.max(0, Math.min(255, g));
+    b = Math.max(0, Math.min(255, b));
+
+    return "#" + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+}
+
+function hexToRGBA(hex, alpha) {
+    const clean = hex.replace("#", "");
+    const num = parseInt(clean, 16);
+    const r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/* ============================================================
    RENDER
 ============================================================ */
 
@@ -1503,9 +1801,20 @@ function drawBox(a) {
     const width = a.width * state.scale;
     const height = a.height * state.scale;
     const selected = a.id === state.selectedId;
+    const reviewColor = getReviewColor(a);
+    const color = reviewColor || (selected ? "#a78bfa" : "#22c55e");
 
     ctx.save();
-    ctx.strokeStyle = selected ? "#a78bfa" : "#22c55e";
+
+    if (selected) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 5;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(p.x, p.y, width, height);
+        ctx.setLineDash([]);
+    }
+
+    ctx.strokeStyle = color;
     ctx.lineWidth = selected ? 3 : 2;
     ctx.strokeRect(p.x, p.y, width, height);
 
@@ -1513,7 +1822,7 @@ function drawBox(a) {
     ctx.font = "bold 12px Arial";
     const labelWidth = ctx.measureText(label).width + 12;
 
-    ctx.fillStyle = selected ? "#7c3aed" : "#15803d";
+    ctx.fillStyle = shadeColor(color, selected ? -10 : -25);
     ctx.fillRect(p.x, Math.max(0, p.y - 20), labelWidth, 20);
 
     ctx.fillStyle = "#ffffff";
@@ -1543,6 +1852,8 @@ function drawHandles(a) {
 function drawPolygon(a) {
     if (!a.points || a.points.length < 2) return;
     const selected = a.id === state.selectedId;
+    const reviewColor = getReviewColor(a);
+    const color = reviewColor || (selected ? "#a78bfa" : "#22c55e");
 
     ctx.save();
     ctx.beginPath();
@@ -1556,11 +1867,19 @@ function drawPolygon(a) {
     ctx.closePath();
 
     if (a.type === "segmentation") {
-        ctx.fillStyle = "rgba(139,92,246,.22)";
+        ctx.fillStyle = reviewColor ? hexToRGBA(reviewColor, 0.28) : "rgba(139,92,246,.22)";
         ctx.fill();
     }
 
-    ctx.strokeStyle = selected ? "#a78bfa" : "#22c55e";
+    if (selected) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 5;
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    ctx.strokeStyle = color;
     ctx.lineWidth = selected ? 3 : 2;
     ctx.stroke();
 
@@ -1581,7 +1900,7 @@ function drawPolygon(a) {
     ctx.font = "bold 12px Arial";
     const labelWidth = ctx.measureText(label).width + 12;
 
-    ctx.fillStyle = selected ? "#7c3aed" : "#15803d";
+    ctx.fillStyle = shadeColor(color, selected ? -10 : -25);
     ctx.fillRect(first.x, Math.max(0, first.y - 20), labelWidth, 20);
 
     ctx.fillStyle = "#ffffff";
@@ -1613,7 +1932,6 @@ function drawCurrentPolygon() {
     ctx.stroke();
     ctx.restore();
 
-    // Vertex markers so each placed point is visible while building the shape
     ctx.save();
     state.polygonPoints.forEach(point => {
         const p = imageToScreen(point.x, point.y);
@@ -1642,6 +1960,7 @@ function loadFrameAnnotations() {
     const saved = state.frameAnnotations.get(state.currentFrame);
     state.annotations = saved ? JSON.parse(JSON.stringify(saved)) : [];
     state.selectedId = null;
+    resetHistory(state.annotations);
 
     updateCounts();
     hidePopup();
@@ -1649,7 +1968,7 @@ function loadFrameAnnotations() {
 }
 
 /* ============================================================
-   VIDEO FILMSTRIP (bottom of workspace)
+   VIDEO FILMSTRIP
 ============================================================ */
 
 function buildFilmstrip() {
@@ -1873,6 +2192,119 @@ function downloadBlob(blob, filename) {
 }
 
 /* ============================================================
+   SESSION PERSISTENCE (localStorage) — survives reload until
+   "COMPLETE TASK" is clicked
+============================================================ */
+
+function saveSession() {
+    try {
+        if (!state.mediaType) {
+            localStorage.removeItem(SESSION_KEY);
+            return;
+        }
+
+        const payload = {
+            mediaType: state.mediaType,
+            fileName: $("fileName").textContent,
+            annotations: state.annotations,
+            colorMode: state.colorMode,
+            savedAt: Date.now()
+        };
+
+        if (state.mediaType === "image" && state.image) {
+            const w = state.image.naturalWidth || state.image.width;
+            const h = state.image.naturalHeight || state.image.height;
+            const tmp = document.createElement("canvas");
+            tmp.width = w;
+            tmp.height = h;
+            tmp.getContext("2d").drawImage(state.image, 0, 0, w, h);
+            payload.imageDataURL = tmp.toDataURL("image/jpeg", 0.85);
+        } else if (state.mediaType === "video") {
+            payload.frameAnnotations = [...state.frameAnnotations.entries()];
+            payload.fps = state.fps;
+            payload.totalFrames = state.totalFrames;
+            payload.currentFrame = state.currentFrame;
+            payload.videoDuration = state.videoDuration;
+        }
+
+        localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+    } catch (error) {
+        console.warn("Could not autosave session:", error.message);
+    }
+}
+
+function clearSession() {
+    try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
+}
+
+function loadSessionOnStartup() {
+    let raw;
+    try { raw = localStorage.getItem(SESSION_KEY); } catch (e) { return; }
+    if (!raw) return;
+
+    let payload;
+    try { payload = JSON.parse(raw); } catch (e) { return; }
+    if (!payload || !payload.mediaType) return;
+
+    if (payload.mediaType === "image" && payload.imageDataURL) {
+        const image = new Image();
+        image.onload = () => {
+            state.mediaType = "image";
+            state.image = image;
+            state.annotations = payload.annotations || [];
+            state.colorMode = payload.colorMode || "normal";
+            $("colorMode").value = state.colorMode;
+            updateColorLegend();
+            $("fileName").textContent = payload.fileName || "Restored image";
+            $("mediaInfo").textContent = "Restored from previous session";
+            emptyWorkspace.style.display = "none";
+            resetHistory(state.annotations);
+            fitView();
+            updateCounts();
+            updateAnnotationsList();
+            render();
+            showToast("Previous session restored");
+        };
+        image.onerror = () => { clearSession(); };
+        image.src = payload.imageDataURL;
+    } else if (payload.mediaType === "video") {
+        state.pendingVideoRestore = payload;
+        showSessionBanner(`A saved video session ("${escapeHTML(payload.fileName || "video")}") was found. Re-upload the same video to restore its annotations.`);
+    }
+}
+
+function showSessionBanner(message) {
+    const banner = $("sessionBanner");
+    if (!banner) return;
+
+    banner.innerHTML = "";
+    const text = document.createElement("span");
+    text.textContent = message;
+    banner.appendChild(text);
+
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.textContent = "Dismiss";
+    dismiss.addEventListener("click", () => {
+        banner.style.display = "none";
+        state.pendingVideoRestore = null;
+    });
+    banner.appendChild(dismiss);
+
+    banner.style.display = "flex";
+}
+
+$("completeTask").addEventListener("click", () => {
+    if (!confirm("Complete task and clear the workspace? This removes the saved session and cannot be undone.")) return;
+    clearSession();
+    cleanupMedia();
+    state.pendingVideoRestore = null;
+    $("sessionBanner").style.display = "none";
+    render();
+    showToast("Task completed — workspace cleared");
+});
+
+/* ============================================================
    CLEANUP
 ============================================================ */
 
@@ -1892,15 +2324,21 @@ function cleanupMedia() {
     state.currentFrame = 0;
     state.currentTime = 0;
     state.totalFrames = 0;
+    state.history = [];
+    state.historyIndex = -1;
 
     $("videoControlsPanel").style.display = "none";
     filmstripBar.style.display = "none";
     filmstripTrack.innerHTML = "";
     $("allFramesRow").style.display = "none";
+    $("fileName").textContent = "No customer data loaded";
+    $("mediaInfo").textContent = "No customer media loaded";
+    emptyWorkspace.style.display = "block";
 
     updateCounts();
     hidePopup();
     updateAnnotationsList();
+    updateUndoRedoButtons();
 }
 
 /* ============================================================
