@@ -2324,44 +2324,7 @@ function finishBoxDrawing() {
 }
 
 
-/* ============================================================
-   POLYGON POINT
-============================================================ */
 
-function addPolygonPoint(
-    x,
-    y
-) {
-
-    const point =
-        screenToImage(
-            x,
-            y
-        );
-
-
-    if (
-        !state.drawing
-    ) {
-
-        state.drawing =
-            true;
-
-        state.polygonPoints =
-            [point];
-
-    } else {
-
-        state.polygonPoints.push(
-            point
-        );
-
-    }
-
-
-    render();
-
-}
 
 
 /* ============================================================
