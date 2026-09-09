@@ -2848,61 +2848,6 @@ function render() {
     ctx.restore();
 
 }
-function finishBoxDrawing() {
-    if (!state.drawing) return;
-
-    const start = state.drawStart;
-    const end = state.drawCurrent;
-
-    const x =
-        Math.min(
-            start.x,
-            end.x
-        );
-
-    const y =
-        Math.min(
-            start.y,
-            end.y
-        );
-
-    const width =
-        Math.abs(
-            end.x - start.x
-        );
-
-    const height =
-        Math.abs(
-            end.y - start.y
-        );
-
-    if (
-        width >= 5 &&
-        height >= 5
-    ) {
-        createAnnotation({
-            type: "box",
-            x,
-            y,
-            width,
-            height,
-            label: "unknown",
-            score: null,
-            occlusion: 0,
-            truncation: "NONE"
-        });
-    }
-
-    state.drawing = false;
-    state.drawStart = null;
-    state.drawCurrent = null;
-
-    saveFrame();
-    pushHistory();
-    saveSession();
-    updateCounts();
-    render();
-}
 
 /* ============================================================
    DRAWING — POLYGON / SEGMENTATION
