@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Annotation AI — Sign In</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body class="auth-body">
+
+<div class="auth-card">
+    <div class="brand" style="justify-content:center;margin-bottom:22px;">
+        <div class="brand-icon">AI</div>
+        <div>
+            <h1>ANNOTATION AI</h1>
+            <span>Customer Data Studio</span>
+        </div>
+    </div>
+
+    <div id="loginPane">
+        <div class="auth-tabs">
+            <button type="button" class="auth-tab active" data-tab="signin">Sign In</button>
+            <button type="button" class="auth-tab" data-tab="signup">Create Account</button>
+        </div>
+
+        <form id="signinForm" class="auth-form">
+            <label class="field-label">EMAIL</label>
+            <input id="signinEmail" class="select" type="email" required autocomplete="username">
+            <label class="field-label">PASSWORD</label>
+            <input id="signinPassword" class="select" type="password" required autocomplete="current-password">
+            <button type="submit" class="primary-button" style="margin-top:14px;">SIGN IN</button>
+            <div id="signinError" class="auth-error"></div>
+        </form>
+
+        <form id="signupForm" class="auth-form" style="display:none;">
+            <label class="field-label">FULL NAME</label>
+            <input id="signupName" class="select" type="text" required autocomplete="name">
+            <label class="field-label">EMAIL</label>
+            <input id="signupEmail" class="select" type="email" required autocomplete="username">
+            <label class="field-label">PASSWORD</label>
+            <input id="signupPassword" class="select" type="password" required minlength="6" autocomplete="new-password">
+            <button type="submit" class="primary-button" style="margin-top:14px;">CREATE ACCOUNT</button>
+            <small class="keyboard-help" style="margin-top:10px;">New accounts start with the lowest-privilege coworker role. An admin will assign you the right role after you sign up.</small>
+            <div id="signupError" class="auth-error"></div>
+        </form>
+    </div>
+
+    <!-- FORCED PASSWORD RESET -->
+    <div id="resetPane" style="display:none;">
+        <h2 style="font-size:14px;margin:0 0 6px;">Set a new password</h2>
+        <p class="keyboard-help" style="margin-bottom:14px;">Your account requires a password reset before continuing.</p>
+        <label class="field-label">NEW PASSWORD</label>
+        <input id="resetPassword" class="select" type="password" required minlength="6" autocomplete="new-password">
+        <button id="resetSubmit" type="button" class="primary-button" style="margin-top:14px;">SET PASSWORD &amp; CONTINUE</button>
+        <div id="resetError" class="auth-error"></div>
+    </div>
+</div>
+
+<script type="module" src="./login.js"></script>
+</body>
+</html>
