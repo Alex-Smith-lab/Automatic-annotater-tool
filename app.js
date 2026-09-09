@@ -1627,3 +1627,326 @@ function updateColorLegend() {}
 function updateZoomUI() {}
 function cleanupMedia() {}
 function formatMB(bytes) { return (bytes / (1024 * 1024)).toFixed(2); }
+const width = Math.abs(current.x - start.x);
+        const height = Math.abs(current.y - start.y);
+
+        ctx.strokeRect(x, y, width, height);
+        ctx.fillRect(x, y, width, height);
+    } else if (state.polygonPoints && state.polygonPoints.length > 0) {
+        ctx.beginPath();
+        state.polygonPoints.forEach((p, idx) => {
+            const screen = imageToScreen(p.x, p.y);
+            if (idx === 0) ctx.moveTo(screen.x, screen.y);
+            else ctx.lineTo(screen.x, screen.y);
+        });
+
+        if (state.drawCurrent) {
+            const screen = imageToScreen(state.drawCurrent.x, state.drawCurrent.y);
+            ctx.lineTo(screen.x, screen.y);
+        }
+
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+
+/* ============================================================
+   ANNOTATIONS LIST & UI UPDATES
+============================================================ */
+
+function updateAnnotationsList() {
+    if (!annotationsList) return;
+    annotationsList.innerHTML = "";
+
+    state.annotations.forEach(a => {
+        const item = document.createElement("div");
+        item.className = `annotation-item ${a.id === state.selectedId ? "selected" : ""}`;
+        item.innerHTML = `
+            <div class="ann-info">
+                <span class="ann-label">${escapeHTML(a.label)}</span>
+                <span class="ann-type">${a.type}</span>
+            </div>
+            <button class="btn-icon delete-btn" data-id="${a.id}">✕</button>
+        `;
+
+        item.addEventListener("click", (e) => {
+            if (e.target.classList.contains("delete-btn")) {
+                const id = e.target.getAttribute("data-id");
+                state.selectedId = id;
+                deleteSelected();
+            } else {
+                state.selectedId = a.id;
+                updateSelected();
+            }
+        });
+
+        annotationsList.appendChild(item);
+    });
+}
+
+function updateCounts() {
+    const countEl = $("annotationCount");
+    const selectedEl = $("selectedCount");
+
+    if (countEl) countEl.textContent = state.annotations.length;
+    if (selectedEl) selectedEl.textContent = state.selectedId ? "1" : "0";
+}
+
+function updateZoomUI() {
+    const zoomEl = $("zoomLevel") || $("zoomDisplay");
+    if (zoomEl) {
+        zoomEl.textContent = `${Math.round(state.scale * 100)}%`;
+    }
+}
+
+function updateUndoRedoButtons() {
+    const undoBtn = $("undoButton");
+    const redoBtn = $("redoButton");
+
+    if (undoBtn) undoBtn.disabled = state.historyIndex <= 0;
+    if (redoBtn) redoBtn.disabled = state.historyIndex >= state.history.length - 1;
+}
+
+function updateAIEngineAvailability() {
+    const runAIBtn = $("runAI");
+    if (runAIBtn) {
+        runAIBtn.disabled = state.aiRunning;
+    }
+}
+
+function updateColorLegend() {
+    // Custom color map implementation if needed
+}
+
+
+/* ============================================================
+   POPUP CONTROL
+============================================================ */
+
+function renderPopup(a) {
+    if (!popupEl) return;
+    popupEl.style.display = "block";
+    if (popupTitle) popupTitle.textContent = `Edit #${a.id} (${a.type})`;
+    renderPopupBody(a);
+}
+
+function renderPopupBody(a) {
+    if (!popupBody) return;
+    popupBody.innerHTML = `
+        <div class="popup-field">
+            <label>Label:</label>
+            <input type="text" id="popLabel" value="${escapeHTML(a.label || "")}" />
+        </div>
+        <div class="popup-field">
+            <label>Occlusion:</label>
+            <select id="popOcclusion">
+                <option value="0" ${a.occlusion === 0 ? "selected" : ""}>0% (None)</option>
+                <option value="1" ${a.occlusion === 1 ? "selected" : ""}>Partial</option>
+                <option value="2" ${a.occlusion === 2 ? "selected" : ""}>Heavy</option>
+            </select>
+        </div>
+    `;
+
+    $("popLabel")?.addEventListener("input", (e) => {
+        a.label = e.target.value;
+        a.corrected = true;
+        updateAnnotationsList();
+        render();
+    });
+
+    $("popOcclusion")?.addEventListener("change", (e) => {
+        a.occlusion = Number(e.target.value);
+        a.corrected = true;
+        saveFrame();
+    });
+}
+
+function showAnnotationPopup(a) {
+    if (a) renderPopup(a);
+}
+
+function hidePopup() {
+    if (popupEl) popupEl.style.display = "none";
+}
+
+
+/* ============================================================
+   HISTORY (UNDO / REDO)
+============================================================ */
+
+function pushHistory() {
+    const snapshot = JSON.stringify(state.annotations);
+    if (state.historyIndex < state.history.length - 1) {
+        state.history = state.history.slice(0, state.historyIndex + 1);
+    }
+    state.history.push(snapshot);
+    state.historyIndex = state.history.length - 1;
+    updateUndoRedoButtons();
+}
+
+function resetHistory(initialAnnotations) {
+    state.history = [JSON.stringify(initialAnnotations)];
+    state.historyIndex = 0;
+    updateUndoRedoButtons();
+}
+
+function undo() {
+    if (state.historyIndex > 0) {
+        state.historyIndex--;
+        state.annotations = JSON.parse(state.history[state.historyIndex]);
+        state.selectedId = null;
+        updateSelected();
+        updateCounts();
+        saveFrame();
+        updateUndoRedoButtons();
+    }
+}
+
+function redo() {
+    if (state.historyIndex < state.history.length - 1) {
+        state.historyIndex++;
+        state.annotations = JSON.parse(state.history[state.historyIndex]);
+        state.selectedId = null;
+        updateSelected();
+        updateCounts();
+        saveFrame();
+        updateUndoRedoButtons();
+    }
+}
+
+$("undoButton")?.addEventListener("click", undo);
+$("redoButton")?.addEventListener("click", redo);
+
+
+/* ============================================================
+   FRAME & SESSION PERSISTENCE
+============================================================ */
+
+function saveFrame() {
+    if (state.mediaType === "video") {
+        state.frameAnnotations.set(state.currentFrame, JSON.parse(JSON.stringify(state.annotations)));
+    }
+}
+
+function loadFrameAnnotations() {
+    if (state.mediaType === "video") {
+        const saved = state.frameAnnotations.get(state.currentFrame);
+        state.annotations = saved ? JSON.parse(JSON.stringify(saved)) : [];
+        state.selectedId = null;
+        resetHistory(state.annotations);
+        updateCounts();
+        updateAnnotationsList();
+    }
+}
+
+function saveSession() {
+    try {
+        const sessionData = {
+            mediaType: state.mediaType,
+            fileName: $("fileName")?.textContent || "",
+            frameAnnotations: Array.from(state.frameAnnotations.entries())
+        };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+    } catch (e) {
+        console.warn("Unable to save session:", e);
+    }
+}
+
+function loadSessionOnStartup() {
+    const data = localStorage.getItem(SESSION_KEY);
+    if (!data) return;
+    try {
+        const parsed = JSON.parse(data);
+        if (parsed.mediaType === "video" && parsed.frameAnnotations) {
+            state.pendingVideoRestore = parsed;
+        }
+    } catch (e) {
+        console.warn("Failed to load session:", e);
+    }
+}
+
+
+/* ============================================================
+   VIDEO & FILMSTRIP HELPERS
+============================================================ */
+
+function updateVideoUI() {
+    if ($("currentFrame")) $("currentFrame").textContent = state.currentFrame;
+    if ($("frameSlider")) $("frameSlider").value = state.currentFrame;
+    if (filmstripCurrentLabel) filmstripCurrentLabel.textContent = `Frame: ${state.currentFrame}`;
+}
+
+function buildFilmstrip() {
+    if (!filmstripTrack) return;
+    filmstripTrack.innerHTML = "";
+    const count = 10;
+    const step = Math.max(1, Math.floor(state.totalFrames / count));
+
+    for (let i = 0; i < state.totalFrames; i += step) {
+        const thumb = document.createElement("div");
+        thumb.className = "filmstrip-thumb";
+        thumb.textContent = i;
+        thumb.addEventListener("click", () => seekVideoFrame(i));
+        filmstripTrack.appendChild(thumb);
+    }
+}
+
+
+/* ============================================================
+   CLOUD & UTILS
+============================================================ */
+
+function cloudSaveAnnotation(a) {
+    // Supabase endpoint placeholder
+}
+
+function cloudDeleteAnnotation(id) {
+    // Supabase endpoint placeholder
+}
+
+function exportCSV() {
+    let csv = "id,type,label,x,y,width,height\n";
+    state.annotations.forEach(a => {
+        csv += `${a.id},${a.type},"${a.label}",${a.x},${a.y},${a.width},${a.height}\n`;
+    });
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "annotations.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function showToast(msg) {
+    if (!toastContainer) return;
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = msg;
+    toastContainer.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
+}
+
+function cleanupMedia() {
+    if (state.imageURL) URL.revokeObjectURL(state.imageURL);
+    if (state.videoURL) URL.revokeObjectURL(state.videoURL);
+    state.image = null;
+    state.imageURL = null;
+    state.videoURL = null;
+    state.annotations = [];
+    state.frameAnnotations.clear();
+}
+
+function formatMB(bytes) {
+    return (bytes / (1024 * 1024)).toFixed(2);
+}
+
+function escapeHTML(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
