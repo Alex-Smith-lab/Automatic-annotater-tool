@@ -2820,3 +2820,1898 @@ function renderPolygonAnnotation(
 
     ctx.restore();
 }
+// ============================================================
+// ANNOTATION LABEL
+// ============================================================
+
+function renderAnnotationLabel(
+    annotation,
+    x,
+    y,
+    width = 0,
+    height = 0
+) {
+
+    const label =
+        annotation.label ||
+        annotation.class_name ||
+        "object";
+
+    const score =
+        Number(annotation.score);
+
+
+    let text =
+        String(label);
+
+
+    if (
+        Number.isFinite(score)
+    ) {
+
+        text +=
+            ` ${Math.round(score * 100)}%`;
+    }
+
+
+    const fontSize =
+        13 / state.scale;
+
+
+    ctx.save();
+
+
+    ctx.font =
+        `600 ${fontSize}px Arial`;
+
+
+    const padding =
+        5 / state.scale;
+
+
+    const metrics =
+        ctx.measureText(text);
+
+
+    const boxWidth =
+        metrics.width +
+        padding * 2;
+
+
+    const boxHeight =
+        fontSize +
+        padding * 2;
+
+
+    const labelX =
+        x;
+
+
+    const labelY =
+        Math.max(
+            0,
+            y - boxHeight
+        );
+
+
+    ctx.fillStyle =
+        "rgba(0,0,0,0.78)";
+
+
+    ctx.fillRect(
+        labelX,
+        labelY,
+        boxWidth,
+        boxHeight
+    );
+
+
+    ctx.fillStyle =
+        "#ffffff";
+
+
+    ctx.textBaseline =
+        "middle";
+
+
+    ctx.fillText(
+        text,
+        labelX + padding,
+        labelY +
+            boxHeight / 2
+    );
+
+
+    ctx.restore();
+}
+
+
+// ============================================================
+// RESIZE HANDLES
+// ============================================================
+
+function getResizeHandles(
+    annotation
+) {
+
+    if (
+        !annotation ||
+        annotation.type !== "box"
+    ) {
+
+        return [];
+    }
+
+
+    const x =
+        Number(annotation.x) || 0;
+
+    const y =
+        Number(annotation.y) || 0;
+
+    const width =
+        Number(annotation.width) || 0;
+
+    const height =
+        Number(annotation.height) || 0;
+
+
+    return [
+
+        {
+            name: "nw",
+            x,
+            y
+        },
+
+        {
+            name: "n",
+            x:
+                x + width / 2,
+            y
+        },
+
+        {
+            name: "ne",
+            x:
+                x + width,
+            y
+        },
+
+        {
+            name: "e",
+            x:
+                x + width,
+            y:
+                y + height / 2
+        },
+
+        {
+            name: "se",
+            x:
+                x + width,
+            y:
+                y + height
+        },
+
+        {
+            name: "s",
+            x:
+                x + width / 2,
+            y:
+                y + height
+        },
+
+        {
+            name: "sw",
+            x,
+            y:
+                y + height
+        },
+
+        {
+            name: "w",
+            x,
+            y:
+                y + height / 2
+        }
+    ];
+}
+
+
+function renderResizeHandles(
+    annotation
+) {
+
+    const handles =
+        getResizeHandles(
+            annotation
+        );
+
+
+    const size =
+        8 / state.scale;
+
+
+    handles.forEach(
+        handle => {
+
+            ctx.save();
+
+
+            ctx.fillStyle =
+                "#ffffff";
+
+
+            ctx.strokeStyle =
+                "#00e5ff";
+
+
+            ctx.lineWidth =
+                1.5 /
+                state.scale;
+
+
+            ctx.beginPath();
+
+
+            ctx.rect(
+                handle.x -
+                    size / 2,
+                handle.y -
+                    size / 2,
+                size,
+                size
+            );
+
+
+            ctx.fill();
+
+            ctx.stroke();
+
+
+            ctx.restore();
+        }
+    );
+}
+
+
+// ============================================================
+// FIND RESIZE HANDLE
+// ============================================================
+
+function findResizeHandle(
+    point,
+    annotation
+) {
+
+    if (
+        !annotation ||
+        annotation.type !== "box"
+    ) {
+
+        return null;
+    }
+
+
+    const handles =
+        getResizeHandles(
+            annotation
+        );
+
+
+    const threshold =
+        12 / state.scale;
+
+
+    let closest =
+        null;
+
+
+    let closestDistance =
+        Infinity;
+
+
+    handles.forEach(
+        handle => {
+
+            const d =
+                distance(
+                    point,
+                    handle
+                );
+
+
+            if (
+                d <= threshold &&
+                d < closestDistance
+            ) {
+
+                closest =
+                    handle.name;
+
+                closestDistance =
+                    d;
+            }
+        }
+    );
+
+
+    return closest;
+}
+
+
+// ============================================================
+// RESIZE SELECTED BOX
+// ============================================================
+
+function resizeSelectedAnnotation(
+    handle,
+    point
+) {
+
+    const annotation =
+        state.annotations.find(
+            item =>
+                item.id ===
+                state.selectedId
+        );
+
+
+    if (
+        !annotation ||
+        annotation.type !== "box"
+    ) {
+
+        return;
+    }
+
+
+    const imageWidth =
+        state.image?.naturalWidth ||
+        state.image?.width ||
+        Infinity;
+
+
+    const imageHeight =
+        state.image?.naturalHeight ||
+        state.image?.height ||
+        Infinity;
+
+
+    let left =
+        Number(annotation.x) || 0;
+
+    let top =
+        Number(annotation.y) || 0;
+
+    let right =
+        left +
+        (
+            Number(annotation.width) ||
+            0
+        );
+
+    let bottom =
+        top +
+        (
+            Number(annotation.height) ||
+            0
+        );
+
+
+    switch (handle) {
+
+        case "nw":
+            left = point.x;
+            top = point.y;
+            break;
+
+        case "n":
+            top = point.y;
+            break;
+
+        case "ne":
+            right = point.x;
+            top = point.y;
+            break;
+
+        case "e":
+            right = point.x;
+            break;
+
+        case "se":
+            right = point.x;
+            bottom = point.y;
+            break;
+
+        case "s":
+            bottom = point.y;
+            break;
+
+        case "sw":
+            left = point.x;
+            bottom = point.y;
+            break;
+
+        case "w":
+            left = point.x;
+            break;
+    }
+
+
+    left =
+        clamp(
+            left,
+            0,
+            imageWidth
+        );
+
+
+    right =
+        clamp(
+            right,
+            0,
+            imageWidth
+        );
+
+
+    top =
+        clamp(
+            top,
+            0,
+            imageHeight
+        );
+
+
+    bottom =
+        clamp(
+            bottom,
+            0,
+            imageHeight
+        );
+
+
+    const minSize =
+        2;
+
+
+    if (
+        right - left <
+        minSize
+    ) {
+
+        if (
+            handle.includes("w")
+        ) {
+
+            left =
+                right -
+                minSize;
+
+        } else {
+
+            right =
+                left +
+                minSize;
+        }
+    }
+
+
+    if (
+        bottom - top <
+        minSize
+    ) {
+
+        if (
+            handle.includes("n")
+        ) {
+
+            top =
+                bottom -
+                minSize;
+
+        } else {
+
+            bottom =
+                top +
+                minSize;
+        }
+    }
+
+
+    annotation.x =
+        Math.max(
+            0,
+            left
+        );
+
+
+    annotation.y =
+        Math.max(
+            0,
+            top
+        );
+
+
+    annotation.width =
+        Math.max(
+            minSize,
+            right - left
+        );
+
+
+    annotation.height =
+        Math.max(
+            minSize,
+            bottom - top
+        );
+
+
+    render();
+}
+
+
+// ============================================================
+// DRAWING PREVIEW
+// ============================================================
+
+function renderDrawingPreview() {
+
+    if (
+        !state.drawing
+    ) {
+
+        return;
+    }
+
+
+    ctx.save();
+
+
+    // --------------------------------------------------------
+    // BOX
+    // --------------------------------------------------------
+
+    if (
+        state.annotationType ===
+        "box" &&
+        state.drawStart &&
+        state.drawCurrent
+    ) {
+
+        const box =
+            normalizeBox(
+                state.drawStart,
+                state.drawCurrent
+            );
+
+
+        ctx.strokeStyle =
+            "#00e5ff";
+
+
+        ctx.fillStyle =
+            "rgba(0,229,255,0.10)";
+
+
+        ctx.lineWidth =
+            2 /
+            state.scale;
+
+
+        ctx.setLineDash(
+            [
+                6 /
+                    state.scale,
+                4 /
+                    state.scale
+            ]
+        );
+
+
+        ctx.fillRect(
+            box.x,
+            box.y,
+            box.width,
+            box.height
+        );
+
+
+        ctx.strokeRect(
+            box.x,
+            box.y,
+            box.width,
+            box.height
+        );
+    }
+
+
+    // --------------------------------------------------------
+    // POLYGON
+    // --------------------------------------------------------
+
+    if (
+        (
+            state.annotationType ===
+                "polygon" ||
+            state.annotationType ===
+                "segmentation"
+        ) &&
+        state.polygonPoints.length
+    ) {
+
+        ctx.strokeStyle =
+            "#00e5ff";
+
+
+        ctx.fillStyle =
+            "rgba(0,229,255,0.10)";
+
+
+        ctx.lineWidth =
+            2 /
+            state.scale;
+
+
+        ctx.beginPath();
+
+
+        state.polygonPoints.forEach(
+            (
+                point,
+                index
+            ) => {
+
+                if (
+                    index === 0
+                ) {
+
+                    ctx.moveTo(
+                        point.x,
+                        point.y
+                    );
+
+                } else {
+
+                    ctx.lineTo(
+                        point.x,
+                        point.y
+                    );
+                }
+            }
+        );
+
+
+        if (
+            state.drawCurrent
+        ) {
+
+            ctx.lineTo(
+                state.drawCurrent.x,
+                state.drawCurrent.y
+            );
+        }
+
+
+        ctx.stroke();
+
+
+        if (
+            state.polygonPoints.length >=
+            3
+        ) {
+
+            ctx.fill();
+        }
+
+
+        state.polygonPoints.forEach(
+            point => {
+
+                ctx.beginPath();
+
+                ctx.fillStyle =
+                    "#ffffff";
+
+                ctx.arc(
+                    point.x,
+                    point.y,
+                    4 /
+                        state.scale,
+                    0,
+                    Math.PI * 2
+                );
+
+                ctx.fill();
+            }
+        );
+    }
+
+
+    ctx.restore();
+}
+
+
+// ============================================================
+// COUNTS
+// ============================================================
+
+function updateCounts() {
+
+    const count =
+        state.annotations.length;
+
+
+    const objectCount =
+        $("objectCount");
+
+
+    if (objectCount) {
+
+        objectCount.textContent =
+            String(count);
+    }
+
+
+    const selectedObject =
+        $("selectedObject");
+
+
+    if (selectedObject) {
+
+        selectedObject.textContent =
+            state.selectedId
+                ? "1"
+                : "0";
+    }
+
+
+    const annotationCount =
+        $("annotationCount");
+
+
+    if (annotationCount) {
+
+        annotationCount.textContent =
+            String(count);
+    }
+
+
+    const selectedCount =
+        $("selectedCount");
+
+
+    if (selectedCount) {
+
+        selectedCount.textContent =
+            state.selectedId
+                ? "1"
+                : "0";
+    }
+}
+
+
+// ============================================================
+// ANNOTATION LIST
+// ============================================================
+
+function updateAnnotationsList() {
+
+    if (
+        !annotationsList
+    ) {
+
+        return;
+    }
+
+
+    annotationsList.innerHTML =
+        "";
+
+
+    if (
+        state.annotations.length ===
+        0
+    ) {
+
+        const empty =
+            document.createElement(
+                "div"
+            );
+
+
+        empty.className =
+            "annotations-empty";
+
+
+        empty.textContent =
+            "No annotations yet.";
+
+
+        annotationsList.appendChild(
+            empty
+        );
+
+
+        return;
+    }
+
+
+    state.annotations.forEach(
+        (
+            annotation,
+            index
+        ) => {
+
+            const item =
+                document.createElement(
+                    "div"
+                );
+
+
+            item.className =
+                "annotation-list-item";
+
+
+            if (
+                annotation.id ===
+                state.selectedId
+            ) {
+
+                item.classList.add(
+                    "selected"
+                );
+            }
+
+
+            item.dataset.annotationId =
+                annotation.id;
+
+
+            const label =
+                document.createElement(
+                    "span"
+                );
+
+
+            label.className =
+                "annotation-list-label";
+
+
+            label.textContent =
+                annotation.label ||
+                annotation.class_name ||
+                "object";
+
+
+            const type =
+                document.createElement(
+                    "span"
+                );
+
+
+            type.className =
+                "annotation-list-type";
+
+
+            type.textContent =
+                annotation.type ||
+                "box";
+
+
+            const number =
+                document.createElement(
+                    "span"
+                );
+
+
+            number.className =
+                "annotation-list-number";
+
+
+            number.textContent =
+                String(index + 1);
+
+
+            item.appendChild(
+                number
+            );
+
+
+            item.appendChild(
+                label
+            );
+
+
+            item.appendChild(
+                type
+            );
+
+
+            item.addEventListener(
+                "click",
+                event => {
+
+                    event.preventDefault();
+
+                    state.selectedId =
+                        annotation.id;
+
+                    updateAnnotationsList();
+
+                    updateCounts();
+
+                    showAnnotationPopup(
+                        annotation
+                    );
+
+                    render();
+                }
+            );
+
+
+            annotationsList.appendChild(
+                item
+            );
+        }
+    );
+}
+
+
+// ============================================================
+// POPUP
+// ============================================================
+
+function showAnnotationPopup(
+    annotation
+) {
+
+    if (
+        !popupEl ||
+        !annotation
+    ) {
+
+        return;
+    }
+
+
+    if (popupTitle) {
+
+        popupTitle.textContent =
+            annotation.label ||
+            annotation.class_name ||
+            "Annotation";
+    }
+
+
+    if (popupBody) {
+
+        const score =
+            Number(annotation.score);
+
+
+        const scoreText =
+            Number.isFinite(score)
+                ? `${Math.round(score * 100)}%`
+                : "—";
+
+
+        popupBody.innerHTML = `
+
+            <div class="annotation-popup-row">
+                <span>Type</span>
+                <strong>
+                    ${escapeHTML(
+                        annotation.type ||
+                        "box"
+                    )}
+                </strong>
+            </div>
+
+            <div class="annotation-popup-row">
+                <span>Label</span>
+                <strong>
+                    ${escapeHTML(
+                        annotation.label ||
+                        annotation.class_name ||
+                        "object"
+                    )}
+                </strong>
+            </div>
+
+            <div class="annotation-popup-row">
+                <span>Confidence</span>
+                <strong>
+                    ${scoreText}
+                </strong>
+            </div>
+
+            <div class="annotation-popup-row">
+                <span>Source</span>
+                <strong>
+                    ${
+                        annotation.ai_generated
+                            ? "AI"
+                            : "Manual"
+                    }
+                </strong>
+            </div>
+
+        `;
+    }
+
+
+    popupEl.classList.add(
+        "visible"
+    );
+
+
+    popupEl.style.display =
+        "";
+
+
+    state.popupExpanded =
+        false;
+}
+
+
+function hidePopup() {
+
+    if (!popupEl) {
+        return;
+    }
+
+
+    popupEl.classList.remove(
+        "visible"
+    );
+
+
+    if (
+        popupEl.style.display !==
+        "none"
+    ) {
+
+        popupEl.style.display =
+            "none";
+    }
+}
+
+
+function escapeHTML(
+    value
+) {
+
+    return String(value ?? "")
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+}
+
+
+// ============================================================
+// POPUP EXPAND
+// ============================================================
+
+if (
+    popupExpandBtn
+) {
+
+    popupExpandBtn.addEventListener(
+        "click",
+        event => {
+
+            event.preventDefault();
+
+            state.popupExpanded =
+                !state.popupExpanded;
+
+
+            popupEl?.classList.toggle(
+                "expanded",
+                state.popupExpanded
+            );
+        }
+    );
+}
+
+
+// ============================================================
+// ANNOTATION PROPERTY EDITING
+// ============================================================
+
+function updateSelectedLabel(
+    label
+) {
+
+    if (
+        !state.selectedId
+    ) {
+
+        return;
+    }
+
+
+    const annotation =
+        state.annotations.find(
+            item =>
+                item.id ===
+                state.selectedId
+        );
+
+
+    if (!annotation) {
+        return;
+    }
+
+
+    const value =
+        String(
+            label || "object"
+        ).trim();
+
+
+    annotation.label =
+        value || "object";
+
+
+    annotation.class_name =
+        annotation.label;
+
+
+    pushHistory();
+
+    updateAnnotationsList();
+
+    render();
+}
+
+
+// ============================================================
+// OCCLUSION / TRUNCATION COLORS
+// ============================================================
+
+function getOcclusionColor(
+    value
+) {
+
+    const level =
+        Number(value) || 0;
+
+
+    if (level >= 2) {
+
+        return "#ff3b30";
+    }
+
+
+    if (level >= 1) {
+
+        return "#ffcc00";
+    }
+
+
+    return "#00ff88";
+}
+
+
+function getTruncationColor(
+    value
+) {
+
+    const normalized =
+        String(
+            value || "NONE"
+        ).toUpperCase();
+
+
+    if (
+        normalized ===
+        "HEAVY"
+    ) {
+
+        return "#ff3b30";
+    }
+
+
+    if (
+        normalized ===
+        "PARTIAL"
+    ) {
+
+        return "#ffcc00";
+    }
+
+
+    return "#00ff88";
+}
+
+
+// ============================================================
+// COLOR MODE
+// ============================================================
+
+function setColorMode(
+    mode
+) {
+
+    const allowed = [
+        "normal",
+        "occlusion",
+        "truncation"
+    ];
+
+
+    if (
+        !allowed.includes(mode)
+    ) {
+
+        mode =
+            "normal";
+    }
+
+
+    state.colorMode =
+        mode;
+
+
+    document
+        .querySelectorAll(
+            "[data-color-mode]"
+        )
+        .forEach(
+            button => {
+
+                button.classList.toggle(
+                    "active",
+                    button.dataset.colorMode ===
+                        mode
+                );
+            }
+        );
+
+
+    render();
+}
+
+
+document
+    .querySelectorAll(
+        "[data-color-mode]"
+    )
+    .forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                event => {
+
+                    event.preventDefault();
+
+                    setColorMode(
+                        button.dataset.colorMode
+                    );
+                }
+            );
+        }
+    );
+
+
+// ============================================================
+// HISTORY
+// ============================================================
+
+function pushHistory() {
+
+    const snapshot =
+        cloneAnnotations(
+            state.annotations
+        );
+
+
+    // Remove redo states.
+    if (
+        state.historyIndex <
+        state.history.length - 1
+    ) {
+
+        state.history =
+            state.history.slice(
+                0,
+                state.historyIndex + 1
+            );
+    }
+
+
+    state.history.push(
+        snapshot
+    );
+
+
+    // Keep memory reasonable.
+    if (
+        state.history.length >
+        100
+    ) {
+
+        state.history.shift();
+    }
+
+
+    state.historyIndex =
+        state.history.length - 1;
+
+
+    updateHistoryButtons();
+}
+
+
+function restoreHistory(
+    snapshot
+) {
+
+    state.annotations =
+        cloneAnnotations(
+            snapshot
+        );
+
+
+    state.selectedId =
+        null;
+
+
+    updateCounts();
+
+    updateAnnotationsList();
+
+    render();
+
+    saveFrame();
+}
+
+
+function undo() {
+
+    if (
+        state.historyIndex <=
+        0
+    ) {
+
+        return;
+    }
+
+
+    state.historyIndex--;
+
+
+    const snapshot =
+        state.history[
+            state.historyIndex
+        ];
+
+
+    restoreHistory(
+        snapshot
+    );
+
+
+    updateHistoryButtons();
+}
+
+
+function redo() {
+
+    if (
+        state.historyIndex >=
+        state.history.length - 1
+    ) {
+
+        return;
+    }
+
+
+    state.historyIndex++;
+
+
+    const snapshot =
+        state.history[
+            state.historyIndex
+        ];
+
+
+    restoreHistory(
+        snapshot
+    );
+
+
+    updateHistoryButtons();
+}
+
+
+function updateHistoryButtons() {
+
+    const undoButton =
+        $("undoButton");
+
+
+    const redoButton =
+        $("redoButton");
+
+
+    if (undoButton) {
+
+        undoButton.disabled =
+            state.historyIndex <= 0;
+    }
+
+
+    if (redoButton) {
+
+        redoButton.disabled =
+            state.historyIndex >=
+            state.history.length - 1;
+    }
+}
+
+
+const undoButton =
+    $("undoButton");
+
+
+if (undoButton) {
+
+    undoButton.addEventListener(
+        "click",
+        event => {
+
+            event.preventDefault();
+
+            undo();
+        }
+    );
+}
+
+
+const redoButton =
+    $("redoButton");
+
+
+if (redoButton) {
+
+    redoButton.addEventListener(
+        "click",
+        event => {
+
+            event.preventDefault();
+
+            redo();
+        }
+    );
+}
+
+
+// ============================================================
+// FRAME ANNOTATIONS
+// ============================================================
+
+function frameKey(
+    frameNumber
+) {
+
+    return Number(
+        frameNumber || 0
+    );
+}
+
+
+function saveFrame() {
+
+    if (
+        state.mediaType !==
+        "video"
+    ) {
+
+        return;
+    }
+
+
+    state.frameAnnotations.set(
+        frameKey(
+            state.currentFrame
+        ),
+        cloneAnnotations(
+            state.annotations
+        )
+    );
+}
+
+
+function loadFrame(
+    frameNumber
+) {
+
+    if (
+        state.mediaType !==
+        "video"
+    ) {
+
+        return;
+    }
+
+
+    saveFrame();
+
+
+    const key =
+        frameKey(
+            frameNumber
+        );
+
+
+    const saved =
+        state.frameAnnotations.get(
+            key
+        );
+
+
+    state.annotations =
+        cloneAnnotations(
+            saved || []
+        );
+
+
+    state.currentFrame =
+        key;
+
+
+    state.selectedId =
+        null;
+
+
+    state.hoveredId =
+        null;
+
+
+    state.history =
+        [
+            cloneAnnotations(
+                state.annotations
+            )
+        ];
+
+
+    state.historyIndex =
+        0;
+
+
+    updateCounts();
+
+    updateAnnotationsList();
+
+    updateHistoryButtons();
+
+    render();
+}
+
+
+function clearFrameAnnotations() {
+
+    state.frameAnnotations.clear();
+
+    state.annotations = [];
+
+    state.selectedId = null;
+
+    state.history = [
+        []
+    ];
+
+    state.historyIndex = 0;
+
+    updateCounts();
+
+    updateAnnotationsList();
+
+    render();
+}
+
+
+// ============================================================
+// INITIAL HISTORY
+// ============================================================
+
+function resetHistory() {
+
+    state.history = [
+        cloneAnnotations(
+            state.annotations
+        )
+    ];
+
+    state.historyIndex =
+        0;
+
+    updateHistoryButtons();
+}
+
+
+// ============================================================
+// PUBLIC ANNOTATION API
+// ============================================================
+
+export {
+
+    state,
+
+    render,
+
+    resizeCanvas,
+
+    fitView,
+
+    setZoom,
+
+    zoomIn,
+
+    zoomOut,
+
+    resetZoom,
+
+    setMode,
+
+    setAnnotationType,
+
+    createBoxAnnotation,
+
+    finishPolygon,
+
+    deleteSelectedAnnotation,
+
+    findAnnotationAtPoint,
+
+    updateCounts,
+
+    updateAnnotationsList,
+
+    showAnnotationPopup,
+
+    hidePopup,
+
+    pushHistory,
+
+    undo,
+
+    redo,
+
+    saveFrame,
+
+    loadFrame,
+
+    clearFrameAnnotations,
+
+    resetHistory,
+
+    updateSelectedLabel
+};
+
+
+// ============================================================
+// GLOBAL COMPATIBILITY API
+// ============================================================
+
+window.annotationState =
+    state;
+
+window.annotationRender =
+    render;
+
+window.annotationResizeCanvas =
+    resizeCanvas;
+
+window.annotationFitView =
+    fitView;
+
+window.annotationSetZoom =
+    setZoom;
+
+window.annotationZoomIn =
+    zoomIn;
+
+window.annotationZoomOut =
+    zoomOut;
+
+window.annotationResetZoom =
+    resetZoom;
+
+window.annotationUndo =
+    undo;
+
+window.annotationRedo =
+    redo;
+
+window.annotationSaveFrame =
+    saveFrame;
+
+window.annotationLoadFrame =
+    loadFrame;
+
+window.annotationDeleteSelected =
+    deleteSelectedAnnotation;
+
+window.annotationSetMode =
+    setMode;
+
+window.annotationSetType =
+    setAnnotationType;
+
+
+// ============================================================
+// ZOOM CONTROLS
+// ============================================================
+
+const zoomInButton =
+    $("zoomIn");
+
+if (zoomInButton) {
+
+    zoomInButton.addEventListener(
+        "click",
+        event => {
+
+            event.preventDefault();
+
+            zoomIn();
+        }
+    );
+}
+
+
+const zoomOutButton =
+    $("zoomOut");
+
+if (zoomOutButton) {
+
+    zoomOutButton.addEventListener(
+        "click",
+        event => {
+
+            event.preventDefault();
+
+            zoomOut();
+        }
+    );
+}
+
+
+const zoomResetButton =
+    $("zoomReset");
+
+if (zoomResetButton) {
+
+    zoomResetButton.addEventListener(
+        "click",
+        event => {
+
+            event.preventDefault();
+
+            resetZoom();
+        }
+    );
+}
+
+
+const zoomSlider =
+    $("zoomSlider");
+
+if (zoomSlider) {
+
+    zoomSlider.addEventListener(
+        "input",
+        event => {
+
+            const value =
+                Number(
+                    event.target.value
+                );
+
+
+            if (
+                Number.isFinite(value)
+            ) {
+
+                setZoom(
+                    value / 100
+                );
+            }
+        }
+    );
+}
+
+
+// ============================================================
+// WINDOW RESIZE
+// ============================================================
+
+window.addEventListener(
+    "resize",
+    () => {
+
+        resizeCanvas();
+    }
+);
+
+
+// ============================================================
+// INITIALIZE CANVAS
+// ============================================================
+
+function initializeAnnotationCanvas() {
+
+    if (!canvas) {
+
+        console.warn(
+            "[Annotation] Canvas element not found."
+        );
+
+        return;
+    }
+
+
+    resizeCanvas();
+
+    updateCounts();
+
+    updateAnnotationsList();
+
+    resetHistory();
+
+    updateHistoryButtons();
+}
+
+
+if (
+    document.readyState ===
+    "loading"
+) {
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeAnnotationCanvas,
+        {
+            once: true
+        }
+    );
+
+} else {
+
+    initializeAnnotationCanvas();
+}
+
+
+// ============================================================
+// MODULE READY EVENT
+// ============================================================
+
+window.dispatchEvent(
+    new CustomEvent(
+        "annotation-module-ready"
+    )
+);
