@@ -333,3 +333,232 @@ body.light{--bg:#f4f5f7;--panel:#fff;--panel2:#f0f1f4;--border:#d9dce3;--text:#2
 .text-button:hover { text-decoration:underline; }
 .login-card .ai-status { min-height:18px; margin-top:14px; text-align:center; }
 @media (max-width:600px) { .login-page { padding:15px; } .login-card { padding:22px; } }
+
+/* =========================================================
+   MODERN COWORKER DASHBOARD / LAYOUT PATCH
+   Keeps all existing IDs and editor geometry intact.
+========================================================= */
+:root{
+    --accent:#ff6a00;
+    --accent-soft:#ff8a3d;
+    --surface:#151515;
+    --surface-2:#1d1d1d;
+    --line:#2c2c2c;
+}
+body{background:#0b0b0b}
+.app{
+    grid-template-columns:260px minmax(0,1fr) 300px;
+    gap:0;
+}
+.sidebar{
+    padding:14px;
+    background:#0c0c0c;
+    border-right:1px solid var(--line);
+}
+.sidebar .brand{display:none}
+.sidebar .panel{background:#111;border-color:#262626;border-radius:12px}
+.sidebar .panel#accountPanel{order:99}
+.sidebar{display:flex;flex-direction:column}
+.sidebar #editToolsPanel{order:1}
+.sidebar #annotationTypePanel{order:2}
+.sidebar #customerUploadPanel{order:3}
+.sidebar #videoControlsPanel{order:4}
+.sidebar #aiPanel{order:5}
+.sidebar #exportPanel{order:6}
+.sidebar #taskQueuePanel{order:7}
+.sidebar #accountPanel{order:99}
+.sidebar .panel{flex-shrink:0}
+.sidebar #taskQueuePanel{display:none!important}
+.sidebar .section-title{font-size:9px}
+.sidebar .tool-button,.sidebar .annotation-type{font-size:10px}
+.sidebar .primary-button{background:var(--accent)}
+.sidebar .primary-button:hover{background:var(--accent-soft)}
+.modern-header{
+    min-height:62px;
+    height:auto;
+    padding:8px 14px;
+    background:#0d0d0d;
+    position:relative;
+    gap:12px;
+}
+.workspace-brand-context{min-width:0;flex:1}
+.workspace-kicker{font-size:8px;letter-spacing:1.6px;color:#666;text-transform:uppercase;font-weight:800}
+.workspace-brand-context .file-name{font-size:11px;margin-top:3px}
+.workspace-nav{
+    display:flex;
+    align-items:center;
+    gap:3px;
+    white-space:nowrap;
+}
+.nav-action{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    min-height:34px;
+    padding:0 9px;
+    border:1px solid transparent;
+    border-radius:7px;
+    background:transparent;
+    color:#c7c7c7;
+    font-size:9px;
+}
+.nav-action:hover{border-color:#343434;background:#171717;color:#fff}
+.nav-icon{font-size:13px;line-height:1}
+.nav-logout{color:#8e8e8e}
+.editor-controls{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    padding-left:8px;
+    border-left:1px solid #242424;
+}
+.editor-controls button{
+    min-width:28px;height:28px;border:1px solid #292929;border-radius:6px;
+    background:#151515;color:#fff;font-size:9px
+}
+.editor-controls button:hover{border-color:var(--accent)}
+.editor-controls #zoomValue{width:42px;text-align:center;color:#bbb;font-size:9px}
+#coworkerDashboard{
+    flex:1;
+    overflow:auto;
+    background:
+      radial-gradient(circle at 50% 0%,rgba(255,106,0,.05),transparent 35%),
+      #0b0b0b;
+}
+.dashboard-inner{width:min(980px,calc(100% - 48px));margin:0 auto;padding:44px 0 56px}
+.dashboard-greeting{
+    display:flex;align-items:center;justify-content:center;gap:14px;text-align:left;
+    margin:0 auto 38px;max-width:700px
+}
+.greeting-avatar,.workbench-avatar{
+    width:46px;height:46px;border-radius:50%;display:grid;place-items:center;
+    background:#58b76a;color:#fff;font-weight:800;font-size:13px;flex:0 0 auto
+}
+.dashboard-greeting h1{margin:0;font-size:25px;letter-spacing:-.6px;color:#f5f5f5}
+.dashboard-greeting p{margin:5px 0 0;color:#777;font-size:11px}
+.dashboard-section-head{
+    display:flex;align-items:flex-end;justify-content:space-between;gap:15px;
+    margin-bottom:13px
+}
+.dashboard-eyebrow{font-size:9px;color:#888;letter-spacing:1.2px;font-weight:800}
+.dashboard-section-head h2{margin:5px 0 0;font-size:17px;color:#eee}
+.dashboard-refresh{
+    border:1px solid #303030;background:#151515;color:#aaa;border-radius:7px;
+    padding:7px 10px;font-size:9px
+}
+.dashboard-refresh:hover{border-color:var(--accent);color:#fff}
+.available-jobs{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+.available-jobs .task-card{
+    width:100%;min-height:178px;text-align:left;padding:0;overflow:hidden;
+    border:1px solid #292929;border-radius:10px;background:#171717;color:#eee;
+    cursor:pointer;display:block
+}
+.available-jobs .task-card:hover{border-color:#555;transform:translateY(-1px)}
+.available-jobs .task-card-top{
+    display:flex;justify-content:space-between;gap:10px;align-items:flex-start;
+    padding:15px 15px 13px;background:linear-gradient(135deg,#54250f,#2d180d)
+}
+.available-jobs .task-card-top strong{font-size:11px}
+.available-jobs .task-count{font-size:8px;color:#d0d0d0;white-space:nowrap}
+.available-jobs .task-card-info{
+    display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 15px 7px;
+    font-size:9px;color:#9d9d9d
+}
+.available-jobs .task-card-info span{display:block}
+.available-jobs .task-card-pay{
+    padding:5px 15px 14px;color:#ddd;font-size:9px
+}
+.dashboard-empty{
+    grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-height:140px;border:1px dashed #303030;border-radius:10px;background:#111;
+    text-align:center;padding:25px;color:#777
+}
+.dashboard-empty strong{font-size:11px;color:#bbb}
+.dashboard-empty span{margin-top:6px;font-size:9px}
+.workbench-banner{
+    display:flex;align-items:center;justify-content:space-between;gap:18px;
+    margin-top:24px;padding:12px;border:1px solid #2b2b2b;border-radius:11px;background:#151515
+}
+.workbench-person{display:flex;align-items:center;gap:10px;min-width:160px}
+.workbench-person>div:last-child{display:flex;flex-direction:column}
+.workbench-person span{font-size:7px;letter-spacing:1px;color:#777;font-weight:800}
+.workbench-person strong{font-size:11px;color:#fff;margin-top:2px}
+.workbench-person small{font-size:8px;color:#929292;margin-top:2px}
+.workbench-avatar{width:38px;height:38px;font-size:11px}
+.workbench-tools{display:grid;grid-template-columns:repeat(4,minmax(115px,1fr));gap:6px;flex:1}
+.workbench-tool{
+    display:grid;grid-template-columns:24px 1fr;grid-template-rows:auto auto;
+    align-items:center;column-gap:6px;text-align:left;padding:8px;
+    border:1px solid #292929;border-radius:7px;background:#101010;color:#fff
+}
+.workbench-tool:hover{border-color:#4a4a4a;background:#1a1a1a}
+.workbench-tool>span{grid-row:1/3;display:grid;place-items:center;font-size:15px;color:var(--accent)}
+.workbench-tool b{font-size:8px}
+.workbench-tool small{font-size:7px;color:#777;margin-top:2px}
+#canvasWorkspace{min-height:0}
+body.dashboard-mode #canvasWorkspace,
+body.dashboard-mode #filmstripBar,
+body.dashboard-mode .workspace-footer,
+body.dashboard-mode #taskActionBar{display:none!important}
+body.editor-mode #coworkerDashboard{display:none!important}
+body.editor-mode #canvasWorkspace{display:block}
+body.editor-mode .modern-header{flex-shrink:0}
+.right-panel{background:#0d0d0d}
+.right-title{font-size:9px}
+.reopen-tab{top:76px}
+.sidebar-signout{margin-top:5px}
+.profile-screen{max-width:960px;margin:0 auto;padding:34px}
+.profile-hero{
+    display:flex;align-items:center;gap:18px;padding:24px;border:1px solid #2b2b2b;
+    border-radius:14px;background:#141414
+}
+.profile-large-avatar{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;background:#58b76a;color:#fff;font-size:22px;font-weight:800}
+.profile-hero h3{margin:0;font-size:20px}.profile-hero p{margin:5px 0;color:#aaa;font-size:11px}.profile-hero span{color:#666;font-size:9px}
+.profile-actions-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.profile-action-card{
+    min-height:110px;border:1px solid #2b2b2b;border-radius:10px;background:#141414;color:#fff;
+    padding:15px;text-align:left;display:flex;flex-direction:column;align-items:flex-start
+}
+.profile-action-card:hover{border-color:#555}.profile-action-card span{font-size:20px;color:var(--accent)}
+.profile-action-card b{font-size:10px;margin-top:10px}.profile-action-card small{font-size:8px;color:#777;margin-top:4px}
+.profile-upload{min-height:110px}
+.danger-card span{color:#f87171}
+.approval-page{
+    position:fixed;inset:0;z-index:100000;display:grid;place-items:center;
+    background:#0b0b0b;padding:24px
+}
+.approval-card{width:min(520px,94vw);padding:42px;border:1px solid #303030;border-radius:16px;background:#151515;text-align:center;box-shadow:0 30px 90px rgba(0,0,0,.55)}
+.approval-icon{font-size:42px;margin-bottom:10px}.approval-kicker{font-size:8px;letter-spacing:1.5px;color:#777;font-weight:800}
+.approval-card h1{font-size:24px;margin:10px 0}.approval-card p{font-size:11px;line-height:1.6;color:#888}
+.approval-card .primary-button{max-width:220px;margin:18px auto 0}
+.modal-overlay{
+    position:fixed!important;inset:0!important;z-index:90000!important;
+    display:grid;place-items:stretch;background:rgba(0,0,0,.84);backdrop-filter:blur(8px)
+}
+.modal-overlay>.modal{
+    width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;
+    margin:0;border:0;border-radius:0;overflow:auto;background:#101010
+}
+.modal-overlay .modal-head{position:sticky;top:0;z-index:2;background:#101010}
+.admin-modal{display:flex;flex-direction:column}
+.admin-modal .admin-tabs{position:sticky;top:61px;z-index:2;background:#101010}
+.admin-modal .admin-tab-content{min-height:calc(100vh - 120px)}
+.admin-export-actions{display:flex;gap:6px;flex-wrap:wrap}
+.admin-export-actions .export-button{width:auto;margin:0}
+@media(max-width:1200px){
+    .workspace-nav{gap:1px}.nav-action{padding:0 6px}.nav-action span:last-child{display:none}
+    .workbench-tools{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:900px){
+    .app{grid-template-columns:220px minmax(0,1fr)}
+    .right-panel{display:none}
+    .dashboard-inner{width:calc(100% - 28px);padding-top:28px}
+    .modern-header{flex-wrap:wrap}.workspace-brand-context{order:1;min-width:45%}.workspace-nav{order:2}.editor-controls{order:3;width:100%;border-left:0;padding-left:0}
+    .profile-actions-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:650px){
+    .app{grid-template-columns:1fr}
+    .sidebar{display:none}
+    .dashboard-greeting h1{font-size:20px}.dashboard-greeting{justify-content:flex-start}
+    .available-jobs{grid-template-columns:1fr}.workbench-banner{flex-direction:column;align-items:stretch}.workbench-tools{grid-template-columns:1fr 1fr}
+}
