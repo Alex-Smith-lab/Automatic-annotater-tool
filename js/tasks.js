@@ -1,22 +1,66 @@
- // ============================================================
+// ============================================================
 // ANNOTATION AI
 // PART 5 — js/tasks.js
 // TASKS / TASK ACTIONS / SUBMIT / SKIP / WORK HISTORY
 // ============================================================
 
-import {
-    state,
-    $,
-    emit,
-    render,
-    saveFrame
-} from "./annotation.js";
+import * as Annotation from "./annotation.js";
 
 import {
-    supabase,
+    getSupabase,
     getCurrentUser,
     getCurrentSession
 } from "./supabase.js";
+
+
+// ============================================================
+// ANNOTATION COMPATIBILITY
+// ============================================================
+
+const state =
+    Annotation.state || {};
+
+const saveFrame =
+    typeof Annotation.saveFrame === "function"
+        ? Annotation.saveFrame
+        : () => {};
+
+
+// ============================================================
+// LOCAL DOM HELPER
+// IMPORTANT:
+// DO NOT IMPORT $ FROM annotation.js
+// ============================================================
+
+function $(id) {
+    return document.getElementById(id);
+}
+
+
+// ============================================================
+// LOCAL EVENT HELPER
+// ============================================================
+
+function emit(
+    name,
+    detail = {}
+) {
+    try {
+        window.dispatchEvent(
+            new CustomEvent(
+                String(name),
+                {
+                    detail
+                }
+            )
+        );
+    } catch (error) {
+        console.warn(
+            "Task event error:",
+            error
+        );
+    }
+}
 
 
 // ============================================================
@@ -64,15 +108,204 @@ function show(
 }
 
 
-function escapeHTML(value) {
+function escapeHTML(
+    value
+) {
     return String(
         value ?? ""
     )
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
+}
+
+
+// ============================================================
+// SAFE SUPABASE
+// ============================================================
+
+function getClient() {
+    try {
+        return getSupabase();
+    } catch (error) {
+        console.warn(
+            "Supabase client unavailable:",
+            error
+        );
+
+        return null;
+    }
+}
+
+
+function canUseSupabase() {
+    const client =
+        getClient();
+
+    return Boolean(
+        client &&
+        typeof client.from ===
+            "function"
+    );
+}
+
+
+// ============================================================
+// TASK TABLE
+// ============================================================
+
+function getTaskTable() {
+    return (
+        window.APP_TASK_TABLE ||
+        "tasks"
+    );
+}
+
+
+function getResultTable() {
+    return (
+        window.APP_RESULT_TABLE ||
+        "task_results"
+    );
+}
+
+
+// ============================================================
+// USER
+// ============================================================
+
+async function requireUser() {
+    try {
+        const user =
+            await getCurrentUser();
+
+        if (user) {
+            return user;
+        }
+    } catch (error) {
+        console.warn(
+            "getCurrentUser failed:",
+            error
+        );
+    }
+
+    try {
+        const session =
+            await getCurrentSession();
+
+        return (
+            session?.user ||
+            null
+        );
+    } catch (error) {
+        console.warn(
+            "getCurrentSession failed:",
+            error
+        );
+
+        return null;
+    }
+}
+
+
+// ============================================================
+// NORMALIZE TASK
+// ============================================================
+
+export function normalizeTask(
+    task
+) {
+    if (!task) {
+        return null;
+    }
+
+    return {
+        ...task,
+
+        id:
+            task.id ??
+            task.task_id ??
+            task.taskId ??
+            null,
+
+        title:
+            task.title ??
+            task.name ??
+            "Untitled task",
+
+        description:
+            task.description ??
+            task.instructions ??
+            "",
+
+        shape:
+            task.shape ??
+            task.task_shape ??
+            task.task_type ??
+            task.type ??
+            "box",
+
+        duration:
+            task.duration ??
+            task.duration_minutes ??
+            task.estimated_minutes ??
+            null,
+
+        pay:
+            task.pay ??
+            task.payment ??
+            task.reward ??
+            null,
+
+        status:
+            task.status ??
+            "available",
+
+        media_url:
+            task.media_url ??
+            task.mediaUrl ??
+            task.source_url ??
+            task.sourceUrl ??
+            task.file_url ??
+            task.fileUrl ??
+            task.url ??
+            null,
+
+        media_type:
+            task.media_type ??
+            task.mediaType ??
+            null,
+
+        created_at:
+            task.created_at ??
+            null,
+
+        assigned_to:
+            task.assigned_to ??
+            task.assignedTo ??
+            task.assignee_id ??
+            task.assigneeId ??
+            task.worker_id ??
+            task.workerId ??
+            null
+    };
 }
 
 
@@ -81,17 +314,23 @@ function escapeHTML(value) {
 // ============================================================
 
 function getTaskActionBar() {
-    return $("taskActionBar");
+    return $(
+        "taskActionBar"
+    );
 }
 
 
 function getTaskActionTitle() {
-    return $("taskActionTitle");
+    return $(
+        "taskActionTitle"
+    );
 }
 
 
 function getTaskActionMeta() {
-    return $("taskActionMeta");
+    return $(
+        "taskActionMeta"
+    );
 }
 
 
@@ -130,14 +369,26 @@ export function updateTaskActionBar() {
     const bar =
         getTaskActionBar();
 
-    if (!bar) return;
-
-    if (!currentTask) {
-        show(bar, false);
+    if (!bar) {
+        updateTaskButtons();
         return;
     }
 
-    show(bar, true);
+    if (!currentTask) {
+        show(
+            bar,
+            false
+        );
+
+        updateTaskButtons();
+
+        return;
+    }
+
+    show(
+        bar,
+        true
+    );
 
     const title =
         getTaskActionTitle();
@@ -159,14 +410,14 @@ export function updateTaskActionBar() {
         "";
 
     const duration =
-        currentTask.duration ||
-        currentTask.duration_minutes ||
+        currentTask.duration ??
+        currentTask.duration_minutes ??
         "";
 
     const pay =
-        currentTask.pay ||
-        currentTask.payment ||
-        currentTask.reward ||
+        currentTask.pay ??
+        currentTask.payment ??
+        currentTask.reward ??
         "";
 
     const pieces = [];
@@ -177,7 +428,11 @@ export function updateTaskActionBar() {
         );
     }
 
-    if (duration) {
+    if (
+        duration !== "" &&
+        duration !== null &&
+        duration !== undefined
+    ) {
         pieces.push(
             `${duration} min`
         );
@@ -260,7 +515,9 @@ function setTaskStatus(
     const element =
         getTaskStatusElement();
 
-    if (!element) return;
+    if (!element) {
+        return;
+    }
 
     setText(
         element,
@@ -285,141 +542,27 @@ function setTaskStatus(
 
 
 // ============================================================
-// USER
-// ============================================================
-
-async function requireUser() {
-    try {
-        const user =
-            await getCurrentUser();
-
-        if (user) {
-            return user;
-        }
-    } catch (_) {
-        // Continue to fallback.
-    }
-
-    const session =
-        await getCurrentSession();
-
-    return session?.user || null;
-}
-
-
-// ============================================================
-// SAFE SUPABASE CHECK
-// ============================================================
-
-function canUseSupabase() {
-    return Boolean(
-        supabase &&
-        typeof supabase.from ===
-            "function"
-    );
-}
-
-
-// ============================================================
-// GENERIC TASK TABLE
-// ============================================================
-
-function getTaskTable() {
-    return (
-        window.APP_TASK_TABLE ||
-        "tasks"
-    );
-}
-
-
-// ============================================================
-// NORMALIZE TASK
-// ============================================================
-
-export function normalizeTask(
-    task
-) {
-    if (!task) {
-        return null;
-    }
-
-    return {
-        ...task,
-
-        id:
-            task.id ??
-            task.task_id ??
-            task.taskId,
-
-        title:
-            task.title ??
-            task.name ??
-            "Untitled task",
-
-        description:
-            task.description ??
-            task.instructions ??
-            "",
-
-        shape:
-            task.shape ??
-            task.task_shape ??
-            task.task_type ??
-            task.type ??
-            "box",
-
-        duration:
-            task.duration ??
-            task.duration_minutes ??
-            task.estimated_minutes ??
-            null,
-
-        pay:
-            task.pay ??
-            task.payment ??
-            task.reward ??
-            null,
-
-        status:
-            task.status ??
-            "available",
-
-        media_url:
-            task.media_url ??
-            task.mediaUrl ??
-            task.source_url ??
-            task.url ??
-            null,
-
-        media_type:
-            task.media_type ??
-            task.mediaType ??
-            null,
-
-        created_at:
-            task.created_at ??
-            null,
-
-        assigned_to:
-            task.assigned_to ??
-            task.assignedTo ??
-            null
-    };
-}
-
-
-// ============================================================
 // FETCH AVAILABLE TASKS
 // ============================================================
 
 export async function fetchAvailableTasks(
     options = {}
 ) {
-    const {
-        limit = 50
-    } = options;
+    const limit =
+        Number(
+            options.limit ?? 50
+        );
 
-    if (!canUseSupabase()) {
+    const client =
+        getClient();
+
+    if (!client) {
+        availableTasks = [];
+
+        renderAvailableTasks(
+            availableTasks
+        );
+
         return [];
     }
 
@@ -427,6 +570,12 @@ export async function fetchAvailableTasks(
         await requireUser();
 
     if (!user) {
+        availableTasks = [];
+
+        renderAvailableTasks(
+            availableTasks
+        );
+
         return [];
     }
 
@@ -438,45 +587,48 @@ export async function fetchAvailableTasks(
         const table =
             getTaskTable();
 
-        let query =
-            supabase
-                .from(table)
-                .select("*");
-
         /*
-         * Do not assume a single database schema.
-         * Try the common available-status query first.
+         * First try status = available.
          */
 
         let result =
-            await query
+            await client
+                .from(table)
+                .select("*")
                 .eq(
                     "status",
                     "available"
                 )
-                .limit(limit);
+                .limit(
+                    limit
+                );
 
         /*
-         * Some installations may not have
-         * a status column. Fall back to a
-         * general task query rather than
-         * crashing the application.
+         * If the database schema does not
+         * support the status query, load
+         * the table and filter locally.
          */
 
-        if (
-            result.error
-        ) {
+        if (result.error) {
             result =
-                await supabase
+                await client
                     .from(table)
                     .select("*")
-                    .limit(limit);
+                    .limit(
+                        limit
+                    );
         }
 
         if (result.error) {
             console.error(
                 "Unable to load tasks:",
                 result.error
+            );
+
+            availableTasks = [];
+
+            renderAvailableTasks(
+                availableTasks
             );
 
             setTaskStatus(
@@ -495,6 +647,53 @@ export async function fetchAvailableTasks(
                 .filter(
                     Boolean
                 );
+
+        /*
+         * Keep only tasks that are actually
+         * available or assigned to this user.
+         */
+
+        availableTasks =
+            availableTasks.filter(
+                task => {
+                    const status =
+                        String(
+                            task.status ||
+                            "available"
+                        )
+                            .toLowerCase();
+
+                    const assigned =
+                        task.assigned_to;
+
+                    const assignedToCurrentUser =
+                        assigned &&
+                        String(assigned) ===
+                            String(user.id);
+
+                    const availableStatus =
+                        [
+                            "",
+                            "available",
+                            "open",
+                            "ready",
+                            "queued",
+                            "pending",
+                            "created",
+                            "in_progress"
+                        ].includes(
+                            status
+                        );
+
+                    return (
+                        availableStatus &&
+                        (
+                            !assigned ||
+                            assignedToCurrentUser
+                        )
+                    );
+                }
+            );
 
         renderAvailableTasks(
             availableTasks
@@ -548,7 +747,9 @@ function renderAvailableTasks(
     const container =
         getAvailableTasksContainer();
 
-    if (!container) return;
+    if (!container) {
+        return;
+    }
 
     if (!tasks.length) {
         container.innerHTML = `
@@ -561,67 +762,87 @@ function renderAvailableTasks(
     }
 
     container.innerHTML =
-        tasks.map(
-            (task) => `
-                <button
-                    type="button"
-                    class="task-card"
-                    data-task-id="${escapeHTML(task.id)}"
-                >
-                    <div class="task-card-title">
-                        ${escapeHTML(task.title)}
-                    </div>
+        tasks
+            .map(
+                task => {
+                    const id =
+                        task.id ??
+                        "";
 
-                    <div class="task-card-meta">
-                        ${escapeHTML(
-                            task.shape || ""
-                        )}
-                        ${
-                            task.duration
-                                ? ` • ${escapeHTML(
-                                      task.duration
-                                  )} min`
-                                : ""
-                        }
-                        ${
-                            task.pay !== null &&
-                            task.pay !== undefined
-                                ? ` • ${escapeHTML(
-                                      task.pay
-                                  )}`
-                                : ""
-                        }
-                    </div>
+                    return `
+                        <button
+                            type="button"
+                            class="task-card"
+                            data-task-id="${escapeHTML(id)}"
+                        >
+                            <div class="task-card-title">
+                                ${escapeHTML(
+                                    task.title
+                                )}
+                            </div>
 
-                    ${
-                        task.description
-                            ? `
-                                <div class="task-card-description">
-                                    ${escapeHTML(
-                                        task.description
-                                    )}
-                                </div>
-                            `
-                            : ""
-                    }
-                </button>
-            `
-        )
-        .join("");
+                            <div class="task-card-meta">
+                                ${escapeHTML(
+                                    task.shape || ""
+                                )}
+
+                                ${
+                                    task.duration !==
+                                        null &&
+                                    task.duration !==
+                                        undefined &&
+                                    task.duration !==
+                                        ""
+                                        ? ` • ${escapeHTML(
+                                              task.duration
+                                          )} min`
+                                        : ""
+                                }
+
+                                ${
+                                    task.pay !==
+                                        null &&
+                                    task.pay !==
+                                        undefined &&
+                                    task.pay !==
+                                        ""
+                                        ? ` • ${escapeHTML(
+                                              task.pay
+                                          )}`
+                                        : ""
+                                }
+                            </div>
+
+                            ${
+                                task.description
+                                    ? `
+                                        <div class="task-card-description">
+                                            ${escapeHTML(
+                                                task.description
+                                            )}
+                                        </div>
+                                    `
+                                    : ""
+                            }
+                        </button>
+                    `;
+                }
+            )
+            .join("");
 
     container
         .querySelectorAll(
             "[data-task-id]"
         )
         .forEach(
-            (element) => {
+            element => {
                 element.addEventListener(
                     "click",
-                    () => {
+                    async () => {
                         const taskId =
                             element.dataset.taskId;
 
-                        selectTask(
+                        await selectTask(
                             taskId
                         );
                     }
@@ -639,7 +860,7 @@ function findTask(
     taskId
 ) {
     return availableTasks.find(
-        (task) =>
+        task =>
             String(task.id) ===
             String(taskId)
     );
@@ -653,11 +874,12 @@ function findTask(
 export async function selectTask(
     taskOrId
 ) {
-    let task;
+    let task = null;
 
     if (
+        taskOrId &&
         typeof taskOrId ===
-        "object"
+            "object"
     ) {
         task =
             normalizeTask(
@@ -697,27 +919,23 @@ export async function selectTask(
     );
 
     /*
-     * If the task contains a direct media URL,
-     * ask the media module to load it.
+     * Ask media.js to load task media.
+     * This avoids circular imports.
      */
 
     if (
         task.media_url
     ) {
-        try {
-            window.dispatchEvent(
-                new CustomEvent(
-                    "annotation:loadTaskMedia",
-                    {
-                        detail: {
-                            task
-                        }
+        window.dispatchEvent(
+            new CustomEvent(
+                "annotation:loadTaskMedia",
+                {
+                    detail: {
+                        task
                     }
-                )
-            );
-        } catch (_) {
-            // Ignore event errors.
-        }
+                }
+            )
+        );
     }
 
     return true;
@@ -749,90 +967,16 @@ export function clearCurrentTask() {
 
 
 // ============================================================
-// TASK MEDIA EVENT
-// ============================================================
-
-window.addEventListener(
-    "annotation:taskSelected",
-    (event) => {
-        const task =
-            event.detail?.task;
-
-        if (task) {
-            selectTask(task);
-        }
-    }
-);
-
-
-// ============================================================
-// ASSIGN TASK
-// ============================================================
-
-async function assignTaskToUser(
-    taskId,
-    userId
-) {
-    if (
-        !canUseSupabase()
-    ) {
-        return {
-            ok: false,
-            error:
-                new Error(
-                    "Supabase is not configured."
-                )
-        };
-    }
-
-    const table =
-        getTaskTable();
-
-    /*
-     * Try the most common task assignment
-     * field first.
-     */
-
-    let result =
-        await supabase
-            .from(table)
-            .update({
-                status:
-                    "in_progress",
-
-                assigned_to:
-                    userId
-            })
-            .eq(
-                "id",
-                taskId
-            );
-
-    /*
-     * If the database does not allow the
-     * expected fields, don't repeatedly
-     * mutate unknown schema.
-     */
-
-    return {
-        ok:
-            !result.error,
-
-        error:
-            result.error || null,
-
-        data:
-            result.data || null
-    };
-}
-
-
-// ============================================================
 // START CURRENT TASK
 // ============================================================
 
 export async function startCurrentTask() {
     if (!currentTask) {
+        setTaskStatus(
+            "No task is selected.",
+            "warning"
+        );
+
         return false;
     }
 
@@ -848,57 +992,99 @@ export async function startCurrentTask() {
         return false;
     }
 
-    if (
-        !currentTask.id
-    ) {
+    if (!currentTask.id) {
         return true;
     }
 
-    const result =
-        await assignTaskToUser(
-            currentTask.id,
-            user.id
-        );
+    const client =
+        getClient();
 
-    if (
-        !result.ok
-    ) {
-        /*
-         * Assignment can be controlled by
-         * database policies. Keep the task
-         * usable locally if assignment is
-         * not supported.
-         */
-
-        console.warn(
-            "Task assignment was not completed:",
-            result.error
+    if (!client) {
+        setTaskStatus(
+            "Database connection is unavailable.",
+            "error"
         );
 
         return false;
     }
 
-    currentTask = {
-        ...currentTask,
-        status:
-            "in_progress",
-        assigned_to:
-            user.id
-    };
+    try {
+        const table =
+            getTaskTable();
 
-    updateTaskActionBar();
+        const result =
+            await client
+                .from(table)
+                .update({
+                    status:
+                        "in_progress",
 
-    setTaskStatus(
-        "Task started.",
-        "success"
-    );
+                    assigned_to:
+                        user.id
+                })
+                .eq(
+                    "id",
+                    currentTask.id
+                );
 
-    return true;
+        if (result.error) {
+            console.warn(
+                "Task assignment failed:",
+                result.error
+            );
+
+            setTaskStatus(
+                "Unable to start this task.",
+                "error"
+            );
+
+            return false;
+        }
+
+        currentTask = {
+            ...currentTask,
+
+            status:
+                "in_progress",
+
+            assigned_to:
+                user.id
+        };
+
+        updateTaskActionBar();
+
+        setTaskStatus(
+            "Task started.",
+            "success"
+        );
+
+        emit(
+            "taskStarted",
+            {
+                task:
+                    currentTask
+            }
+        );
+
+        return true;
+    } catch (error) {
+        console.error(
+            "Start task error:",
+            error
+        );
+
+        setTaskStatus(
+            "Unable to start task.",
+            "error"
+        );
+
+        return false;
+    }
 }
 
 
 // ============================================================
-// VALIDATE ANNOTATIONS
+// VALIDATE CURRENT TASK
 // ============================================================
 
 export function validateCurrentTask() {
@@ -921,12 +1107,6 @@ export function validateCurrentTask() {
                 "No annotations were created."
         };
     }
-
-    /*
-     * Submitting zero annotations may be valid
-     * for some task types, so only block it when
-     * explicitly configured by the task.
-     */
 
     const requiresAnnotation =
         currentTask.require_annotation ===
@@ -966,17 +1146,15 @@ export function serializeAnnotations() {
     }
 
     return state.annotations.map(
-        (annotation) => ({
-            ...annotation,
+        annotation => {
+            const copy = {
+                ...annotation
+            };
 
-            /*
-             * Remove temporary UI flags from
-             * the submitted representation.
-             */
+            delete copy.selected;
 
-            selected:
-                undefined
-        })
+            return copy;
+        }
     );
 }
 
@@ -1028,9 +1206,10 @@ function buildSubmissionPayload(
 async function saveTaskResult(
     payload
 ) {
-    if (
-        !canUseSupabase()
-    ) {
+    const client =
+        getClient();
+
+    if (!client) {
         return {
             ok: false,
             error:
@@ -1040,35 +1219,38 @@ async function saveTaskResult(
         };
     }
 
-    /*
-     * The exact result table was not present
-     * in the supplied application source.
-     *
-     * Allow the final application configuration
-     * to specify it.
-     */
-
     const table =
-        window.APP_RESULT_TABLE ||
-        "task_results";
+        getResultTable();
 
-    const result =
-        await supabase
-            .from(table)
-            .insert(payload)
-            .select()
-            .maybeSingle();
+    try {
+        const result =
+            await client
+                .from(table)
+                .insert(
+                    payload
+                )
+                .select()
+                .maybeSingle();
 
-    return {
-        ok:
-            !result.error,
+        return {
+            ok:
+                !result.error,
 
-        data:
-            result.data || null,
+            data:
+                result.data ||
+                null,
 
-        error:
-            result.error || null
-    };
+            error:
+                result.error ||
+                null
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            data: null,
+            error
+        };
+    }
 }
 
 
@@ -1080,8 +1262,11 @@ async function updateTaskStatus(
     taskId,
     status
 ) {
+    const client =
+        getClient();
+
     if (
-        !canUseSupabase() ||
+        !client ||
         !taskId
     ) {
         return {
@@ -1096,24 +1281,32 @@ async function updateTaskStatus(
     const table =
         getTaskTable();
 
-    const result =
-        await supabase
-            .from(table)
-            .update({
-                status
-            })
-            .eq(
-                "id",
-                taskId
-            );
+    try {
+        const result =
+            await client
+                .from(table)
+                .update({
+                    status
+                })
+                .eq(
+                    "id",
+                    taskId
+                );
 
-    return {
-        ok:
-            !result.error,
+        return {
+            ok:
+                !result.error,
 
-        error:
-            result.error || null
-    };
+            error:
+                result.error ||
+                null
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            error
+        };
+    }
 }
 
 
@@ -1165,8 +1358,8 @@ export async function submitCurrentTask() {
 
     try {
         /*
-         * Preserve current video-frame annotations
-         * before submission.
+         * Save the current video frame before
+         * creating the submission.
          */
 
         if (
@@ -1177,8 +1370,11 @@ export async function submitCurrentTask() {
                 saveFrame(
                     state.currentFrame
                 );
-            } catch (_) {
-                // Ignore.
+            } catch (error) {
+                console.warn(
+                    "Unable to save video frame:",
+                    error
+                );
             }
         }
 
@@ -1195,12 +1391,6 @@ export async function submitCurrentTask() {
         if (
             !result.ok
         ) {
-            /*
-             * Don't silently claim success if the
-             * result table does not exist or RLS
-             * rejects the operation.
-             */
-
             console.error(
                 "Task submission failed:",
                 result.error
@@ -1213,6 +1403,11 @@ export async function submitCurrentTask() {
 
             return false;
         }
+
+        /*
+         * Update the task status only when
+         * a task ID exists.
+         */
 
         if (
             currentTask?.id
@@ -1227,7 +1422,7 @@ export async function submitCurrentTask() {
                 !statusResult.ok
             ) {
                 console.warn(
-                    "Task result saved, but task status was not updated:",
+                    "Result saved but task status could not be updated:",
                     statusResult.error
                 );
             }
@@ -1243,13 +1438,39 @@ export async function submitCurrentTask() {
                 new Date().toISOString(),
 
             annotation_count:
-                state.annotations.length,
+                Array.isArray(
+                    state.annotations
+                )
+                    ? state.annotations.length
+                    : 0,
 
             status:
                 "submitted"
         });
 
+        /*
+         * Remove completed task from the
+         * local available list.
+         */
+
+        if (
+            completedTask?.id
+        ) {
+            availableTasks =
+                availableTasks.filter(
+                    item =>
+                        String(item.id) !==
+                        String(
+                            completedTask.id
+                        )
+                );
+        }
+
         currentTask = null;
+
+        renderAvailableTasks(
+            availableTasks
+        );
 
         updateTaskActionBar();
 
@@ -1263,13 +1484,14 @@ export async function submitCurrentTask() {
             {
                 task:
                     completedTask,
+
                 result:
                     result.data
             }
         );
 
         /*
-         * Refresh available jobs after submission.
+         * Refresh the queue in the background.
          */
 
         await fetchAvailableTasks();
@@ -1333,23 +1555,25 @@ export async function skipCurrentTask(
         let updateSucceeded =
             false;
 
+        const client =
+            getClient();
+
         if (
-            task.id &&
-            canUseSupabase()
+            client &&
+            task.id
         ) {
             const table =
                 getTaskTable();
-
-            /*
-             * Keep the reason only if a reason
-             * field is explicitly available via
-             * configuration.
-             */
 
             const updatePayload = {
                 status:
                     "skipped"
             };
+
+            /*
+             * Optional reason column can be
+             * configured by the application.
+             */
 
             const reasonColumn =
                 window.APP_TASK_SKIP_REASON_COLUMN;
@@ -1363,36 +1587,36 @@ export async function skipCurrentTask(
                 ] = reason;
             }
 
-            const result =
-                await supabase
-                    .from(table)
-                    .update(
-                        updatePayload
-                    )
-                    .eq(
-                        "id",
-                        task.id
-                    );
+            try {
+                const result =
+                    await client
+                        .from(table)
+                        .update(
+                            updatePayload
+                        )
+                        .eq(
+                            "id",
+                            task.id
+                        );
 
-            updateSucceeded =
-                !result.error;
+                updateSucceeded =
+                    !result.error;
 
-            if (
-                result.error
-            ) {
-                console.warn(
-                    "Task skip database update failed:",
+                if (
                     result.error
+                ) {
+                    console.warn(
+                        "Task skip database update failed:",
+                        result.error
+                    );
+                }
+            } catch (error) {
+                console.warn(
+                    "Task skip error:",
+                    error
                 );
             }
         }
-
-        /*
-         * Remove the task from the local
-         * available-task list regardless of
-         * whether the remote status update
-         * is available.
-         */
 
         availableTasks =
             availableTasks.filter(
@@ -1422,7 +1646,9 @@ export async function skipCurrentTask(
             "taskSkipped",
             {
                 task,
+
                 reason,
+
                 remote:
                     updateSucceeded
             }
@@ -1488,12 +1714,13 @@ function getConfirmSkipButton() {
 }
 
 
-function openSkipModal() {
+export function openSkipModal() {
     const modal =
         getSkipModal();
 
     if (!modal) {
         skipCurrentTask();
+
         return;
     }
 
@@ -1509,14 +1736,18 @@ function openSkipModal() {
         reason.value = "";
 
         setTimeout(
-            () => reason.focus(),
+            () => {
+                try {
+                    reason.focus();
+                } catch (_) {}
+            },
             0
         );
     }
 }
 
 
-function closeSkipModal() {
+export function closeSkipModal() {
     const modal =
         getSkipModal();
 
@@ -1556,38 +1787,35 @@ function bindTaskButtons() {
     const submit =
         getSubmitButton();
 
+    const approve =
+        getApproveButton();
+
+    const closeSkip =
+        getCloseSkipButton();
+
+    const confirm =
+        getConfirmSkipButton();
+
     if (skip) {
         skip.addEventListener(
             "click",
-            () => {
-                openSkipModal();
-            }
+            openSkipModal
         );
     }
 
     if (submit) {
         submit.addEventListener(
             "click",
-            () => {
-                submitCurrentTask();
-            }
+            submitCurrentTask
         );
     }
-
-    const approve =
-        getApproveButton();
 
     if (approve) {
         approve.addEventListener(
             "click",
-            () => {
-                approveCurrentTask();
-            }
+            approveCurrentTask
         );
     }
-
-    const closeSkip =
-        getCloseSkipButton();
 
     if (closeSkip) {
         closeSkip.addEventListener(
@@ -1595,9 +1823,6 @@ function bindTaskButtons() {
             closeSkipModal
         );
     }
-
-    const confirm =
-        getConfirmSkipButton();
 
     if (confirm) {
         confirm.addEventListener(
@@ -1612,7 +1837,7 @@ function bindTaskButtons() {
     if (modal) {
         modal.addEventListener(
             "click",
-            (event) => {
+            event => {
                 if (
                     event.target ===
                     modal
@@ -1639,11 +1864,21 @@ export async function approveCurrentTask() {
         return false;
     }
 
-    if (
-        !canUseSupabase()
-    ) {
+    const client =
+        getClient();
+
+    if (!client) {
         setTaskStatus(
             "Database connection is unavailable.",
+            "error"
+        );
+
+        return false;
+    }
+
+    if (!currentTask.id) {
+        setTaskStatus(
+            "This task has no valid ID.",
             "error"
         );
 
@@ -1658,7 +1893,7 @@ export async function approveCurrentTask() {
 
     try {
         const result =
-            await supabase
+            await client
                 .from(table)
                 .update({
                     status:
@@ -1673,6 +1908,7 @@ export async function approveCurrentTask() {
             result.error
         ) {
             console.error(
+                "Approve task error:",
                 result.error
             );
 
@@ -1686,6 +1922,7 @@ export async function approveCurrentTask() {
 
         currentTask = {
             ...task,
+
             status:
                 "approved"
         };
@@ -1737,13 +1974,15 @@ function getWorkHistoryContainer() {
 export async function fetchWorkHistory(
     options = {}
 ) {
-    const {
-        limit = 50
-    } = options;
+    const limit =
+        Number(
+            options.limit ?? 50
+        );
 
-    if (
-        !canUseSupabase()
-    ) {
+    const client =
+        getClient();
+
+    if (!client) {
         renderWorkHistory(
             taskHistory
         );
@@ -1755,16 +1994,23 @@ export async function fetchWorkHistory(
         await requireUser();
 
     if (!user) {
+        renderWorkHistory(
+            []
+        );
+
         return [];
     }
 
     try {
         const table =
-            window.APP_RESULT_TABLE ||
-            "task_results";
+            getResultTable();
 
-        const result =
-            await supabase
+        /*
+         * First try submitted_at ordering.
+         */
+
+        let result =
+            await client
                 .from(table)
                 .select("*")
                 .eq(
@@ -1778,47 +2024,48 @@ export async function fetchWorkHistory(
                             false
                     }
                 )
-                .limit(limit);
+                .limit(
+                    limit
+                );
+
+        /*
+         * Fallback for schemas that don't
+         * have submitted_at.
+         */
 
         if (
             result.error
         ) {
-            /*
-             * Some existing databases may use
-             * created_at rather than submitted_at.
-             */
-
-            const fallback =
-                await supabase
+            result =
+                await client
                     .from(table)
                     .select("*")
                     .eq(
                         "user_id",
                         user.id
                     )
-                    .limit(limit);
-
-            if (
-                fallback.error
-            ) {
-                console.warn(
-                    "Unable to load work history:",
-                    fallback.error
-                );
-
-                renderWorkHistory(
-                    taskHistory
-                );
-
-                return taskHistory;
-            }
-
-            taskHistory =
-                fallback.data || [];
-        } else {
-            taskHistory =
-                result.data || [];
+                    .limit(
+                        limit
+                    );
         }
+
+        if (
+            result.error
+        ) {
+            console.warn(
+                "Unable to load work history:",
+                result.error
+            );
+
+            renderWorkHistory(
+                taskHistory
+            );
+
+            return taskHistory;
+        }
+
+        taskHistory =
+            result.data || [];
 
         renderWorkHistory(
             taskHistory
@@ -1858,10 +2105,12 @@ function renderWorkHistory(
     const container =
         getWorkHistoryContainer();
 
-    if (!container) return;
+    if (!container) {
+        return;
+    }
 
     if (
-        !history ||
+        !Array.isArray(history) ||
         !history.length
     ) {
         container.innerHTML = `
@@ -1874,69 +2123,90 @@ function renderWorkHistory(
     }
 
     container.innerHTML =
-        history.map(
-            (item) => {
-                const title =
-                    item.task_title ||
-                    item.title ||
-                    item.task_name ||
-                    `Task ${item.task_id || ""}`;
+        history
+            .map(
+                item => {
+                    const title =
+                        item.task_title ||
+                        item.title ||
+                        item.task_name ||
+                        (
+                            item.task_id
+                                ? `Task ${item.task_id}`
+                                : "Task"
+                        );
 
-                const status =
-                    item.status ||
-                    "submitted";
+                    const status =
+                        item.status ||
+                        "submitted";
 
-                const count =
-                    item.annotation_count ??
-                    item.annotations?.length ??
-                    0;
+                    const count =
+                        item.annotation_count ??
+                        (
+                            Array.isArray(
+                                item.annotations
+                            )
+                                ? item.annotations.length
+                                : 0
+                        );
 
-                const date =
-                    item.submitted_at ||
-                    item.completed_at ||
-                    item.created_at;
+                    const date =
+                        item.submitted_at ||
+                        item.completed_at ||
+                        item.created_at ||
+                        null;
 
-                return `
-                    <div class="history-item">
-                        <div class="history-item-title">
-                            ${escapeHTML(title)}
-                        </div>
+                    return `
+                        <div class="history-item">
 
-                        <div class="history-item-meta">
-                            <span>
-                                ${escapeHTML(status)}
-                            </span>
-
-                            <span>
+                            <div class="history-item-title">
                                 ${escapeHTML(
-                                    count
-                                )} annotation${
-                                    Number(count) ===
-                                    1
-                                        ? ""
-                                        : "s"
-                                }
-                            </span>
+                                    title
+                                )}
+                            </div>
 
-                            ${
-                                date
-                                    ? `
-                                        <span>
-                                            ${escapeHTML(
-                                                formatDate(
-                                                    date
-                                                )
-                                            )}
-                                        </span>
-                                    `
-                                    : ""
-                            }
+                            <div class="history-item-meta">
+
+                                <span>
+                                    ${escapeHTML(
+                                        status
+                                    )}
+                                </span>
+
+                                <span>
+                                    ${escapeHTML(
+                                        count
+                                    )}
+                                    annotation${
+                                        Number(
+                                            count
+                                        ) === 1
+                                            ? ""
+                                            : "s"
+                                    }
+                                </span>
+
+                                ${
+                                    date
+                                        ? `
+                                            <span>
+                                                ${escapeHTML(
+                                                    formatDate(
+                                                        date
+                                                    )
+                                                )}
+                                            </span>
+                                        `
+                                        : ""
+                                }
+
+                            </div>
+
                         </div>
-                    </div>
-                `;
-            }
-        )
-        .join("");
+                    `;
+                }
+            )
+            .join("");
 }
 
 
@@ -1955,7 +2225,9 @@ function formatDate(
             date.getTime()
         )
     ) {
-        return String(value);
+        return String(
+            value ?? ""
+        );
     }
 
     return date.toLocaleString();
@@ -1970,7 +2242,9 @@ function bindDashboardRefresh() {
     const button =
         $("refreshDashboardJobs");
 
-    if (!button) return;
+    if (!button) {
+        return;
+    }
 
     button.addEventListener(
         "click",
@@ -1982,14 +2256,16 @@ function bindDashboardRefresh() {
 
 
 // ============================================================
-// OPEN WORK HISTORY
+// WORK HISTORY BUTTON
 // ============================================================
 
 function bindWorkHistoryButton() {
     const button =
         $("workHistoryButton");
 
-    if (!button) return;
+    if (!button) {
+        return;
+    }
 
     button.addEventListener(
         "click",
@@ -2011,12 +2287,14 @@ function bindWorkHistoryButton() {
 function bindTaskEvents() {
     window.addEventListener(
         "annotation:taskSelected",
-        (event) => {
+        event => {
             const task =
                 event.detail?.task;
 
             if (task) {
-                selectTask(task);
+                selectTask(
+                    task
+                );
             }
         }
     );
@@ -2034,20 +2312,29 @@ function bindTaskEvents() {
             openSkipModal();
         }
     );
+
+    window.addEventListener(
+        "annotation:startTask",
+        () => {
+            startCurrentTask();
+        }
+    );
 }
 
 
 // ============================================================
-// MEDIA TASK EVENT
+// TASK MEDIA EVENT
 // ============================================================
 
 window.addEventListener(
     "annotation:loadTaskMedia",
-    async (event) => {
+    event => {
         const task =
             event.detail?.task;
 
-        if (!task) return;
+        if (!task) {
+            return;
+        }
 
         const mediaURL =
             task.media_url;
@@ -2057,8 +2344,8 @@ window.addEventListener(
         }
 
         /*
-         * media.js owns the actual media loading.
-         * Send a separate event to avoid a circular import.
+         * media.js owns actual media loading.
+         * This event avoids a circular import.
          */
 
         window.dispatchEvent(
@@ -2125,7 +2412,71 @@ export function getAvailableTaskCount() {
 
 
 export function getWorkHistory() {
-    return [...taskHistory];
+    return [
+        ...taskHistory
+    ];
+}
+
+
+// ============================================================
+// SET CURRENT TASK
+// ============================================================
+
+export function setCurrentTask(
+    task
+) {
+    currentTask =
+        normalizeTask(
+            task
+        );
+
+    updateTaskActionBar();
+
+    if (currentTask) {
+        emit(
+            "taskSelected",
+            {
+                task:
+                    currentTask
+            }
+        );
+    }
+
+    return currentTask;
+}
+
+
+// ============================================================
+// REFRESH TASKS
+// ============================================================
+
+export async function refreshTasks() {
+    return fetchAvailableTasks();
+}
+
+
+// ============================================================
+// CAN USE UPLOAD
+// ============================================================
+
+export function canUseUpload() {
+    /*
+     * Upload is controlled by the HTML/UI and
+     * application configuration. Keep this
+     * function available because app.js may call it.
+     */
+
+    const panel =
+        $("customerUploadPanel");
+
+    if (panel) {
+        show(
+            panel,
+            true
+        );
+    }
+
+    return true;
 }
 
 
@@ -2152,14 +2503,7 @@ export async function initializeTasks() {
 
     updateTaskActionBar();
 
-    /*
-     * Don't force a database query before the
-     * authentication module has finished restoring
-     * the user's session.
-     *
-     * app.js can call fetchAvailableTasks()
-     * after authentication is ready.
-     */
+    canUseUpload();
 
     emit(
         "tasksReady"
@@ -2168,10 +2512,36 @@ export async function initializeTasks() {
 
 
 // ============================================================
+// ALIASES FOR COMPATIBILITY
+// ============================================================
+
+export const initTasks =
+    initializeTasks;
+
+export const loadTasks =
+    fetchAvailableTasks;
+
+export const getCurrentTaskState =
+    getCurrentTask;
+
+export const submitTask =
+    submitCurrentTask;
+
+export const skipTask =
+    skipCurrentTask;
+
+export const approveTask =
+    approveCurrentTask;
+
+
+// ============================================================
 // GLOBAL COMPATIBILITY
 // ============================================================
 
 window.fetchAvailableTasks =
+    fetchAvailableTasks;
+
+window.loadTasks =
     fetchAvailableTasks;
 
 window.selectTask =
@@ -2183,13 +2553,25 @@ window.getCurrentTask =
 window.clearCurrentTask =
     clearCurrentTask;
 
+window.setCurrentTask =
+    setCurrentTask;
+
 window.submitCurrentTask =
+    submitCurrentTask;
+
+window.submitTask =
     submitCurrentTask;
 
 window.skipCurrentTask =
     skipCurrentTask;
 
+window.skipTask =
+    skipCurrentTask;
+
 window.approveCurrentTask =
+    approveCurrentTask;
+
+window.approveTask =
     approveCurrentTask;
 
 window.loadNextTask =
@@ -2206,6 +2588,15 @@ window.validateCurrentTask =
 
 window.updateTaskActionBar =
     updateTaskActionBar;
+
+window.initializeTasks =
+    initializeTasks;
+
+window.initTasks =
+    initializeTasks;
+
+window.canUseUpload =
+    canUseUpload;
 
 
 // ============================================================
