@@ -1,5611 +1,1752 @@
-import {
-    pipeline,
-    env
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
-
-import {
-    createClient
-} from "https://esm.sh/@supabase/supabase-js@2";
-
-
-env.allowLocalModels = false;
-env.allowRemoteModels = true;
+```css
+/* ============================================================
+   ANNOTATION AI
+   MAIN APPLICATION STYLES
+   File: styles.css
+   ============================================================ */
 
 
 /* ============================================================
-   DOM
-============================================================ */
-
-const ID_ALIASES = {
-
-    loginButton:
-        "signInBtn",
-
-    signupButton:
-        "signUpBtn",
-
-    logoutButton:
-        "logoutBtn",
-
-    themeToggle:
-        "settingsButton",
-
-    profilePictureInput:
-        "avatarInput",
-
-    workHistoryBtn:
-        "workHistoryButton",
-
-    workHistory:
-        "workHistoryList",
-
-    submitTaskBtn:
-        "submitTaskButton",
-
-    skipTaskBtn:
-        "skipTaskButton",
-
-    skipTaskModal:
-        "skipModal",
-
-    cancelSkipTask:
-        "closeSkipModal",
-
-    adminControlBtn:
-        "adminCenterButton",
-
-    closeAdminCenter:
-        "closeAdminModal",
-
-    adminCenter:
-        "adminModal",
-
-    createTaskBtn:
-        "createTaskButton",
-
-    newTaskType:
-        "taskShape",
-
-    newTaskDuration:
-        "taskDuration",
-
-    newTaskPay:
-        "taskPay",
-
-    adminTasksTable:
-        "adminTasksList",
-
-    adminUsersTable:
-        "usersList",
-
-    adminCoworkersTable:
-        "coworkersList",
-
-    adminPaymentsTable:
-        "paymentsList",
-
-    adminActivityTable:
-        "activityList",
-
-    adminExportCSV:
-        "copyAdminCSV",
-
-    adminExportHTML:
-        "downloadAdminHTML",
-
-    uploadPanel:
-        "customerUploadPanel",
-
-    undoButton:
-        "undoBtn",
-
-    redoButton:
-        "redoBtn",
-
-    runAI:
-        "autoAnnotate",
-
-    annotationCount:
-        "objectCount",
-
-    selectedCount:
-        "selectedObject",
-
-    deleteAnnotation:
-        "deleteSelected"
-};
-
-
-const $ = id =>
-    document.getElementById(
-        ID_ALIASES[id] || id
-    );
-
-
-/* ============================================================
-   DOM REFERENCES
-============================================================ */
-
-const canvas =
-    $("annotationCanvas");
-
-const ctx =
-    canvas
-        ? canvas.getContext("2d")
-        : null;
-
-const workspace =
-    $("canvasWorkspace");
-
-const mediaInput =
-    $("mediaInput");
-
-const sourceVideo =
-    $("sourceVideo");
-
-const emptyWorkspace =
-    $("emptyWorkspace");
-
-const appEl =
-    document.querySelector(
-        ".app"
-    );
-
-const workspaceRoot =
-    $("workspaceRoot");
-
-const annotationsList =
-    $("annotationsList");
-
-const popupEl =
-    $("annotationPopup");
-
-const popupTitle =
-    $("annPopupTitle");
-
-const popupBody =
-    $("annPopupBody");
-
-const popupExpandBtn =
-    $("annPopupExpand");
-
-const filmstripBar =
-    $("filmstripBar");
-
-const filmstripTrack =
-    $("filmstripTrack");
-
-const filmstripLabel =
-    $("filmstripLabel");
-
-const filmstripCurrentLabel =
-    $("filmstripCurrentLabel");
-
-const toastContainer =
-    $("toastContainer");
-
-
-const SESSION_KEY =
-    "annotationAI_session_v1";
-
-
-/* ============================================================
-   STATE
-============================================================ */
-
-const state = {
-
-    mediaType: null,
-
-    image: null,
-
-    imageURL: null,
-
-    videoURL: null,
-
-    videoDuration: 0,
-
-    fps: 30,
-
-    currentFrame: 0,
-
-    totalFrames: 0,
-
-    currentTime: 0,
-
-    videoPlaying: false,
-
-    videoSeeking: false,
-
-    frameCaptureBusy: false,
-
-    animationFrame: null,
-
-
-    scale: 1,
-
-    offsetX: 0,
-
-    offsetY: 0,
-
-    minScale: 0.03,
-
-    maxScale: 25,
-
-
-    annotationType:
-        "box",
-
-    mode:
-        "select",
-
-    annotations: [],
-
-    selectedId:
-        null,
-
-    hoveredId:
-        null,
-
-    nextId:
-        1,
-
-
-    drawing:
-        false,
-
-    drawStart:
-        null,
-
-    drawCurrent:
-        null,
-
-    polygonPoints:
-        [],
-
-
-    pointerDown:
-        false,
-
-    dragging:
-        false,
-
-    panning:
-        false,
-
-    spacePan:
-        false,
-
-    resizeHandle:
-        null,
-
-    dragStartImage:
-        null,
-
-    dragLastImage:
-        null,
-
-    panStart:
-        null,
-
-
-    frameAnnotations:
-        new Map(),
-
-
-    rightPanelOpen:
-        true,
-
-    popupExpanded:
-        false,
-
-    colorMode:
-        "normal",
-
-
-    history:
-        [],
-
-    historyIndex:
-        -1,
-
-
-    detr:
-        null,
-
-    yolo:
-        null,
-
-    segmenter:
-        null,
-
-    aiRunning:
-        false,
-
-
-    pendingVideoRestore:
-        null
-};
-
-
-/* ============================================================
-   AI MODELS
-============================================================ */
-
-const MODELS = {
-
-    detr:
-        "Xenova/detr-resnet-50",
-
-    yolo:
-        "Xenova/yolov9-c",
-
-    panoptic:
-        "Xenova/detr-resnet-50-panoptic"
-};
-
-
-const LABEL_ALIASES = {
-
-    automobile:
-        "car",
-
-    vehicle:
-        "car",
-
-    "motor vehicle":
-        "car",
-
-    human:
-        "person",
-
-    cyclist:
-        "bicycle",
-
-    bike:
-        "bicycle"
-};
-
-
-/* ============================================================
-   INITIALIZATION
-============================================================ */
-
-window.addEventListener(
-    "resize",
-    resizeCanvas
-);
-
-
-/*
- * These calls are intentionally protected.
- * A missing optional workspace element must
- * never prevent Supabase authentication.
- */
-
-try {
-    resizeCanvas();
-} catch (error) {
-    console.warn(
-        "Initial canvas resize skipped:",
-        error
-    );
+   RESET
+   ============================================================ */
+
+* {
+    box-sizing: border-box;
 }
 
-
-try {
-    updateZoomUI();
-} catch (error) {
-    console.warn(
-        "Initial zoom UI skipped:",
-        error
-    );
+html,
+body {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
 }
 
+html {
+    font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
 
-try {
-    updateCounts();
-} catch (error) {
-    console.warn(
-        "Initial count update skipped:",
-        error
-    );
+    background: #0b1020;
+    color: #e5e7eb;
+
+    color-scheme: dark;
 }
 
-
-try {
-    updateAnnotationsList();
-} catch (error) {
-    console.warn(
-        "Initial annotation list skipped:",
-        error
-    );
+body {
+    min-height: 100vh;
+    overflow-x: hidden;
+    background:
+        radial-gradient(
+            circle at top left,
+            rgba(59, 130, 246, 0.12),
+            transparent 35%
+        ),
+        #0b1020;
 }
 
-
-try {
-    updateUndoRedoButtons();
-} catch (error) {
-    console.warn(
-        "Initial undo/redo update skipped:",
-        error
-    );
+button,
+input,
+select,
+textarea {
+    font: inherit;
 }
 
-
-try {
-    updateAIEngineAvailability();
-} catch (error) {
-    console.warn(
-        "Initial AI UI skipped:",
-        error
-    );
+button {
+    cursor: pointer;
 }
 
-
-try {
-    updateColorLegend();
-} catch (error) {
-    console.warn(
-        "Initial color legend skipped:",
-        error
-    );
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
 }
 
-
-try {
-    hidePopup();
-} catch (error) {
-    console.warn(
-        "Initial popup hide skipped:",
-        error
-    );
+img,
+video,
+canvas {
+    max-width: 100%;
 }
 
-
-try {
-    loadSessionOnStartup();
-} catch (error) {
-    console.warn(
-        "Session restore skipped:",
-        error
-    );
+.hidden,
+[hidden] {
+    display: none !important;
 }
 
 
 /* ============================================================
-   UPLOAD
-============================================================ */
+   SCROLLBARS
+   ============================================================ */
 
-if (mediaInput) {
+::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
 
-    mediaInput.addEventListener(
-        "change",
-        async event => {
+::-webkit-scrollbar-track {
+    background: #111827;
+}
 
-            if (
-                typeof canUseUpload ===
-                "function" &&
-                !canUseUpload()
-            ) {
+::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 999px;
+}
 
-                alert(
-                    "Customer upload is not available for this role."
-                );
-
-                event.target.value =
-                    "";
-
-                return;
-            }
-                        sourceVideo.currentTime =
-                time;
-
-
-            /*
-             * Some browsers do not emit seeked when
-             * the requested time is effectively the
-             * current time.
-             */
-            if (
-                Math.abs(
-                    sourceVideo.currentTime -
-                    time
-                ) <
-                0.001
-            ) {
-
-                state.videoSeeking =
-                    false;
-
-                sourceVideo
-                    .removeEventListener(
-                        "seeked",
-                        done
-                    );
-
-                resolve();
-
-            }
-
-        }
-    );
-
+::-webkit-scrollbar-thumb:hover {
+    background: #4b5563;
 }
 
 
 /* ============================================================
-   CAPTURE VIDEO FRAME
-============================================================ */
+   LOGIN
+   ============================================================ */
 
-async function captureVideoFrame() {
+#loginPage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 
-    if (
-        !sourceVideo ||
-        sourceVideo.readyState <
-            2
-    ) {
+    padding: 24px;
 
-        return;
+    background:
+        radial-gradient(
+            circle at 20% 20%,
+            rgba(37, 99, 235, 0.20),
+            transparent 35%
+        ),
+        radial-gradient(
+            circle at 80% 80%,
+            rgba(124, 58, 237, 0.18),
+            transparent 35%
+        ),
+        #080d1a;
+}
 
-    }
+.auth-container,
+.login-container,
+.auth-card {
+    width: min(440px, 100%);
 
+    padding: 32px;
 
-    if (
-        state.frameCaptureBusy
-    ) {
+    border: 1px solid #263247;
 
-        return;
+    border-radius: 18px;
 
-    }
+    background:
+        rgba(17, 24, 39, 0.94);
 
+    box-shadow:
+        0 25px 70px rgba(0, 0, 0, 0.45);
+}
 
-    state.frameCaptureBusy =
-        true;
+.auth-logo,
+.login-logo {
+    text-align: center;
+    margin-bottom: 24px;
+}
 
+.auth-logo h1,
+.login-logo h1 {
+    margin: 0;
 
-    try {
+    font-size: 28px;
+    font-weight: 800;
 
-        const width =
-            sourceVideo.videoWidth;
+    letter-spacing: -0.8px;
+}
 
-        const height =
-            sourceVideo.videoHeight;
+.auth-logo p,
+.login-logo p {
+    margin: 8px 0 0;
 
-
-        if (
-            !width ||
-            !height
-        ) {
-
-            return;
-
-        }
-
-
-        const frameCanvas =
-            document.createElement(
-                "canvas"
-            );
-
-
-        frameCanvas.width =
-            width;
-
-        frameCanvas.height =
-            height;
-
-
-        const frameCtx =
-            frameCanvas.getContext(
-                "2d"
-            );
-
-
-        frameCtx.drawImage(
-            sourceVideo,
-            0,
-            0,
-            width,
-            height
-        );
-
-
-        const image =
-            new Image();
-
-
-        image.src =
-            frameCanvas.toDataURL(
-                "image/jpeg",
-                0.92
-            );
-
-
-        await new Promise(
-            (
-                resolve,
-                reject
-            ) => {
-
-                image.onload =
-                    resolve;
-
-                image.onerror =
-                    reject;
-
-            }
-        );
-
-
-        state.image =
-            image;
-
-    } finally {
-
-        state.frameCaptureBusy =
-            false;
-
-    }
-
+    color: #9ca3af;
 }
 
 
 /* ============================================================
-   CLEANUP MEDIA
-============================================================ */
+   FORMS
+   ============================================================ */
 
-function cleanupMedia() {
+label {
+    display: block;
 
-    if (
-        state.imageURL
-    ) {
+    margin-bottom: 7px;
 
-        URL.revokeObjectURL(
-            state.imageURL
-        );
+    color: #d1d5db;
 
-        state.imageURL =
-            null;
+    font-size: 13px;
+    font-weight: 600;
+}
 
-    }
+input,
+select,
+textarea {
+    width: 100%;
 
+    border: 1px solid #334155;
 
-    if (
-        state.videoURL
-    ) {
+    border-radius: 9px;
 
-        URL.revokeObjectURL(
-            state.videoURL
-        );
+    background: #111827;
 
-        state.videoURL =
-            null;
+    color: #f9fafb;
 
-    }
+    padding: 11px 13px;
 
+    outline: none;
 
-    if (sourceVideo) {
+    transition:
+        border-color 0.15s ease,
+        box-shadow 0.15s ease;
+}
 
-        sourceVideo.pause();
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: #60a5fa;
 
-        sourceVideo.removeAttribute(
-            "src"
-        );
+    box-shadow:
+        0 0 0 3px rgba(96, 165, 250, 0.12);
+}
 
-        sourceVideo.load();
-
-    }
-
-
-    state.image =
-        null;
-
-    state.mediaType =
-        null;
-
-    state.videoDuration =
-        0;
-
-    state.currentFrame =
-        0;
-
-    state.currentTime =
-        0;
-
-    state.totalFrames =
-        0;
-
-    state.annotations =
-        [];
-
-    state.frameAnnotations =
-        new Map();
-
-    state.selectedId =
-        null;
-
-
-    if (
-        $("videoControlsPanel")
-    ) {
-
-        $("videoControlsPanel")
-            .style.display =
-            "none";
-
-    }
-
-
-    if (filmstripBar) {
-
-        filmstripBar.style.display =
-            "none";
-
-    }
-
-
-    hidePopup();
-
-    updateCounts();
-
-    updateAnnotationsList();
-
+.form-group {
+    margin-bottom: 17px;
 }
 
 
 /* ============================================================
-   VIDEO UI
-============================================================ */
+   BUTTONS
+   ============================================================ */
 
-function updateVideoUI() {
+button {
+    border: 1px solid #334155;
 
-    if (
-        $("currentFrame")
-    ) {
+    border-radius: 9px;
 
-        $("currentFrame")
-            .textContent =
-            String(
-                state.currentFrame +
-                1
-            );
+    background: #1f2937;
 
-    }
+    color: #f9fafb;
 
+    padding: 10px 15px;
 
-    if (
-        $("totalFrames")
-    ) {
-
-        $("totalFrames")
-            .textContent =
-            String(
-                Math.max(
-                    1,
-                    state.totalFrames
-                )
-            );
-
-    }
-
-
-    if (
-        $("currentTime")
-    ) {
-
-        $("currentTime")
-            .textContent =
-            formatVideoTime(
-                state.currentTime
-            );
-
-    }
-
-
-    if (
-        $("duration")
-    ) {
-
-        $("duration")
-            .textContent =
-            formatVideoTime(
-                state.videoDuration
-            );
-
-    }
-
-
-    const slider =
-        $("frameSlider");
-
-
-    if (slider) {
-
-        slider.max =
-            Math.max(
-                0,
-                state.totalFrames -
-                1
-            );
-
-        slider.value =
-            state.currentFrame;
-
-    }
-
-
-    if (
-        filmstripCurrentLabel
-    ) {
-
-        filmstripCurrentLabel
-            .textContent =
-            `Frame ${state.currentFrame + 1}`;
-
-    }
-
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        transform 0.1s ease;
 }
 
+button:hover:not(:disabled) {
+    background: #273449;
+    border-color: #475569;
+}
 
-function formatVideoTime(
-    seconds
-) {
+button:active:not(:disabled) {
+    transform: translateY(1px);
+}
 
-    const value =
-        Number(
-            seconds
-        );
+.primary-btn,
+#signInBtn,
+#createTaskButton {
+    border-color: #2563eb;
 
+    background: #2563eb;
 
-    if (
-        !Number.isFinite(
-            value
-        )
-    ) {
+    color: white;
+}
 
-        return "00:00";
+.primary-btn:hover:not(:disabled),
+#signInBtn:hover:not(:disabled),
+#createTaskButton:hover:not(:disabled) {
+    background: #1d4ed8;
+}
 
-    }
+.danger-btn {
+    border-color: #dc2626;
+    background: #b91c1c;
+    color: white;
+}
 
-
-    const total =
-        Math.max(
-            0,
-            Math.floor(
-                value
-            )
-        );
-
-
-    const minutes =
-        Math.floor(
-            total / 60
-        );
-
-
-    const secs =
-        total % 60;
-
-
-    return (
-        String(
-            minutes
-        ).padStart(
-            2,
-            "0"
-        ) +
-        ":" +
-        String(
-            secs
-        ).padStart(
-            2,
-            "0"
-        )
-    );
-
+.success-btn {
+    border-color: #16a34a;
+    background: #15803d;
+    color: white;
 }
 
 
 /* ============================================================
-   FRAME CONTROLS
-============================================================ */
+   AUTH BUTTON AREA
+   ============================================================ */
 
-$("frameSlider")?.addEventListener(
-    "input",
-    async event => {
-
-        const frame =
-            Number(
-                event.target.value
-            );
-
-
-        await seekVideoFrame(
-            frame
-        );
-
-    }
-);
-
-
-$("prevFrame")?.addEventListener(
-    "click",
-    async () => {
-
-        await seekVideoFrame(
-            state.currentFrame -
-            1
-        );
-
-    }
-);
-
-
-$("nextFrame")?.addEventListener(
-    "click",
-    async () => {
-
-        await seekVideoFrame(
-            state.currentFrame +
-            1
-        );
-
-    }
-);
-
-
-$("playVideo")?.addEventListener(
-    "click",
-    toggleVideoPlayback
-);
-
-
-async function toggleVideoPlayback() {
-
-    if (
-        !sourceVideo ||
-        state.mediaType !==
-            "video"
-    ) {
-
-        return;
-
-    }
-
-
-    if (
-        state.videoPlaying
-    ) {
-
-        sourceVideo.pause();
-
-        state.videoPlaying =
-            false;
-
-        updatePlayButton();
-
-        return;
-
-    }
-
-
-    try {
-
-        await sourceVideo.play();
-
-        state.videoPlaying =
-            true;
-
-        updatePlayButton();
-
-    } catch (
-        error
-    ) {
-
-        console.warn(
-            "Video playback failed:",
-            error
-        );
-
-        showToast(
-            "Unable to play this video."
-        );
-
-    }
-
+.auth-actions,
+.login-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
 }
 
+.auth-actions button,
+.login-actions button {
+    flex: 1;
+}
 
-function updatePlayButton() {
+#forgotPassword {
+    display: block;
 
-    const button =
-        $("playVideo");
+    margin-top: 14px;
 
+    width: 100%;
 
-    if (!button) {
-        return;
-    }
+    border: 0;
 
+    background: transparent;
 
-    button.textContent =
-        state.videoPlaying
-            ? "❚❚"
-            : "▶";
+    color: #60a5fa;
 
+    padding: 5px;
+}
+
+#forgotPassword:hover {
+    color: #93c5fd;
 }
 
 
 /* ============================================================
-   VIDEO EVENTS
-============================================================ */
+   AUTH STATUS
+   ============================================================ */
 
-sourceVideo?.addEventListener(
-    "timeupdate",
-    () => {
+#authStatus,
+#cloudStatus {
+    margin-top: 14px;
 
-        if (
-            state.videoSeeking
-        ) {
+    min-height: 20px;
 
-            return;
+    color: #9ca3af;
 
-        }
+    font-size: 13px;
+}
 
+#authStatus.error,
+.error {
+    color: #fca5a5;
+}
 
-        state.currentTime =
-            sourceVideo.currentTime;
-
-
-        if (
-            state.fps > 0
-        ) {
-
-            state.currentFrame =
-                Math.max(
-                    0,
-                    Math.min(
-                        state.totalFrames -
-                        1,
-                        Math.round(
-                            sourceVideo.currentTime *
-                            state.fps
-                        )
-                    )
-                );
-
-        }
+.success {
+    color: #86efac;
+}
 
 
-        updateVideoUI();
+/* ============================================================
+   MAIN APPLICATION
+   ============================================================ */
 
-    }
-);
+#authLoggedIn {
+    min-height: 100vh;
+}
 
+.app-shell {
+    min-height: 100vh;
 
-sourceVideo?.addEventListener(
-    "play",
-    () => {
-
-        state.videoPlaying =
-            true;
-
-        updatePlayButton();
-
-    }
-);
+    display: flex;
+    flex-direction: column;
+}
 
 
-sourceVideo?.addEventListener(
-    "pause",
-    () => {
+/* ============================================================
+   TOP NAVIGATION
+   ============================================================ */
 
-        state.videoPlaying =
-            false;
+.topbar,
+.navbar,
+.app-header {
+    min-height: 64px;
 
-        updatePlayButton();
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 
-    }
-);
+    gap: 16px;
+
+    padding: 10px 18px;
+
+    border-bottom: 1px solid #1f2937;
+
+    background:
+        rgba(11, 16, 32, 0.94);
+
+    backdrop-filter: blur(14px);
+
+    position: sticky;
+    top: 0;
+
+    z-index: 100;
+}
+
+.app-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    font-weight: 800;
+}
+
+.nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+
+    flex-wrap: wrap;
+}
+
+.nav-actions button {
+    padding: 8px 11px;
+
+    font-size: 13px;
+}
 
 
-sourceVideo?.addEventListener(
-    "ended",
-    () => {
+/* ============================================================
+   PROFILE HEADER
+   ============================================================ */
 
-        state.videoPlaying =
-            false;
+#profileAvatar,
+.profile-avatar {
+    width: 38px;
+    height: 38px;
 
-        updatePlayButton();
+    border-radius: 50%;
 
-    }
-);
+    object-fit: cover;
+
+    border: 1px solid #334155;
+
+    background: #1f2937;
+}
+
+.profile-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.profile-name {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.profile-role {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+
+#homePage,
+#home,
+#dashboard,
+.dashboard {
+    width: 100%;
+
+    max-width: 1500px;
+
+    margin: 0 auto;
+
+    padding: 24px;
+}
+
+.dashboard-header {
+    margin-bottom: 22px;
+}
+
+.dashboard-header h1 {
+    margin: 0;
+
+    font-size: 28px;
+
+    letter-spacing: -0.5px;
+}
+
+.dashboard-header p {
+    margin: 7px 0 0;
+
+    color: #9ca3af;
+}
+
+
+/* ============================================================
+   DASHBOARD CARDS
+   ============================================================ */
+
+.dashboard-grid,
+.stats-grid,
+.cards-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(
+            auto-fit,
+            minmax(190px, 1fr)
+        );
+
+    gap: 15px;
+
+    margin-bottom: 24px;
+}
+
+.dashboard-card,
+.stat-card {
+    padding: 18px;
+
+    border: 1px solid #253047;
+
+    border-radius: 13px;
+
+    background: #111827;
+}
+
+.dashboard-card-title,
+.stat-title {
+    color: #9ca3af;
+
+    font-size: 12px;
+
+    text-transform: uppercase;
+
+    letter-spacing: 0.5px;
+}
+
+.dashboard-card-value,
+.stat-value {
+    margin-top: 8px;
+
+    font-size: 28px;
+
+    font-weight: 800;
+}
+
+
+/* ============================================================
+   AVAILABLE JOBS
+   ============================================================ */
+
+#availableJobs,
+#jobsList,
+#availableJobsList {
+    display: grid;
+
+    grid-template-columns:
+        repeat(
+            auto-fill,
+            minmax(280px, 1fr)
+        );
+
+    gap: 15px;
+}
+
+.available-job-card {
+    padding: 18px;
+
+    border: 1px solid #273449;
+
+    border-radius: 13px;
+
+    background: #111827;
+
+    transition:
+        transform 0.15s ease,
+        border-color 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+.available-job-card:hover {
+    transform: translateY(-2px);
+
+    border-color: #475569;
+
+    box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.25);
+}
+
+.available-job-card-header {
+    display: flex;
+
+    align-items: flex-start;
+
+    justify-content: space-between;
+
+    gap: 10px;
+}
+
+.available-job-title {
+    font-weight: 750;
+
+    font-size: 16px;
+}
+
+.available-job-meta {
+    display: flex;
+
+    flex-wrap: wrap;
+
+    gap: 7px;
+
+    margin-top: 14px;
+}
+
+.available-job-meta span {
+    padding: 5px 8px;
+
+    border-radius: 6px;
+
+    background: #1f2937;
+
+    color: #cbd5e1;
+
+    font-size: 11px;
+}
+
+.available-job-date {
+    margin-top: 12px;
+
+    color: #64748b;
+
+    font-size: 11px;
+}
+
+.available-job-media {
+    margin-top: 9px;
+
+    color: #94a3b8;
+
+    font-size: 12px;
+}
+
+.available-job-actions {
+    display: flex;
+
+    margin-top: 16px;
+}
+
+.open-task-btn {
+    width: 100%;
+
+    background: #2563eb;
+
+    border-color: #2563eb;
+}
+
+.open-task-btn:hover {
+    background: #1d4ed8;
+}
+
+
+/* ============================================================
+   TASK STATUS
+   ============================================================ */
+
+.task-status {
+    display: inline-flex;
+
+    align-items: center;
+
+    white-space: nowrap;
+
+    padding: 4px 8px;
+
+    border-radius: 999px;
+
+    background: #1f2937;
+
+    color: #cbd5e1;
+
+    font-size: 10px;
+
+    font-weight: 700;
+}
+
+.status-available,
+.status-open {
+    color: #86efac;
+}
+
+.status-pending {
+    color: #fde68a;
+}
+
+.status-in_progress,
+.status-in-progress,
+.status-working {
+    color: #93c5fd;
+}
+
+.status-submitted {
+    color: #c4b5fd;
+}
+
+.status-completed,
+.status-approved {
+    color: #86efac;
+}
+
+.status-rejected {
+    color: #fca5a5;
+}
+
+
+/* ============================================================
+   EMPTY / LOADING
+   ============================================================ */
+
+.jobs-empty,
+.history-empty,
+.jobs-loading {
+    grid-column: 1 / -1;
+
+    padding: 45px 20px;
+
+    text-align: center;
+
+    border: 1px dashed #334155;
+
+    border-radius: 13px;
+
+    color: #94a3b8;
+}
+
+.jobs-empty-icon,
+.history-empty-icon {
+    font-size: 30px;
+
+    margin-bottom: 9px;
+}
+
+.jobs-empty-title,
+.history-empty-title {
+    color: #e5e7eb;
+
+    font-weight: 700;
+}
+
+.jobs-empty-text,
+.history-empty-text {
+    margin-top: 6px;
+
+    font-size: 13px;
+}
+
+
+/* ============================================================
+   WORKSPACE
+   ============================================================ */
+
+#canvasWorkspace,
+.canvas-workspace {
+    position: relative;
+
+    width: 100%;
+
+    min-height: 500px;
+
+    flex: 1;
+
+    overflow: hidden;
+
+    background:
+        #050914;
+}
+
+#annotationCanvas {
+    display: block;
+
+    width: 100%;
+    height: 100%;
+
+    touch-action: none;
+
+    user-select: none;
+}
+
+#emptyWorkspace {
+    position: absolute;
+
+    inset: 0;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    text-align: center;
+
+    color: #64748b;
+
+    pointer-events: none;
+}
+
+
+/* ============================================================
+   ANNOTATION TOOLBAR
+   ============================================================ */
+
+.annotation-toolbar,
+.tool-bar,
+.workspace-toolbar {
+    display: flex;
+
+    align-items: center;
+
+    gap: 7px;
+
+    flex-wrap: wrap;
+
+    padding: 9px;
+
+    border-bottom: 1px solid #1f2937;
+
+    background: #0f172a;
+
+    z-index: 20;
+}
+
+.annotation-toolbar button,
+.tool-bar button {
+    min-width: 38px;
+
+    min-height: 36px;
+
+    padding: 7px 10px;
+}
+
+.annotation-toolbar button.active,
+.tool-bar button.active,
+.annotation-toolbar button[aria-pressed="true"] {
+    border-color: #3b82f6;
+
+    background: #1d4ed8;
+
+    color: white;
+}
+
+
+/* ============================================================
+   ANNOTATION SIDE PANEL
+   ============================================================ */
+
+.annotations-panel,
+.right-panel,
+#annotationsList {
+    background: #0f172a;
+}
+
+.annotations-panel {
+    width: 300px;
+
+    min-width: 250px;
+
+    border-left: 1px solid #1f2937;
+
+    overflow-y: auto;
+}
+
+.annotations-panel-header {
+    padding: 14px;
+
+    border-bottom: 1px solid #1f2937;
+
+    font-weight: 700;
+}
+
+
+/* ============================================================
+   ANNOTATION LIST
+   ============================================================ */
+
+#annotationsList {
+    padding: 8px;
+}
+
+.annotation-item {
+    display: flex;
+
+    align-items: center;
+
+    gap: 9px;
+
+    padding: 9px;
+
+    margin-bottom: 6px;
+
+    border: 1px solid transparent;
+
+    border-radius: 8px;
+
+    background: #111827;
+
+    cursor: pointer;
+}
+
+.annotation-item:hover {
+    border-color: #334155;
+}
+
+.annotation-item.selected,
+.annotation-item.active {
+    border-color: #3b82f6;
+
+    background: #172554;
+}
+
+.annotation-item-label {
+    flex: 1;
+
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+
+    white-space: nowrap;
+
+    font-size: 13px;
+}
 
 
 /* ============================================================
    FILMSTRIP
-============================================================ */
+   ============================================================ */
 
-function buildFilmstrip() {
+#filmstripBar,
+.filmstrip-bar {
+    width: 100%;
 
-    if (
-        !filmstripTrack ||
-        state.mediaType !==
-            "video"
-    ) {
+    border-top: 1px solid #1f2937;
 
-        return;
+    background: #0b1120;
 
-    }
-
-
-    filmstripTrack.innerHTML =
-        "";
-
-
-    const count =
-        Math.min(
-            12,
-            Math.max(
-                1,
-                state.totalFrames
-            )
-        );
-
-
-    for (
-        let index = 0;
-        index < count;
-        index++
-    ) {
-
-        const frame =
-            Math.round(
-                (
-                    index /
-                    Math.max(
-                        1,
-                        count -
-                        1
-                    )
-                ) *
-                Math.max(
-                    0,
-                    state.totalFrames -
-                    1
-                )
-            );
-
-
-        const item =
-            document.createElement(
-                "button"
-            );
-
-
-        item.type =
-            "button";
-
-        item.className =
-            "filmstrip-item";
-
-
-        item.dataset.frame =
-            String(
-                frame
-            );
-
-
-        item.innerHTML = `
-            <span class="filmstrip-frame">
-                ${frame + 1}
-            </span>
-        `;
-
-
-        item.addEventListener(
-            "click",
-            () =>
-                seekVideoFrame(
-                    frame
-                )
-        );
-
-
-        filmstripTrack.appendChild(
-            item
-        );
-
-    }
-
-
-    updateFilmstripSelection();
-
+    padding: 8px;
 }
 
+#filmstripTrack {
+    display: flex;
 
-function updateFilmstripSelection() {
+    gap: 6px;
 
-    if (!filmstripTrack) {
-        return;
-    }
+    overflow-x: auto;
 
+    min-height: 70px;
+}
 
-    filmstripTrack
-        .querySelectorAll(
-            ".filmstrip-item"
-        )
-        .forEach(
-            item => {
+.filmstrip-frame {
+    flex: 0 0 auto;
 
-                const frame =
-                    Number(
-                        item.dataset.frame
-                    );
+    width: 82px;
+    height: 58px;
 
+    border: 1px solid #334155;
 
-                item.classList.toggle(
-                    "active",
-                    frame ===
-                    state.currentFrame
-                );
+    border-radius: 5px;
 
-            }
-        );
+    overflow: hidden;
 
+    background: #111827;
+
+    cursor: pointer;
+}
+
+.filmstrip-frame.active {
+    border-color: #3b82f6;
 }
 
 
 /* ============================================================
-   CANVAS RESIZE
-============================================================ */
+   TASK ACTION BAR
+   ============================================================ */
 
-function resizeCanvas() {
+#taskActionBar,
+.task-action-bar {
+    display: flex;
 
-    if (
-        !canvas ||
-        !workspace
-    ) {
+    align-items: center;
 
-        return;
+    justify-content: space-between;
 
-    }
+    gap: 12px;
 
+    padding: 11px 15px;
 
-    const rect =
-        workspace.getBoundingClientRect();
+    border-top: 1px solid #1f2937;
 
+    background: #0f172a;
 
-    if (
-        rect.width <= 0 ||
-        rect.height <= 0
-    ) {
+    position: sticky;
 
-        return;
+    bottom: 0;
 
-    }
+    z-index: 30;
+}
 
+#taskActionTitle,
+.task-action-title {
+    font-weight: 700;
+}
 
-    const ratio =
-        window.devicePixelRatio ||
-        1;
+#taskActionMeta,
+.task-action-meta {
+    color: #94a3b8;
 
+    font-size: 12px;
+}
 
-    canvas.width =
-        Math.round(
-            rect.width *
-            ratio
-        );
+.task-action-buttons {
+    display: flex;
 
-
-    canvas.height =
-        Math.round(
-            rect.height *
-            ratio
-        );
-
-
-    canvas.style.width =
-        `${rect.width}px`;
-
-    canvas.style.height =
-        `${rect.height}px`;
-
-
-    if (ctx) {
-
-        ctx.setTransform(
-            ratio,
-            0,
-            0,
-            ratio,
-            0,
-            0
-        );
-
-    }
-
-
-    render();
-
+    gap: 8px;
 }
 
 
 /* ============================================================
-   VIEW TRANSFORM
-============================================================ */
+   ADMIN
+   ============================================================ */
 
-function fitView() {
+#adminModal,
+.modal-overlay {
+    position: fixed;
 
-    if (
-        !canvas ||
-        !state.image
-    ) {
+    inset: 0;
 
-        return;
+    z-index: 1000;
 
-    }
+    display: flex;
 
+    align-items: center;
 
-    const rect =
-        canvas.getBoundingClientRect();
+    justify-content: center;
 
+    padding: 20px;
 
-    const imageWidth =
-        state.image.naturalWidth ||
-        state.image.width;
+    background:
+        rgba(0, 0, 0, 0.72);
 
-    const imageHeight =
-        state.image.naturalHeight ||
-        state.image.height;
+    backdrop-filter: blur(5px);
+}
 
+.modal,
+.admin-modal,
+#adminModal > div {
+    width: min(1200px, 100%);
 
-    if (
-        !imageWidth ||
-        !imageHeight
-    ) {
+    max-height: 92vh;
 
-        return;
+    overflow: auto;
 
-    }
+    border: 1px solid #334155;
 
+    border-radius: 15px;
 
-    const scaleX =
-        rect.width /
-        imageWidth;
+    background: #0f172a;
 
+    box-shadow:
+        0 30px 80px rgba(0, 0, 0, 0.55);
+}
 
-    const scaleY =
-        rect.height /
-        imageHeight;
+.modal-header,
+.admin-header {
+    display: flex;
 
+    align-items: center;
 
-    state.scale =
-        Math.min(
-            scaleX,
-            scaleY
-        ) *
-        0.92;
+    justify-content: space-between;
 
+    gap: 12px;
 
-    state.scale =
-        Math.max(
-            state.minScale,
-            Math.min(
-                state.maxScale,
-                state.scale
-            )
-        );
+    padding: 16px 18px;
 
+    border-bottom: 1px solid #1f2937;
 
-    state.offsetX =
-        (
-            rect.width -
-            imageWidth *
-            state.scale
-        ) /
-        2;
+    position: sticky;
 
+    top: 0;
 
-    state.offsetY =
-        (
-            rect.height -
-            imageHeight *
-            state.scale
-        ) /
-        2;
+    background: #0f172a;
 
+    z-index: 5;
+}
 
-    updateZoomUI();
-
+.modal-body,
+.admin-body {
+    padding: 18px;
 }
 
 
 /* ============================================================
-   COORDINATE HELPERS
-============================================================ */
+   ADMIN TABS
+   ============================================================ */
 
-function screenToImage(
-    clientX,
-    clientY
-) {
+.admin-tabs {
+    display: flex;
 
-    if (
-        !canvas
-    ) {
+    gap: 5px;
 
-        return {
-            x: 0,
-            y: 0
-        };
+    overflow-x: auto;
 
-    }
+    padding: 10px;
 
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-
-    const x =
-        clientX -
-        rect.left;
-
-
-    const y =
-        clientY -
-        rect.top;
-
-
-    return {
-
-        x:
-            (
-                x -
-                state.offsetX
-            ) /
-            state.scale,
-
-        y:
-            (
-                y -
-                state.offsetY
-            ) /
-            state.scale
-
-    };
-
+    border-bottom: 1px solid #1f2937;
 }
 
+.admin-tabs button.active,
+.admin-tab.active {
+    background: #2563eb;
 
-function imageToScreen(
-    x,
-    y
-) {
+    border-color: #2563eb;
 
-    return {
-
-        x:
-            state.offsetX +
-            x *
-            state.scale,
-
-        y:
-            state.offsetY +
-            y *
-            state.scale
-
-    };
-
-}
-
-
-function clamp(
-    value,
-    min,
-    max
-) {
-
-    return Math.max(
-        min,
-        Math.min(
-            max,
-            value
-        )
-    );
-
+    color: white;
 }
 
 
 /* ============================================================
-   ZOOM
-============================================================ */
+   ADMIN TABLES
+   ============================================================ */
 
-function setZoom(
-    nextScale,
-    centerX,
-    centerY
-) {
+table {
+    width: 100%;
 
-    if (
-        !canvas
-    ) {
-
-        return;
-
-    }
-
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-
-    const cx =
-        Number.isFinite(
-            centerX
-        )
-            ? centerX -
-              rect.left
-            : rect.width /
-              2;
-
-
-    const cy =
-        Number.isFinite(
-            centerY
-        )
-            ? centerY -
-              rect.top
-            : rect.height /
-              2;
-
-
-    const oldScale =
-        state.scale;
-
-
-    const newScale =
-        clamp(
-            nextScale,
-            state.minScale,
-            state.maxScale
-        );
-
-
-    if (
-        oldScale ===
-        newScale
-    ) {
-
-        return;
-
-    }
-
-
-    const imageX =
-        (
-            cx -
-            state.offsetX
-        ) /
-        oldScale;
-
-
-    const imageY =
-        (
-            cy -
-            state.offsetY
-        ) /
-        oldScale;
-
-
-    state.scale =
-        newScale;
-
-
-    state.offsetX =
-        cx -
-        imageX *
-        newScale;
-
-
-    state.offsetY =
-        cy -
-        imageY *
-        newScale;
-
-
-    updateZoomUI();
-
-    render();
-
+    border-collapse: collapse;
 }
 
+th,
+td {
+    padding: 10px 9px;
 
-function zoomIn() {
+    border-bottom: 1px solid #1f2937;
 
-    setZoom(
-        state.scale *
-        1.2
-    );
+    text-align: left;
 
+    vertical-align: middle;
+
+    font-size: 12px;
 }
 
+th {
+    color: #94a3b8;
 
-function zoomOut() {
+    font-size: 11px;
 
-    setZoom(
-        state.scale /
-        1.2
-    );
+    text-transform: uppercase;
 
+    letter-spacing: 0.35px;
 }
 
-
-function resetZoom() {
-
-    fitView();
-
-    render();
-
-}
-
-
-$("zoomIn")?.addEventListener(
-    "click",
-    zoomIn
-);
-
-
-$("zoomOut")?.addEventListener(
-    "click",
-    zoomOut
-);
-
-
-$("resetZoom")?.addEventListener(
-    "click",
-    resetZoom
-);
-
-
-function updateZoomUI() {
-
-    const zoom =
-        $("zoomLevel");
-
-
-    if (zoom) {
-
-        zoom.textContent =
-            `${Math.round(
-                state.scale *
-                100
-            )}%`;
-
-    }
-
+tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
 }
 
 
 /* ============================================================
-   MOUSE WHEEL ZOOM
-============================================================ */
+   ADMIN USER / ROLE CONTROLS
+   ============================================================ */
 
-canvas?.addEventListener(
-    "wheel",
-    event => {
+.role-select {
+    min-width: 110px;
 
-        event.preventDefault();
+    padding: 7px 8px;
 
-
-        const factor =
-            event.deltaY < 0
-                ? 1.12
-                : 0.89;
-
-
-        setZoom(
-            state.scale *
-            factor,
-            event.clientX,
-            event.clientY
-        );
-
-    },
-    {
-        passive: false
-    }
-);
-
-
-/* ============================================================
-   POINTER HELPERS
-============================================================ */
-
-function getPointerPosition(
-    event
-) {
-
-    return screenToImage(
-        event.clientX,
-        event.clientY
-    );
-
-}
-
-
-function distance(
-    a,
-    b
-) {
-
-    const dx =
-        a.x -
-        b.x;
-
-    const dy =
-        a.y -
-        b.y;
-
-
-    return Math.sqrt(
-        dx * dx +
-        dy * dy
-    );
-
-}
-
-
-function normalizeBox(
-    start,
-    end
-) {
-
-    const x =
-        Math.min(
-            start.x,
-            end.x
-        );
-
-
-    const y =
-        Math.min(
-            start.y,
-            end.y
-        );
-
-
-    const width =
-        Math.abs(
-            end.x -
-            start.x
-        );
-
-
-    const height =
-        Math.abs(
-            end.y -
-            start.y
-        );
-
-
-    return {
-        x,
-        y,
-        width,
-        height
-    };
-
+    font-size: 12px;
 }
 
 
 /* ============================================================
-   CANVAS POINTER DOWN
-============================================================ */
+   PROFILE MODAL
+   ============================================================ */
 
-canvas?.addEventListener(
-    "pointerdown",
-    event => {
+#profileModal {
+    position: fixed;
 
-        if (
-            event.button !==
-            0
-        ) {
+    inset: 0;
 
-            return;
+    z-index: 900;
 
-        }
+    display: flex;
 
+    align-items: center;
 
-        canvas.setPointerCapture(
-            event.pointerId
-        );
+    justify-content: center;
 
+    padding: 20px;
 
-        state.pointerDown =
-            true;
+    background:
+        rgba(0, 0, 0, 0.70);
+}
 
+.profile-modal-content {
+    width: min(500px, 100%);
 
-        const point =
-            getPointerPosition(
-                event
-            );
+    max-height: 90vh;
 
+    overflow-y: auto;
 
-        if (
-            state.spacePan ||
-            state.mode ===
-            "pan"
-        ) {
+    padding: 24px;
 
-            state.panning =
-                true;
+    border: 1px solid #334155;
 
-            state.panStart = {
+    border-radius: 16px;
 
-                clientX:
-                    event.clientX,
+    background: #0f172a;
+}
 
-                clientY:
-                    event.clientY,
+#profileLargeAvatar {
+    width: 100px;
+    height: 100px;
 
-                offsetX:
-                    state.offsetX,
+    display: block;
 
-                offsetY:
-                    state.offsetY
+    margin: 0 auto 15px;
 
-            };
+    border-radius: 50%;
 
-            return;
+    object-fit: cover;
 
-        }
+    border: 2px solid #334155;
+}
 
+#profileScreenName {
+    text-align: center;
 
-        if (
-            state.annotationType ===
-            "polygon"
-        ) {
+    font-size: 20px;
 
-            handlePolygonPointerDown(
-                point
-            );
+    font-weight: 800;
+}
 
-            return;
+#profileScreenRole,
+#profileScreenEmail {
+    display: block;
 
-        }
+    text-align: center;
 
+    margin-top: 5px;
 
-        if (
-            state.annotationType ===
-            "segmentation"
-        ) {
+    color: #94a3b8;
 
-            handleSegmentationPointerDown(
-                point
-            );
-
-            return;
-
-        }
-
-
-        if (
-            state.mode ===
-            "select"
-        ) {
-
-            const selected =
-                findAnnotationAtPoint(
-                    point
-                );
-
-
-            if (selected) {
-
-                state.selectedId =
-                    selected.id;
-
-                state.dragging =
-                    true;
-
-                state.dragStartImage =
-                    point;
-
-                state.dragLastImage =
-                    point;
-
-                pushHistory();
-
-                updateAnnotationsList();
-
-                render();
-
-                return;
-
-            }
-
-
-            state.selectedId =
-                null;
-
-            hidePopup();
-
-            updateAnnotationsList();
-
-            render();
-
-            return;
-
-        }
-
-
-        if (
-            state.mode ===
-            "draw"
-        ) {
-
-            state.drawing =
-                true;
-
-            state.drawStart =
-                point;
-
-            state.drawCurrent =
-                point;
-
-            return;
-
-        }
-
-    }
-);
-
-
-/* ============================================================
-   CANVAS POINTER MOVE
-============================================================ */
-
-canvas?.addEventListener(
-    "pointermove",
-    event => {
-
-        if (
-            !state.pointerDown
-        ) {
-
-            const point =
-                getPointerPosition(
-                    event
-                );
-
-
-            const hovered =
-                findAnnotationAtPoint(
-                    point
-                );
-
-
-            const id =
-                hovered?.id ||
-                null;
-
-
-            if (
-                id !==
-                state.hoveredId
-            ) {
-
-                state.hoveredId =
-                    id;
-
-                render();
-
-            }
-
-
-            return;
-
-        }
-
-
-        if (
-            state.panning &&
-            state.panStart
-        ) {
-
-            const dx =
-                event.clientX -
-                state.panStart.clientX;
-
-
-            const dy =
-                event.clientY -
-                state.panStart.clientY;
-
-
-            state.offsetX =
-                state.panStart.offsetX +
-                dx;
-
-
-            state.offsetY =
-                state.panStart.offsetY +
-                dy;
-
-
-            render();
-
-            return;
-
-        }
-
-
-        const point =
-            getPointerPosition(
-                event
-            );
-
-
-        if (
-            state.dragging &&
-            state.selectedId
-        ) {
-
-            moveSelectedAnnotation(
-                point
-            );
-
-            return;
-
-        }
-
-
-        if (
-            state.drawing
-        ) {
-
-            state.drawCurrent =
-                point;
-
-            render();
-
-            return;
-
-        }
-
-
-        if (
-            state.annotationType ===
-            "polygon" &&
-            state.polygonPoints.length
-        ) {
-
-            state.drawCurrent =
-                point;
-
-            render();
-
-        }
-
-    }
-);
-
-
-/* ============================================================
-   CANVAS POINTER UP
-============================================================ */
-
-canvas?.addEventListener(
-    "pointerup",
-    event => {
-
-        state.pointerDown =
-            false;
-
-
-        if (
-            canvas.hasPointerCapture(
-                event.pointerId
-            )
-        ) {
-
-            canvas.releasePointerCapture(
-                event.pointerId
-            );
-
-        }
-
-
-        if (
-            state.panning
-        ) {
-
-            state.panning =
-                false;
-
-            state.panStart =
-                null;
-
-            return;
-
-        }
-
-
-        if (
-            state.dragging
-        ) {
-
-            state.dragging =
-                false;
-
-            state.dragStartImage =
-                null;
-
-            state.dragLastImage =
-                null;
-
-            saveFrame();
-
-            updateAnnotationsList();
-
-            render();
-
-            return;
-
-        }
-
-
-        if (
-            state.drawing
-        ) {
-
-            state.drawing =
-                false;
-
-            const start =
-                state.drawStart;
-
-            const end =
-                getPointerPosition(
-                    event
-                );
-
-
-            state.drawStart =
-                null;
-
-            state.drawCurrent =
-                null;
-
-
-            if (
-                start &&
-                end
-            ) {
-
-                createBoxAnnotation(
-                    start,
-                    end
-                );
-
-            }
-
-
-            return;
-
-        }
-
-    }
-);
-
-
-/* ============================================================
-   POINTER CANCEL
-============================================================ */
-
-canvas?.addEventListener(
-    "pointercancel",
-    () => {
-
-        state.pointerDown =
-            false;
-
-        state.panning =
-            false;
-
-        state.dragging =
-            false;
-
-        state.drawing =
-            false;
-
-        state.drawStart =
-            null;
-
-        state.drawCurrent =
-            null;
-
-        state.panStart =
-            null;
-
-    }
-);
-
-
-/* ============================================================
-   KEYBOARD
-============================================================ */
-
-window.addEventListener(
-    "keydown",
-    event => {
-
-        if (
-            event.code ===
-            "Space" &&
-            !isTypingTarget(
-                event.target
-            )
-        ) {
-
-            state.spacePan =
-                true;
-
-            event.preventDefault();
-
-        }
-
-
-        if (
-            event.key ===
-            "Delete"
-        ) {
-
-            if (
-                !isTypingTarget(
-                    event.target
-                )
-            ) {
-
-                deleteSelectedAnnotation();
-
-            }
-
-        }
-
-
-        if (
-            (
-                event.ctrlKey ||
-                event.metaKey
-            ) &&
-            event.key.toLowerCase() ===
-            "z"
-        ) {
-
-            event.preventDefault();
-
-
-            if (
-                event.shiftKey
-            ) {
-
-                redo();
-
-            } else {
-
-                undo();
-
-            }
-
-        }
-
-
-        if (
-            (
-                event.ctrlKey ||
-                event.metaKey
-            ) &&
-            event.key.toLowerCase() ===
-            "y"
-        ) {
-
-            event.preventDefault();
-
-            redo();
-
-        }
-
-    }
-);
-
-
-window.addEventListener(
-    "keyup",
-    event => {
-
-        if (
-            event.code ===
-            "Space"
-        ) {
-
-            state.spacePan =
-                false;
-
-        }
-
-    }
-);
-
-
-function isTypingTarget(
-    target
-) {
-
-    if (!target) {
-        return false;
-    }
-
-
-    const tag =
-        target.tagName?.toLowerCase();
-
-
-    return (
-        tag ===
-            "input" ||
-        tag ===
-            "textarea" ||
-        tag ===
-            "select" ||
-        target.isContentEditable
-    );
-
+    font-size: 13px;
 }
 
 
 /* ============================================================
-   ANNOTATION CREATION
-============================================================ */
+   PASSWORD RESET
+   ============================================================ */
 
-function createBoxAnnotation(
-    start,
-    end
-) {
+#passwordResetModal {
+    position: fixed;
 
-    const box =
-        normalizeBox(
-            start,
-            end
-        );
+    inset: 0;
 
+    z-index: 1100;
 
-    if (
-        box.width <
-            2 ||
-        box.height <
-            2
-    ) {
+    display: flex;
 
-        return;
+    align-items: center;
 
-    }
+    justify-content: center;
 
+    padding: 20px;
 
-    const annotation = {
+    background:
+        rgba(0, 0, 0, 0.75);
+}
 
-        id:
-            `ann-${Date.now()}-${state.nextId++}`,
+.password-reset-content {
+    width: min(430px, 100%);
 
-        type:
-            "box",
+    padding: 24px;
 
-        class_name:
-            $("className")
-                ?.value
-                ?.trim() ||
-            "object",
+    border: 1px solid #334155;
 
-        x:
-            box.x,
+    border-radius: 15px;
 
-        y:
-            box.y,
-
-        width:
-            box.width,
-
-        height:
-            box.height,
-
-        score:
-            1,
-
-        ai_generated:
-            false,
-
-        corrected:
-            false,
-
-        frame_number:
-            state.currentFrame
-
-    };
-
-
-    pushHistory();
-
-
-    state.annotations.push(
-        annotation
-    );
-
-
-    state.selectedId =
-        annotation.id;
-
-
-    saveFrame();
-
-    updateAnnotationsList();
-
-    updateCounts();
-
-    render();
-
+    background: #0f172a;
 }
 
 
 /* ============================================================
-   POLYGON
-============================================================ */
+   SKIP MODAL
+   ============================================================ */
 
-function handlePolygonPointerDown(
-    point
-) {
+#skipModal {
+    position: fixed;
 
-    if (
-        !state.polygonPoints.length
-    ) {
+    inset: 0;
 
-        pushHistory();
+    z-index: 1050;
 
-        state.polygonPoints = [
-            point
-        ];
+    display: flex;
 
-        state.mode =
-            "draw";
+    align-items: center;
 
-        render();
+    justify-content: center;
 
-        return;
+    padding: 20px;
 
-    }
-
-
-    const first =
-        state.polygonPoints[0];
-
-
-    if (
-        distance(
-            point,
-            first
-        ) <
-        12 /
-        Math.max(
-            state.scale,
-            0.01
-        )
-    ) {
-
-        finishPolygon();
-
-        return;
-
-    }
-
-
-    state.polygonPoints.push(
-        point
-    );
-
-
-    render();
-
-}
-
-
-function finishPolygon() {
-
-    const points =
-        state.polygonPoints;
-
-
-    if (
-        points.length <
-        3
-    ) {
-
-        state.polygonPoints =
-            [];
-
-        render();
-
-        return;
-
-    }
-
-
-    const annotation = {
-
-        id:
-            `ann-${Date.now()}-${state.nextId++}`,
-
-        type:
-            "polygon",
-
-        class_name:
-            $("className")
-                ?.value
-                ?.trim() ||
-            "object",
-
-        points:
-            points.map(
-                point => ({
-                    x:
-                        point.x,
-
-                    y:
-                        point.y
-                })
-            ),
-
-        score:
-            1,
-
-        ai_generated:
-            false,
-
-        corrected:
-            false,
-
-        frame_number:
-            state.currentFrame
-
-    };
-
-
-    state.annotations.push(
-        annotation
-    );
-
-
-    state.selectedId =
-        annotation.id;
-
-
-    state.polygonPoints =
-        [];
-
-    state.drawCurrent =
-        null;
-
-    state.mode =
-        "select";
-
-
-    saveFrame();
-
-    updateAnnotationsList();
-
-    updateCounts();
-
-    render();
-
+    background:
+        rgba(0, 0, 0, 0.72);
 }
 
 
 /* ============================================================
-   SEGMENTATION
-============================================================ */
+   TOASTS
+   ============================================================ */
 
-function handleSegmentationPointerDown(
-    point
-) {
+#toastContainer {
+    position: fixed;
 
-    /*
-     * Segmentation is represented as a polygon
-     * in the saved annotation structure.
-     */
+    right: 18px;
 
-    handlePolygonPointerDown(
-        point
-    );
+    bottom: 18px;
 
+    z-index: 2000;
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 9px;
+
+    width: min(360px, calc(100vw - 36px));
+
+    pointer-events: none;
 }
 
+.toast {
+    pointer-events: auto;
 
-/* ============================================================
-   MOVE SELECTED
-============================================================ */
+    padding: 12px 14px;
 
-function moveSelectedAnnotation(
-    point
-) {
+    border: 1px solid #334155;
 
-    const annotation =
-        state.annotations.find(
-            item =>
-                item.id ===
-                state.selectedId
-        );
+    border-radius: 9px;
 
+    background: #111827;
 
-    if (!annotation) {
-        return;
-    }
+    color: #f9fafb;
 
+    box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.35);
 
-    const previous =
-        state.dragLastImage;
-
-
-    if (!previous) {
-
-        state.dragLastImage =
-            point;
-
-        return;
-
-    }
-
-
-    const dx =
-        point.x -
-        previous.x;
-
-
-    const dy =
-        point.y -
-        previous.y;
-
-
-    if (
-        annotation.type ===
-        "box"
-    ) {
-
-        annotation.x +=
-            dx;
-
-        annotation.y +=
-            dy;
-
-    } else if (
-        Array.isArray(
-            annotation.points
-        )
-    ) {
-
-        annotation.points =
-            annotation.points.map(
-                item => ({
-                    x:
-                        item.x +
-                        dx,
-
-                    y:
-                        item.y +
-                        dy
-                })
-            );
-
-    }
-
-
-    state.dragLastImage =
-        point;
-
-
-    render();
-
+    animation:
+        toast-in 0.2s ease-out;
 }
 
-
-/* ============================================================
-   ANNOTATION HIT TEST
-============================================================ */
-
-function findAnnotationAtPoint(
-    point
-) {
-
-    for (
-        let index =
-            state.annotations.length -
-            1;
-        index >= 0;
-        index--
-    ) {
-
-        const annotation =
-            state.annotations[
-                index
-            ];
-
-
-        if (
-            annotation.type ===
-            "box"
-        ) {
-
-            if (
-                point.x >=
-                    annotation.x &&
-                point.x <=
-                    annotation.x +
-                    annotation.width &&
-                point.y >=
-                    annotation.y &&
-                point.y <=
-                    annotation.y +
-                    annotation.height
-            ) {
-
-                return annotation;
-
-            }
-
-        }
-
-
-        if (
-            Array.isArray(
-                annotation.points
-            ) &&
-            pointInPolygon(
-                point,
-                annotation.points
-            )
-        ) {
-
-            return annotation;
-
-        }
-
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
     }
 
-
-    return null;
-
-}
-
-
-function pointInPolygon(
-    point,
-    points
-) {
-
-    let inside =
-        false;
-
-
-    for (
-        let i = 0,
-            j = points.length - 1;
-        i < points.length;
-        j = i++
-    ) {
-
-        const xi =
-            points[i].x;
-
-        const yi =
-            points[i].y;
-
-        const xj =
-            points[j].x;
-
-        const yj =
-            points[j].y;
-
-
-        const intersect =
-            (
-                yi >
-                    point.y
-            ) !==
-            (
-                yj >
-                    point.y
-            ) &&
-            point.x <
-                (
-                    xj -
-                    xi
-                ) *
-                (
-                    point.y -
-                    yi
-                ) /
-                (
-                    yj -
-                    yi
-                ) +
-                xi;
-
-
-        if (
-            intersect
-        ) {
-
-            inside =
-                !inside;
-
-        }
-
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
-
-
-    return inside;
-
-}
-
-
-/* ============================================================
-   DELETE
-============================================================ */
-
-$("deleteSelected")?.addEventListener(
-    "click",
-    deleteSelectedAnnotation
-);
-
-
-function deleteSelectedAnnotation() {
-
-    if (
-        !state.selectedId
-    ) {
-
-        showToast(
-            "Select an annotation first."
-        );
-
-        return;
-
-    }
-
-
-    const index =
-        state.annotations.findIndex(
-            annotation =>
-                annotation.id ===
-                state.selectedId
-        );
-
-
-    if (
-        index ===
-        -1
-    ) {
-
-        return;
-
-    }
-
-
-    pushHistory();
-
-
-    state.annotations.splice(
-        index,
-        1
-    );
-
-
-    state.selectedId =
-        null;
-
-
-    saveFrame();
-
-    updateAnnotationsList();
-
-    updateCounts();
-
-    render();
-
-}
-
-
-/* ============================================================
-   ANNOTATION TYPE BUTTONS
-============================================================ */
-
-document
-    .querySelectorAll(
-        "[data-annotation-type]"
-    )
-    .forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    const type =
-                        button.dataset
-                            .annotationType;
-
-
-                    if (
-                        type ===
-                        "box"
-                    ) {
-
-                        state.annotationType =
-                            "box";
-
-                        state.mode =
-                            "draw";
-
-                    } else if (
-                        type ===
-                        "polygon"
-                    ) {
-
-                        state.annotationType =
-                            "polygon";
-
-                        state.mode =
-                            "draw";
-
-                    } else if (
-                        type ===
-                        "segmentation"
-                    ) {
-
-                        state.annotationType =
-                            "segmentation";
-
-                        state.mode =
-                            "draw";
-
-                    } else {
-
-                        state.annotationType =
-                            type;
-
-                    }
-
-
-                    state.polygonPoints =
-                        [];
-
-
-                    document
-                        .querySelectorAll(
-                            "[data-annotation-type]"
-                        )
-                        .forEach(
-                            item =>
-                                item.classList.toggle(
-                                    "active",
-                                    item ===
-                                    button
-                                )
-                        );
-
-
-                    render();
-
-                }
-            );
-
-        }
-    );
-
-
-/* ============================================================
-   SELECT / PAN / DRAW TOOLS
-============================================================ */
-
-document
-    .querySelectorAll(
-        "[data-tool]"
-    )
-    .forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    const tool =
-                        button.dataset.tool;
-
-
-                    if (
-                        tool ===
-                        "select"
-                    ) {
-
-                        state.mode =
-                            "select";
-
-                    } else if (
-                        tool ===
-                        "draw"
-                    ) {
-
-                        state.mode =
-                            "draw";
-
-                    } else if (
-                        tool ===
-                        "pan"
-                    ) {
-
-                        state.mode =
-                            "pan";
-
-                    }
-
-
-                    document
-                        .querySelectorAll(
-                            "[data-tool]"
-                        )
-                        .forEach(
-                            item =>
-                                item.classList.toggle(
-                                    "active",
-                                    item ===
-                                    button
-                                )
-                        );
-
-
-                    render();
-
-                }
-            );
-
-        }
-    );
-
-
-/* ============================================================
-   RENDER
-============================================================ */
-
-function render() {
-
-    if (
-        !canvas ||
-        !ctx
-    ) {
-
-        return;
-
-    }
-
-
-    const rect =
-        canvas.getBoundingClientRect();
-
-
-    const width =
-        rect.width;
-
-    const height =
-        rect.height;
-
-
-    ctx.clearRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
-    ctx.save();
-
-
-    /*
-     * Canvas background.
-     */
-
-    ctx.fillStyle =
-        "#101214";
-
-    ctx.fillRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-
-    if (
-        state.image
-    ) {
-
-        const imageWidth =
-            state.image.naturalWidth ||
-            state.image.width;
-
-
-        const imageHeight =
-            state.image.naturalHeight ||
-            state.image.height;
-
-
-        ctx.drawImage(
-            state.image,
-            state.offsetX,
-            state.offsetY,
-            imageWidth *
-                state.scale,
-            imageHeight *
-                state.scale
-        );
-
-
-        renderAnnotations();
-
-        renderDrawingPreview();
-
-    }
-
-
-    ctx.restore();
-
-
-    updateFilmstripSelection();
-
-    updateCounts();
-
-    updateZoomUI();
-
-}
-
-
-/* ============================================================
-   RENDER ANNOTATIONS
-============================================================ */
-
-function renderAnnotations() {
-
-    state.annotations
-        .forEach(
-            annotation => {
-
-                const selected =
-                    annotation.id ===
-                    state.selectedId;
-
-
-                const hovered =
-                    annotation.id ===
-                    state.hoveredId;
-
-
-                if (
-                    annotation.type ===
-                    "box"
-                ) {
-
-                    renderBoxAnnotation(
-                        annotation,
-                        selected,
-                        hovered
-                    );
-
-                } else if (
-                    Array.isArray(
-                        annotation.points
-                    )
-                ) {
-
-                    renderPolygonAnnotation(
-                        annotation,
-                        selected,
-                        hovered
-                    );
-
-                }
-
-            }
-        );
-
-}
-
-
-/* ============================================================
-   RENDER BOX
-============================================================ */
-
-function renderBoxAnnotation(
-    annotation,
-    selected,
-    hovered
-) {
-
-    const topLeft =
-        imageToScreen(
-            annotation.x,
-            annotation.y
-        );
-
-
-    const width =
-        annotation.width *
-        state.scale;
-
-
-    const height =
-        annotation.height *
-        state.scale;
-
-
-    ctx.save();
-
-
-    ctx.lineWidth =
-        selected
-            ? 3
-            : hovered
-                ? 2.5
-                : 2;
-
-
-    ctx.strokeStyle =
-        selected
-            ? "#ff6b00"
-            : "#22c55e";
-
-
-    ctx.fillStyle =
-        selected
-            ? "rgba(255,107,0,.12)"
-            : "rgba(34,197,94,.08)";
-
-
-    ctx.fillRect(
-        topLeft.x,
-        topLeft.y,
-        width,
-        height
-    );
-
-
-    ctx.strokeRect(
-        topLeft.x,
-        topLeft.y,
-        width,
-        height
-    );
-
-
-    renderAnnotationLabel(
-        annotation,
-        topLeft.x,
-        topLeft.y
-    );
-
-
-    if (
-        selected
-    ) {
-
-        renderResizeHandles(
-            topLeft.x,
-            topLeft.y,
-            width,
-            height
-        );
-
-    }
-
-
-    ctx.restore();
-
-}
-
-
-/* ============================================================
-   RENDER POLYGON
-============================================================ */
-
-function renderPolygonAnnotation(
-    annotation,
-    selected,
-    hovered
-) {
-
-    if (
-        !annotation.points ||
-        annotation.points.length <
-            2
-    ) {
-
-        return;
-
-    }
-
-
-    ctx.save();
-
-
-    ctx.beginPath();
-
-
-    annotation.points
-        .forEach(
-            (
-                point,
-                index
-            ) => {
-
-                const screen =
-                    imageToScreen(
-                        point.x,
-                        point.y
-                    );
-
-
-                if (
-                    index ===
-                    0
-                ) {
-
-                    ctx.moveTo(
-                        screen.x,
-                        screen.y
-                    );
-
-                } else {
-
-                    ctx.lineTo(
-                        screen.x,
-                        screen.y
-                    );
-
-                }
-
-            }
-        );
-
-
-    ctx.closePath();
-
-
-    ctx.lineWidth =
-        selected
-            ? 3
-            : hovered
-                ? 2.5
-                : 2;
-
-
-    ctx.strokeStyle =
-        selected
-            ? "#ff6b00"
-            : "#22c55e";
-
-
-    ctx.fillStyle =
-        selected
-            ? "rgba(255,107,0,.12)"
-            : "rgba(34,197,94,.08)";
-
-
-    ctx.fill();
-
-    ctx.stroke();
-
-
-    const first =
-        annotation.points[0];
-
-
-    if (first) {
-
-        const label =
-            imageToScreen(
-                first.x,
-                first.y
-            );
-
-
-        renderAnnotationLabel(
-            annotation,
-            label.x,
-            label.y
-        );
-
-    }
-
-
-    ctx.restore();
-
-}
-
-
-/* ============================================================
-   LABEL
-============================================================ */
-
-function renderAnnotationLabel(
-    annotation,
-    x,
-    y
-) {
-
-    const label =
-        annotation.class_name ||
-        annotation.label ||
-        annotation.type ||
-        "object";
-
-
-    const score =
-        Number(
-            annotation.score
-        );
-
-
-    const text =
-        Number.isFinite(
-            score
-        ) &&
-        score < 1
-            ? `${label} ${Math.round(
-                score * 100
-            )}%`
-            : label;
-
-
-    ctx.save();
-
-
-    ctx.font =
-        "600 12px Inter, Arial, sans-serif";
-
-
-    const metrics =
-        ctx.measureText(
-            text
-        );
-
-
-    const padding =
-        6;
-
-
-    const boxWidth =
-        metrics.width +
-        padding * 2;
-
-
-    const boxHeight =
-        22;
-
-
-    const top =
-        Math.max(
-            0,
-            y -
-            boxHeight
-        );
-
-
-    ctx.fillStyle =
-        "#ff6b00";
-
-
-    ctx.fillRect(
-        x,
-        top,
-        boxWidth,
-        boxHeight
-    );
-
-
-    ctx.fillStyle =
-        "#ffffff";
-
-
-    ctx.textBaseline =
-        "middle";
-
-
-    ctx.fillText(
-        text,
-        x +
-            padding,
-        top +
-            boxHeight /
-                2
-    );
-
-
-    ctx.restore();
-
-}
-
-
-/* ============================================================
-   RESIZE HANDLES
-============================================================ */
-
-function renderResizeHandles(
-    x,
-    y,
-    width,
-    height
-) {
-
-    const size =
-        7;
-
-
-    const points = [
-
-        [x, y],
-
-        [x + width, y],
-
-        [x, y + height],
-
-        [x + width, y + height]
-
-    ];
-
-
-    ctx.save();
-
-
-    ctx.fillStyle =
-        "#ffffff";
-
-    ctx.strokeStyle =
-        "#ff6b00";
-
-
-    points.forEach(
-        point => {
-
-            ctx.beginPath();
-
-            ctx.rect(
-                point[0] -
-                    size /
-                    2,
-                point[1] -
-                    size /
-                    2,
-                size,
-                size
-            );
-
-            ctx.fill();
-
-            ctx.stroke();
-
-        }
-    );
-
-
-    ctx.restore();
-
-}
-
-
-/* ============================================================
-   DRAWING PREVIEW
-============================================================ */
-
-function renderDrawingPreview() {
-
-    if (
-        state.drawing &&
-        state.drawStart &&
-        state.drawCurrent
-    ) {
-
-        const box =
-            normalizeBox(
-                state.drawStart,
-                state.drawCurrent
-            );
-
-
-        const topLeft =
-            imageToScreen(
-                box.x,
-                box.y
-            );
-
-
-        ctx.save();
-
-
-        ctx.setLineDash(
-            [
-                6,
-                4
-            ]
-        );
-
-
-        ctx.lineWidth =
-            2;
-
-        ctx.strokeStyle =
-            "#ff6b00";
-
-        ctx.strokeRect(
-            topLeft.x,
-            topLeft.y,
-            box.width *
-                state.scale,
-            box.height *
-                state.scale
-        );
-
-
-        ctx.restore();
-
-    }
-
-
-    if (
-        state.polygonPoints.length
-    ) {
-
-        ctx.save();
-
-
-        ctx.lineWidth =
-            2;
-
-        ctx.strokeStyle =
-            "#ff6b00";
-
-
-        ctx.beginPath();
-
-
-        state.polygonPoints
-            .forEach(
-                (
-                    point,
-                    index
-                ) => {
-
-                    const screen =
-                        imageToScreen(
-                            point.x,
-                            point.y
-                        );
-
-
-                    if (
-                        index ===
-                        0
-                    ) {
-
-                        ctx.moveTo(
-                            screen.x,
-                            screen.y
-                        );
-
-                    } else {
-
-                        ctx.lineTo(
-                            screen.x,
-                            screen.y
-                        );
-
-                    }
-
-                }
-            );
-
-
-        if (
-            state.drawCurrent
-        ) {
-
-            const current =
-                imageToScreen(
-                    state.drawCurrent.x,
-                    state.drawCurrent.y
-                );
-
-
-            ctx.lineTo(
-                current.x,
-                current.y
-            );
-
-        }
-
-
-        ctx.stroke();
-
-
-        state.polygonPoints
-            .forEach(
-                point => {
-
-                    const screen =
-                        imageToScreen(
-                            point.x,
-                            point.y
-                        );
-
-
-                    ctx.beginPath();
-
-                    ctx.arc(
-                        screen.x,
-                        screen.y,
-                        4,
-                        0,
-                        Math.PI * 2
-                    );
-
-                    ctx.fillStyle =
-                        "#ff6b00";
-
-                    ctx.fill();
-
-                }
-            );
-
-
-        ctx.restore();
-
-    }
-
-}
-
-
-/* ============================================================
-   COUNTS
-============================================================ */
-
-function updateCounts() {
-    const count = state.annotations.length;
-
-    const objectCount = $("objectCount");
-    const annotationCount = $("annotationCount");
-
-    if (objectCount) {
-        objectCount.textContent = String(count);
-    }
-
-    if (annotationCount) {
-        annotationCount.textContent = String(count);
-    }
-
-    const selectedObject = $("selectedObject");
-    const selectedCount = $("selectedCount");
-
-    if (selectedObject) {
-        selectedObject.textContent = state.selectedId ? "1" : "0";
-    }
-
-    if (selectedCount) {
-        selectedCount.textContent = state.selectedId
-            ? "1 selected"
-            : "0 selected";
-    }
-
-    if (state.mediaType === "video") {
-        updateFilmstripTicks();
-    }
-}
-
-
-/* ============================================================
-   ANNOTATIONS LIST
-============================================================ */
-
-
-
-
-function renderAnnotationListItem(
-    annotation
-) {
-
-    const selected =
-        annotation.id ===
-        state.selectedId;
-
-
-    return `
-        <button
-            type="button"
-            class="annotation-list-item ${
-                selected
-                    ? "active"
-                    : ""
-            }"
-            data-annotation-id="${escapeHTML(
-                annotation.id
-            )}"
-        >
-            <span class="annotation-list-main">
-                <strong>
-                    ${escapeHTML(
-                        annotation.class_name ||
-                        annotation.label ||
-                        "Object"
-                    )}
-                </strong>
-
-                <small>
-                    ${escapeHTML(
-                        shapeLabel(
-                            annotation.type
-                        )
-                    )}
-                </small>
-            </span>
-
-            <span class="annotation-list-score">
-                ${
-                    Number.isFinite(
-                        Number(
-                            annotation.score
-                        )
-                    )
-                        ? `${Math.round(
-                            Number(
-                                annotation.score
-                            ) *
-                            100
-                        )}%`
-                        : ""
-                }
-            </span>
-        </button>
-    `;
-
 }
 
 
 /* ============================================================
    POPUP
-============================================================ */
+   ============================================================ */
 
-function showAnnotationPopup(
-    annotation
-) {
+#annotationPopup {
+    position: fixed;
 
-    if (
-        !popupEl
-    ) {
+    z-index: 700;
 
-        return;
+    max-width: 340px;
 
-    }
+    border: 1px solid #334155;
 
+    border-radius: 10px;
 
-    if (popupTitle) {
+    background: #111827;
 
-        popupTitle.textContent =
-            annotation.class_name ||
-            annotation.label ||
-            "Annotation";
+    box-shadow:
+        0 20px 50px rgba(0, 0, 0, 0.45);
 
-    }
-
-
-    if (popupBody) {
-
-        popupBody.innerHTML = `
-            <div>
-                <span>Type</span>
-                <strong>
-                    ${escapeHTML(
-                        shapeLabel(
-                            annotation.type
-                        )
-                    )}
-                </strong>
-            </div>
-
-            <div>
-                <span>Score</span>
-                <strong>
-                    ${
-                        Number.isFinite(
-                            Number(
-                                annotation.score
-                            )
-                        )
-                            ? `${Math.round(
-                                Number(
-                                    annotation.score
-                                ) *
-                                100
-                            )}%`
-                            : "—"
-                    }
-                </strong>
-            </div>
-        `;
-
-    }
-
-
-    popupEl.style.display =
-        "block";
-
-
-    popupEl.classList.toggle(
-        "expanded",
-        state.popupExpanded
-    );
-
+    overflow: hidden;
 }
 
+#annPopupTitle {
+    padding: 11px 13px;
 
+    border-bottom: 1px solid #1f2937;
 
+    font-weight: 700;
+}
 
+#annPopupBody {
+    padding: 12px 13px;
 
-popupExpandBtn?.addEventListener(
-    "click",
-    () => {
+    color: #cbd5e1;
 
-        state.popupExpanded =
-            !state.popupExpanded;
-
-
-        popupEl?.classList.toggle(
-            "expanded",
-            state.popupExpanded
-        );
-
-    }
-);
-
-
-/* ============================================================
-   ESCAPE HTML
-============================================================ */
-
-function escapeHTML(
-    value
-) {
-
-    return String(
-        value ??
-        ""
-    )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
-
+    font-size: 12px;
 }
 
 
 /* ============================================================
-   MB
-============================================================ */
+   HISTORY
+   ============================================================ */
 
-function formatMB(
-    bytes
-) {
+#workHistoryList,
+#historyList,
+#workHistory {
+    display: flex;
 
-    const value =
-        Number(
-            bytes
-        );
+    flex-direction: column;
 
-
-    if (
-        !Number.isFinite(
-            value
-        )
-    ) {
-
-        return "0.00";
-
-    }
-
-
-    return (
-        value /
-        (
-            1024 *
-            1024
-        )
-    ).toFixed(
-        2
-    );
-
+    gap: 7px;
 }
 
-popupExpandBtn?.addEventListener(
-    "click",
-    () => {
-        state.popupExpanded =
-            !state.popupExpanded;
+.history-item {
+    display: flex;
 
-        popupEl?.classList.toggle(
-            "expanded",
-            state.popupExpanded
-        );
+    align-items: flex-start;
 
-        popupExpandBtn.classList.toggle(
-            "expanded",
-            state.popupExpanded
-        );
-    }
-);
+    gap: 11px;
 
-function hidePopup() {
-    if (!popupEl) return;
+    padding: 12px;
 
-    popupEl.style.display =
-        "none";
+    border: 1px solid #263247;
 
-    popupEl.dataset.id =
-        "";
+    border-radius: 9px;
+
+    background: #111827;
+
+    cursor: pointer;
 }
 
-/* ============================================================
-   ANNOTATION LIST
-============================================================ */
-
-function updateAnnotationsList() {
-    if (!annotationsList) {
-        return;
-    }
-
-    if (
-        !state.annotations.length
-    ) {
-        annotationsList.innerHTML = `
-            <div class="details-empty">
-                <div class="details-icon">□</div>
-
-                <strong>
-                    No annotations yet
-                </strong>
-
-                <span>
-                    Draw a box, polygon,
-                    or run Auto Annotate.
-                </span>
-            </div>
-        `;
-
-        return;
-    }
-
-    annotationsList.innerHTML =
-        state.annotations.map(
-            a => {
-                const dotColor =
-                    state.colorMode ===
-                    "occlusion"
-                        ? occlusionColor(
-                            a.occlusion
-                        )
-                        : state.colorMode ===
-                          "truncation"
-                            ? truncationColor(
-                                a.truncation
-                            )
-                            : null;
-
-                const dotStyle =
-                    dotColor
-                        ? ` style="background:${dotColor}"`
-                        : "";
-
-                return `
-                    <div
-                        class="ann-row ${
-                            a.id ===
-                            state.selectedId
-                                ? "selected"
-                                : ""
-                        }"
-                        data-id="${escapeHTML(
-                            a.id
-                        )}"
-                    >
-                        <span
-                            class="ann-row-dot"
-                            ${dotStyle}
-                        ></span>
-
-                        <div class="ann-row-main">
-                            <div class="ann-row-label">
-                                ${escapeHTML(
-                                    a.label ||
-                                    "unknown"
-                                )}
-                            </div>
-
-                            <div class="ann-row-meta">
-                                ${escapeHTML(
-                                    a.type
-                                )}
-                                •
-                                ${
-                                    a.corrected
-                                        ? "corrected"
-                                        : "AI"
-                                }
-                            </div>
-                        </div>
-
-                        <span class="ann-row-badge">
-                            ${
-                                a.occlusion ??
-                                0
-                            }%
-                        </span>
-                    </div>
-                `;
-            }
-        ).join("");
-
-    annotationsList
-        .querySelectorAll(
-            ".ann-row"
-        )
-        .forEach(
-            row => {
-                row.addEventListener(
-                    "click",
-                    () => {
-                        state.selectedId =
-                            row.dataset.id;
-
-                        updateSelected();
-                    }
-                );
-            }
-        );
+.history-item:hover {
+    border-color: #475569;
 }
 
+.history-item-icon {
+    width: 30px;
+    height: 30px;
+
+    flex: 0 0 30px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border-radius: 50%;
+
+    background: #1e293b;
+
+    color: #93c5fd;
+
+    font-weight: 800;
+}
+
+.history-item-content {
+    min-width: 0;
+
+    flex: 1;
+}
+
+.history-item-title {
+    color: #f3f4f6;
+
+    font-weight: 700;
+
+    font-size: 13px;
+}
+
+.history-item-action {
+    margin-top: 3px;
+
+    color: #94a3b8;
+
+    font-size: 12px;
+}
+
+.history-item-description {
+    margin-top: 5px;
+
+    color: #64748b;
+
+    font-size: 11px;
+}
+
+.history-item-time {
+    flex: 0 0 auto;
+
+    color: #64748b;
+
+    font-size: 10px;
+}
+
+.history-item-status {
+    display: inline-block;
+
+    margin-top: 6px;
+
+    padding: 3px 7px;
+
+    border-radius: 999px;
+
+    background: #1f2937;
+
+    color: #94a3b8;
+
+    font-size: 10px;
+}
 
 
 /* ============================================================
-   OCCLUSION / TRUNCATION COLORS
-============================================================ */
+   COWORKER
+   ============================================================ */
 
-function occlusionColor(
-    value
-) {
-    const v =
-        Number(
-            value ?? 0
-        );
-
-    if (v >= 80) {
-        return "#ef4444";
-    }
-
-    if (v >= 50) {
-        return "#f59e0b";
-    }
-
-    if (v >= 20) {
-        return "#eab308";
-    }
-
-    return "#22c55e";
+#coworkerDashboard {
+    width: 100%;
 }
 
-function truncationColor(
-    value
-) {
-    if (
-        !value ||
-        value === "NONE"
-    ) {
-        return "#22c55e";
-    }
+#coworkerWorkbench {
+    display: flex;
 
-    return "#f97316";
+    flex-direction: column;
+
+    gap: 10px;
+
+    padding: 18px;
+
+    border: 1px solid #273449;
+
+    border-radius: 13px;
+
+    background: #111827;
 }
 
-/* ============================================================
-   COLOR MODE
-============================================================ */
+.coworker-actions {
+    display: flex;
 
-$("colorMode")?.addEventListener(
-    "change",
-    event => {
-        state.colorMode =
-            event.target.value;
+    flex-wrap: wrap;
 
-        updateAnnotationsList();
-        render();
-    }
-);
-
-function updateColorLegend() {
-    const legend =
-        $("colorLegend");
-
-    if (!legend) return;
-
-    legend.innerHTML = `
-        <span class="legend-chip">
-            <span
-                class="legend-dot"
-                style="background:#22c55e"
-            ></span>
-
-            Clear
-        </span>
-
-        <span class="legend-chip">
-            <span
-                class="legend-dot"
-                style="background:#eab308"
-            ></span>
-
-            Partial
-        </span>
-
-        <span class="legend-chip">
-            <span
-                class="legend-dot"
-                style="background:#ef4444"
-            ></span>
-
-            Heavy
-        </span>
-    `;
+    gap: 9px;
 }
-
-/* ============================================================
-   VIDEO FRAME ANNOTATIONS
-============================================================ */
-
-function saveFrame() {
-    if (
-        state.mediaType !==
-        "video"
-    ) {
-        return;
-    }
-
-    state.frameAnnotations.set(
-        state.currentFrame,
-        cloneAnnotations(
-            state.annotations
-        )
-    );
-
-    updateFilmstripTicks();
-
-    cloudSaveCurrentFrame();
-}
-
-function loadFrameAnnotations() {
-    if (
-        state.mediaType !==
-        "video"
-    ) {
-        return;
-    }
-
-    const saved =
-        state.frameAnnotations.get(
-            state.currentFrame
-        );
-
-    state.annotations =
-        saved
-            ? cloneAnnotations(
-                saved
-            )
-            : [];
-
-    state.selectedId =
-        null;
-
-    resetHistory(
-        state.annotations
-    );
-
-    updateCounts();
-    updateAnnotationsList();
-    hidePopup();
-}
-
-
-
-function updateFilmstripTicks() {
-    if (!filmstripTrack) {
-        return;
-    }
-
-    const ticks =
-        filmstripTrack.querySelectorAll(
-            ".filmstrip-tick"
-        );
-
-    ticks.forEach(
-        tick => {
-            const frame =
-                Number(
-                    tick.dataset.frame
-                );
-
-            const anns =
-                state.frameAnnotations.get(
-                    frame
-                ) || [];
-
-            tick.classList.toggle(
-                "has-ann",
-                anns.length >
-                    0
-            );
-
-            tick.classList.toggle(
-                "current",
-                frame ===
-                    state.currentFrame
-            );
-        }
-    );
-}
-
-function updateFilmstripCurrent() {
-    if (
-        !filmstripCurrentLabel
-    ) {
-        return;
-    }
-
-    filmstripCurrentLabel.textContent =
-        `Frame ${state.currentFrame}`;
-}
-
-
-
-function formatTime(
-    seconds
-) {
-    const minutes =
-        Math.floor(
-            seconds / 60
-        );
-
-    const secs =
-        Math.floor(
-            seconds % 60
-        );
-
-    const millis =
-        Math.floor(
-            (seconds % 1) *
-            1000
-        );
-
-    return (
-        String(
-            minutes
-        ).padStart(
-            2,
-            "0"
-        ) +
-        ":" +
-        String(
-            secs
-        ).padStart(
-            2,
-            "0"
-        ) +
-        "." +
-        String(
-            millis
-        ).padStart(
-            3,
-            "0"
-        )
-    );
-}
-
-/* ============================================================
-   ZOOM UI
-============================================================ */
-
 
 
 /* ============================================================
    AI STATUS
-============================================================ */
+   ============================================================ */
 
-function setAIStatus(
-    message
-) {
-    const status =
-        $("aiStatus");
+.ai-status,
+#aiStatus {
+    display: flex;
 
-    if (status) {
-        status.textContent =
-            message;
-    }
-}
-/* ============================================================
-   AI ANNOTATION ENGINE
-============================================================ */
+    align-items: center;
 
-const AI_CONFIG = {
-    confidenceThreshold: 0.35,
-    maxObjects: 100,
-    defaultLabel: "object",
-    enabled: true
-};
+    gap: 7px;
 
-const AI_LABELS = [
-    "person",
-    "car",
-    "truck",
-    "bus",
-    "motorcycle",
-    "bicycle",
-    "animal",
-    "dog",
-    "cat",
-    "bird",
-    "traffic light",
-    "traffic sign",
-    "building",
-    "tree",
-    "road",
-    "vehicle",
-    "object"
-];
+    min-height: 25px;
 
-let aiModel = null;
-let aiModelLoading = false;
-let aiModelReady = false;
+    color: #94a3b8;
 
-/* ============================================================
-   AI STATUS HELPERS
-============================================================ */
-
-function setAIProgress(
-    percent
-) {
-    const progress =
-        $("aiProgress");
-
-    const bar =
-        $("aiProgressBar");
-
-    if (progress) {
-        progress.value =
-            percent;
-    }
-
-    if (bar) {
-        bar.style.width =
-            `${percent}%`;
-    }
+    font-size: 12px;
 }
 
-function setAILoading(
-    loading
-) {
-    aiModelLoading =
-        loading;
-
-    const button =
-        $("runAI");
-
-    if (button) {
-        button.disabled =
-            loading;
-
-        button.textContent =
-            loading
-                ? "RUNNING AI..."
-                : "AUTO ANNOTATE";
-    }
+.ai-status.running {
+    color: #93c5fd;
 }
 
-/* ============================================================
-   AI MODEL LOADER
-============================================================ */
-
-async function loadAIModel() {
-    if (
-        aiModelReady &&
-        aiModel
-    ) {
-        return aiModel;
-    }
-
-    if (aiModelLoading) {
-        return null;
-    }
-
-    setAILoading(true);
-    setAIStatus(
-        "Preparing AI annotation engine..."
-    );
-    setAIProgress(10);
-
-    try {
-        /*
-         * The application supports the browser-side AI workflow.
-         * If an external model is available in the page, use it.
-         * Otherwise the fallback detector below remains available.
-         */
-
-        if (
-            window.annotationAI &&
-            typeof
-                window.annotationAI.detect ===
-                "function"
-        ) {
-            aiModel =
-                window.annotationAI;
-
-            aiModelReady =
-                true;
-
-            setAIProgress(100);
-            setAIStatus(
-                "AI model ready."
-            );
-
-            return aiModel;
-        }
-
-        /*
-         * Optional TensorFlow/COCO-SSD integration.
-         * This does not break the application when the library
-         * has not been loaded.
-         */
-        if (
-            window.cocoSsd &&
-            typeof
-                window.cocoSsd.load ===
-                "function"
-        ) {
-            setAIProgress(25);
-
-            aiModel =
-                await window.cocoSsd.load();
-
-            aiModelReady =
-                true;
-
-            setAIProgress(100);
-            setAIStatus(
-                "AI model ready."
-            );
-
-            return aiModel;
-        }
-
-        /*
-         * If no model library exists, keep the workflow usable.
-         * The fallback uses image processing and creates a
-         * reviewable annotation rather than crashing.
-         */
-        aiModel =
-            {
-                fallback: true
-            };
-
-        aiModelReady =
-            true;
-
-        setAIProgress(100);
-
-        setAIStatus(
-            "AI fallback mode ready. Add a browser AI model for object detection."
-        );
-
-        return aiModel;
-
-    } catch (error) {
-        console.error(
-            "AI model loading failed:",
-            error
-        );
-
-        aiModel =
-            {
-                fallback: true
-            };
-
-        aiModelReady =
-            true;
-
-        setAIStatus(
-            "AI model unavailable. Using fallback annotation mode."
-        );
-
-        return aiModel;
-
-    } finally {
-        setAILoading(false);
-    }
+.ai-status.success {
+    color: #86efac;
 }
 
-/* ============================================================
-   RUN AUTO ANNOTATE
-============================================================ */
-
-$("runAI")?.addEventListener(
-    "click",
-    runAutoAnnotate
-);
-
-async function runAutoAnnotate() {
-    if (
-        !canUseAIAnnotations()
-    ) {
-        showToast(
-            "AI annotation is not available for this account."
-        );
-
-        return;
-    }
-
-    if (
-        !state.image &&
-        state.mediaType !==
-            "video"
-    ) {
-        showToast(
-            "Load an image or video first."
-        );
-
-        return;
-    }
-
-    if (
-        state.mediaType ===
-        "video" &&
-        !state.image
-    ) {
-        captureCurrentVideoFrame();
-    }
-
-    setAILoading(true);
-    setAIProgress(5);
-    setAIStatus(
-        "Starting AI annotation..."
-    );
-
-    try {
-        const model =
-            await loadAIModel();
-
-        if (!model) {
-            throw new Error(
-                "AI model is not available."
-            );
-        }
-
-        setAIProgress(35);
-
-        let predictions = [];
-
-        if (
-            !model.fallback &&
-            typeof model.detect ===
-                "function"
-        ) {
-            predictions =
-                await model.detect(
-                    state.image
-                );
-        } else {
-            predictions =
-                await fallbackDetect();
-        }
-
-        setAIProgress(70);
-
-        const normalized =
-            normalizeAIPredictions(
-                predictions
-            );
-
-        if (
-            !normalized.length
-        ) {
-            setAIStatus(
-                "AI found no objects to annotate."
-            );
-
-            showToast(
-                "No objects detected."
-            );
-
-            setAIProgress(100);
-
-            return;
-        }
-
-        let added = 0;
-
-        normalized
-            .slice(
-                0,
-                AI_CONFIG.maxObjects
-            )
-            .forEach(
-                prediction => {
-                    if (
-                        prediction.score <
-                        AI_CONFIG.confidenceThreshold
-                    ) {
-                        return;
-                    }
-
-                    createAIAnnotation(
-                        prediction
-                    );
-
-                    added++;
-                }
-            );
-
-        setAIProgress(100);
-
-        setAIStatus(
-            `AI added ${added} annotation${
-                added === 1
-                    ? ""
-                    : "s"
-            }.`
-        );
-
-        showToast(
-            `${added} AI annotation${
-                added === 1
-                    ? ""
-                    : "s"
-            } created`
-        );
-
-        updateCounts();
-        updateAnnotationsList();
-        render();
-
-        saveFrame();
-        saveSession();
-
-        await cloudSaveAllAnnotations();
-
-    } catch (error) {
-        console.error(
-            "Auto annotation failed:",
-            error
-        );
-
-        setAIStatus(
-            "AI annotation failed. Please try again."
-        );
-
-        showToast(
-            "AI annotation failed."
-        );
-
-    } finally {
-        setAILoading(false);
-        setAIProgress(100);
-    }
-}
-
-/* ============================================================
-   CHECK AI PERMISSION
-============================================================ */
-
-function canUseAIAnnotations() {
-    const role =
-        CLOUD.profile?.role;
-
-    if (!role) {
-        return false;
-    }
-
-    /*
-     * Coworkers are deliberately allowed to use
-     * autogenerated / AI annotations.
-     *
-     * They are not given customer-upload or
-     * manual annotation-type controls.
-     */
-    return [
-        "admin",
-        "staff",
-        "reviewer",
-        "customer",
-        "coworker_2d_box",
-        "coworker_polygon",
-        "coworker_segmentation"
-    ].includes(
-        role
-    );
-}
-
-/* ============================================================
-   NORMALIZE AI PREDICTIONS
-============================================================ */
-
-function normalizeAIPredictions(
-    predictions
-) {
-    if (
-        !Array.isArray(
-            predictions
-        )
-    ) {
-        return [];
-    }
-
-    return predictions
-        .map(
-            prediction => {
-
-                const score =
-                    Number(
-                        prediction.score ??
-                        prediction.confidence ??
-                        0
-                    );
-
-                let label =
-                    prediction.class ??
-                    prediction.label ??
-                    prediction.name ??
-                    AI_CONFIG.defaultLabel;
-
-                label =
-                    normalizeLabel(
-                        label
-                    );
-
-
-                let bbox =
-                    prediction.bbox ??
-                    prediction.box ??
-                    prediction.boundingBox;
-
-
-                if (
-                    !Array.isArray(
-                        bbox
-                    )
-                ) {
-
-                    if (
-                        bbox &&
-                        typeof bbox ===
-                            "object"
-                    ) {
-
-                        bbox = [
-                            bbox.x ??
-                                bbox.left ??
-                                0,
-
-                            bbox.y ??
-                                bbox.top ??
-                                0,
-
-                            bbox.width ??
-                                0,
-
-                            bbox.height ??
-                                0
-                        ];
-
-                    }
-
-                }
-
-
-                if (
-                    !Array.isArray(
-                        bbox
-                    ) ||
-                    bbox.length <
-                        4
-                ) {
-
-                    return null;
-
-                }
-
-
-                let [
-                    x,
-                    y,
-                    width,
-                    height
-                ] =
-                    bbox.map(
-                        Number
-                    );
-
-
-                if (
-                    !Number.isFinite(
-                        x
-                    ) ||
-                    !Number.isFinite(
-                        y
-                    ) ||
-                    !Number.isFinite(
-                        width
-                    ) ||
-                    !Number.isFinite(
-                        height
-                    )
-                ) {
-
-                    return null;
-
-                }
-
-
-                /*
-                 * Some detection libraries return
-                 * [x1, y1, x2, y2].
-                 *
-                 * Detect that format when the second
-                 * pair is clearly greater than the
-                 * first pair.
-                 */
-                if (
-                    width >
-                        x &&
-                    height >
-                        y &&
-                    (
-                        width >
-                            (
-                                state.image?.naturalWidth ||
-                                state.image?.width ||
-                                0
-                            ) *
-                            0.25 ||
-                        height >
-                            (
-                                state.image?.naturalHeight ||
-                                state.image?.height ||
-                                0
-                            ) *
-                            0.25
-                    )
-                ) {
-
-                    const x2 =
-                        width;
-
-                    const y2 =
-                        height;
-
-                    width =
-                        x2 -
-                        x;
-
-                    height =
-                        y2 -
-                        y;
-
-                }
-
-
-                const imageWidth =
-                    state.image?.naturalWidth ||
-                    state.image?.width ||
-                    1;
-
-                const imageHeight =
-                    state.image?.naturalHeight ||
-                    state.image?.height ||
-                    1;
-
-
-                /*
-                 * Handle normalized 0–1 coordinates.
-                 */
-                if (
-                    Math.abs(x) <=
-                        1 &&
-                    Math.abs(y) <=
-                        1 &&
-                    Math.abs(width) <=
-                        1 &&
-                    Math.abs(height) <=
-                        1
-                ) {
-
-                    x *=
-                        imageWidth;
-
-                    y *=
-                        imageHeight;
-
-                    width *=
-                        imageWidth;
-
-                    height *=
-                        imageHeight;
-
-                }
-
-
-                x =
-                    clamp(
-                        x,
-                        0,
-                        imageWidth
-                    );
-
-                y =
-                    clamp(
-                        y,
-                        0,
-                        imageHeight
-                    );
-
-                width =
-                    clamp(
-                        width,
-                        1,
-                        imageWidth -
-                            x
-                    );
-
-                height =
-                    clamp(
-                        height,
-                        1,
-                        imageHeight -
-                            y
-                    );
-
-
-                return {
-
-                    label,
-
-                    score:
-                        clamp(
-                            score,
-                            0,
-                            1
-                        ),
-
-                    bbox: {
-                        x,
-                        y,
-                        width,
-                        height
-                    }
-
-                };
-
-            }
-        )
-        .filter(
-            Boolean
-        );
-
-}
-
-
-function normalizeLabel(
-    label
-) {
-
-    const clean =
-        String(
-            label ??
-            "object"
-        )
-            .trim()
-            .toLowerCase();
-
-
-    return (
-        LABEL_ALIASES[
-            clean
-        ] ||
-        clean ||
-        "object"
-    );
-
+.ai-status.error {
+    color: #fca5a5;
 }
 
 
 /* ============================================================
-   CREATE AI ANNOTATION
-============================================================ */
+   UPLOAD INPUT
+   ============================================================ */
 
-function createAIAnnotation(
-    prediction
-) {
+input[type="file"] {
+    padding: 8px;
 
-    if (
-        !prediction ||
-        !prediction.bbox
-    ) {
+    cursor: pointer;
+}
 
-        return null;
+input[type="file"]::file-selector-button {
+    margin-right: 9px;
 
-    }
+    border: 1px solid #475569;
 
+    border-radius: 6px;
 
-    const annotation = {
+    background: #1f2937;
 
-        id:
-            `ann-${Date.now()}-${state.nextId++}`,
+    color: #e5e7eb;
 
-        type:
-            "box",
+    padding: 6px 9px;
 
-        label:
-            prediction.label,
-
-        class_name:
-            prediction.label,
-
-        score:
-            prediction.score,
-
-        x:
-            prediction.bbox.x,
-
-        y:
-            prediction.bbox.y,
-
-        width:
-            prediction.bbox.width,
-
-        height:
-            prediction.bbox.height,
-
-        occlusion:
-            0,
-
-        truncation:
-            "NONE",
-
-        ai_generated:
-            true,
-
-        corrected:
-            false,
-
-        export:
-            true,
-
-        frame_number:
-            state.currentFrame
-
-    };
-
-
-    state.annotations.push(
-        annotation
-    );
-
-
-    return annotation;
-
+    cursor: pointer;
 }
 
 
 /* ============================================================
-   FALLBACK DETECTION
-============================================================ */
+   RANGE INPUT
+   ============================================================ */
 
-async function fallbackDetect() {
+input[type="range"] {
+    padding: 0;
 
-    if (
-        !state.image
-    ) {
+    border: 0;
 
-        return [];
+    box-shadow: none;
 
-    }
-
-
-    /*
-     * The fallback deliberately produces no
-     * false "AI" detections from arbitrary pixels.
-     *
-     * It gives the user a safe reviewable region
-     * covering the visible media when no model
-     * library is available.
-     */
-
-    const width =
-        state.image.naturalWidth ||
-        state.image.width;
-
-
-    const height =
-        state.image.naturalHeight ||
-        state.image.height;
-
-
-    if (
-        !width ||
-        !height
-    ) {
-
-        return [];
-
-    }
-
-
-    return [
-        {
-
-            label:
-                "object",
-
-            score:
-                0.36,
-
-            bbox: {
-
-                x:
-                    width *
-                    0.1,
-
-                y:
-                    height *
-                    0.1,
-
-                width:
-                    width *
-                    0.8,
-
-                height:
-                    height *
-                    0.8
-
-            }
-
-        }
-    ];
-
+    background: transparent;
 }
 
 
 /* ============================================================
-   ANNOTATION HISTORY
-============================================================ */
+   RESPONSIVE
+   ============================================================ */
 
-function cloneAnnotations(
-    annotations
-) {
+@media (max-width: 900px) {
 
-    return JSON.parse(
-        JSON.stringify(
-            annotations ||
-            []
-        )
-    );
+    .topbar,
+    .navbar,
+    .app-header {
+        align-items: flex-start;
 
+        flex-direction: column;
+    }
+
+    .nav-actions {
+        width: 100%;
+    }
+
+    #homePage,
+    #home,
+    #dashboard,
+    .dashboard {
+        padding: 16px;
+    }
+
+    .annotations-panel {
+        width: 250px;
+        min-width: 220px;
+    }
+
+    #taskActionBar,
+    .task-action-bar {
+        align-items: flex-start;
+
+        flex-direction: column;
+    }
+
+    .task-action-buttons {
+        width: 100%;
+    }
+
+    .task-action-buttons button {
+        flex: 1;
+    }
 }
 
 
-function resetHistory(
-    annotations
-) {
+@media (max-width: 650px) {
 
-    state.history =
-        [
-            cloneAnnotations(
-                annotations
-            )
-        ];
+    #loginPage {
+        padding: 12px;
+    }
 
-    state.historyIndex =
-        0;
+    .auth-container,
+    .login-container,
+    .auth-card {
+        padding: 22px;
+    }
 
-    updateUndoRedoButtons();
+    .dashboard-grid,
+    .stats-grid,
+    .cards-grid {
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+    }
 
+    #availableJobs,
+    #jobsList,
+    #availableJobsList {
+        grid-template-columns: 1fr;
+    }
+
+    .annotations-panel {
+        display: none;
+    }
+
+    .auth-actions,
+    .login-actions {
+        flex-direction: column;
+    }
+
+    th,
+    td {
+        padding: 8px 6px;
+    }
+
+    .modal-overlay,
+    #adminModal,
+    #profileModal,
+    #passwordResetModal,
+    #skipModal {
+        padding: 8px;
+    }
 }
 
 
-function pushHistory() {
+@media (max-width: 430px) {
 
-    const snapshot =
-        cloneAnnotations(
-            state.annotations
-        );
-
-
-    if (
-        state.historyIndex <
-        state.history.length -
-            1
-    ) {
-
-        state.history =
-            state.history.slice(
-                0,
-                state.historyIndex +
-                    1
-            );
-
+    .dashboard-grid,
+    .stats-grid,
+    .cards-grid {
+        grid-template-columns: 1fr;
     }
 
-
-    state.history.push(
-        snapshot
-    );
-
-
-    if (
-        state.history.length >
-        100
-    ) {
-
-        state.history.shift();
-
-    } else {
-
-        state.historyIndex++;
-
+    .nav-actions button {
+        flex: 1;
     }
 
-
-    if (
-        state.historyIndex <
-        0
-    ) {
-
-        state.historyIndex =
-            0;
-
+    .history-item-time {
+        display: none;
     }
-
-
-    updateUndoRedoButtons();
-
 }
-
-
-function undo() {
-
-    if (
-        state.historyIndex <=
-        0
-    ) {
-
-        return;
-
-    }
-
-
-    state.historyIndex--;
-
-
-    state.annotations =
-        cloneAnnotations(
-            state.history[
-                state.historyIndex
-            ]
-        );
-
-
-    state.selectedId =
-        null;
-
-
-    saveFrame();
-
-    updateAnnotationsList();
-
-    updateCounts();
-
-    render();
-
-}
-
-
-function redo() {
-
-    if (
-        state.historyIndex >=
-        state.history.length -
-            1
-    ) {
-
-        return;
-
-    }
-
-
-    state.historyIndex++;
-
-
-    state.annotations =
-        cloneAnnotations(
-            state.history[
-                state.historyIndex
-            ]
-        );
-
-
-    state.selectedId =
-        null;
-
-
-    saveFrame();
-
-    updateAnnotationsList();
-
-    updateCounts();
-
-    render();
-
-}
-
-
-function updateUndoRedoButtons() {
-
-    const undoButton =
-        $("undoButton");
-
-    const redoButton =
-        $("redoButton");
-
-
-    if (
-        undoButton
-    ) {
-
-        undoButton.disabled =
-            state.historyIndex <=
-            0;
-
-    }
-
-
-    if (
-        redoButton
-    ) {
-
-        redoButton.disabled =
-            state.historyIndex >=
-            state.history.length -
-                1;
-
-    }
-
-}
-
-
-$("undoButton")?.addEventListener(
-    "click",
-    undo
-);
-
-
-$("redoButton")?.addEventListener(
-    "click",
-    redo
-);
 
 
 /* ============================================================
-   UTILITY
-============================================================ */
+   PRINT
+   ============================================================ */
 
-function showToast(
-    message,
-    duration = 3000
-) {
+@media print {
 
-    if (
-        !toastContainer
-    ) {
-
-        console.log(
-            message
-        );
-
-        return;
-
+    .topbar,
+    .navbar,
+    .app-header,
+    .annotation-toolbar,
+    .task-action-bar,
+    button {
+        display: none !important;
     }
 
+    body {
+        background: white;
 
-    const toast =
-        document.createElement(
-            "div"
-        );
-
-
-    toast.className =
-        "toast";
-
-
-    toast.textContent =
-        message;
-
-
-    toastContainer.appendChild(
-        toast
-    );
-
-
-    requestAnimationFrame(
-        () => {
-
-            toast.classList.add(
-                "show"
-            );
-
-        }
-    );
-
-
-    setTimeout(
-        () => {
-
-            toast.classList.remove(
-                "show"
-            );
-
-            setTimeout(
-                () =>
-                    toast.remove(),
-                250
-            );
-
-        },
-        duration
-    );
-
+        color: black;
+    }
 }
-
-
-
+```
