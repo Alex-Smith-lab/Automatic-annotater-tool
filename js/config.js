@@ -1,4 +1,3 @@
-```js
 // ============================================================
 // ANNOTATION AI
 // CONFIGURATION
@@ -7,16 +6,11 @@
 
 export const APP_CONFIG = {
 
-    // --------------------------------------------------------
-    // Application
-    // --------------------------------------------------------
-
     appName: "ANNOTATION AI",
 
     version: "1.0.0",
 
     environment: "production",
-
 
     // --------------------------------------------------------
     // Supabase
@@ -25,21 +19,11 @@ export const APP_CONFIG = {
     supabaseUrl:
         "https://ozcwfcfcwzjjanxfvico.supabase.co",
 
-    // Supabase publishable key.
-    //
-    // This is safe to use in browser-side Supabase code
-    // when Row Level Security (RLS) is correctly configured.
     supabaseAnonKey:
         "sb_publishable_KwVoNQtwp23fiZnrqCao_g_ROVmU3KZ",
 
-    // Legacy anon key.
-    //
-    // Kept as a fallback because some Supabase client
-    // configurations use the JWT anon key instead of the
-    // newer sb_publishable_ key.
     supabaseLegacyAnonKey:
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96Y3dmY2Zjd3pqamFueGZ2aWNvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NTQzODQsImV4cCI6MjEwNDUzMDM4NH0.GcVi9w-OKTOnIj2vio5v81eJaD5RzpOk1oG9hkazCSY",
-
 
     // --------------------------------------------------------
     // Authentication
@@ -59,22 +43,19 @@ export const APP_CONFIG = {
         flowType: "pkce"
     },
 
-
     // --------------------------------------------------------
-    // Local application session
+    // Local session
     // --------------------------------------------------------
 
     sessionKey:
         "annotationAI_session_v1",
 
-
     // --------------------------------------------------------
-    // Default user role
+    // Default role
     // --------------------------------------------------------
 
     defaultRole:
         "customer",
-
 
     // --------------------------------------------------------
     // Admin
@@ -82,7 +63,6 @@ export const APP_CONFIG = {
 
     adminEmail:
         "antonymbali96@gmail.com",
-
 
     // --------------------------------------------------------
     // Storage
@@ -100,9 +80,8 @@ export const APP_CONFIG = {
             "tasks"
     },
 
-
     // --------------------------------------------------------
-    // AI models
+    // AI
     // --------------------------------------------------------
 
     aiModels: {
@@ -117,9 +96,8 @@ export const APP_CONFIG = {
             "Xenova/detr-resnet-50-panoptic"
     },
 
-
     // --------------------------------------------------------
-    // Annotation defaults
+    // Annotation
     // --------------------------------------------------------
 
     annotation: {
@@ -140,9 +118,8 @@ export const APP_CONFIG = {
             5000
     },
 
-
     // --------------------------------------------------------
-    // Upload defaults
+    // Upload
     // --------------------------------------------------------
 
     upload: {
@@ -168,44 +145,145 @@ export const APP_CONFIG = {
         ]
     },
 
-
     // --------------------------------------------------------
-    // Feature switches
+    // Features
     // --------------------------------------------------------
 
     features: {
 
-        authentication:
-            true,
+        authentication: true,
 
-        annotations:
-            true,
+        annotations: true,
 
-        video:
-            true,
+        video: true,
 
-        image:
-            true,
+        image: true,
 
-        ai:
-            true,
+        ai: true,
 
-        history:
-            true,
+        history: true,
 
-        tasks:
-            true,
+        tasks: true,
 
-        admin:
-            true,
+        admin: true,
 
-        profile:
-            true,
+        profile: true,
 
-        coworker:
-            true
+        coworker: true
     }
 };
+
+
+// ============================================================
+// ROLE NORMALIZATION
+// ============================================================
+
+export function normalizeRole(role) {
+
+    const value =
+        String(role || "")
+            .trim()
+            .toLowerCase();
+
+    const aliases = {
+
+        user:
+            "customer",
+
+        customer:
+            "customer",
+
+        client:
+            "customer",
+
+        annotator:
+            "annotator",
+
+        annotation:
+            "annotator",
+
+        reviewer:
+            "reviewer",
+
+        review:
+            "reviewer",
+
+        staff:
+            "staff",
+
+        coworker:
+            "staff",
+
+        worker:
+            "staff",
+
+        admin:
+            "admin",
+
+        administrator:
+            "admin"
+    };
+
+    return (
+        aliases[value] ||
+        APP_CONFIG.defaultRole
+    );
+}
+
+
+// ============================================================
+// ROLE CHECKS
+// ============================================================
+
+export function isAdminRole(role) {
+
+    return (
+        normalizeRole(role) ===
+        "admin"
+    );
+}
+
+
+export function isStaffRole(role) {
+
+    const normalized =
+        normalizeRole(role);
+
+    return (
+        normalized === "staff" ||
+        normalized === "admin"
+    );
+}
+
+
+export function isReviewerRole(role) {
+
+    const normalized =
+        normalizeRole(role);
+
+    return (
+        normalized === "reviewer" ||
+        normalized === "staff" ||
+        normalized === "admin"
+    );
+}
+
+
+export function canAnnotateRole(role) {
+
+    const normalized =
+        normalizeRole(role);
+
+    return [
+        "customer",
+        "annotator",
+        "reviewer",
+        "staff",
+        "admin"
+    ].includes(
+        normalized
+    );
+}
 
 
 // ============================================================
@@ -222,6 +300,7 @@ export function validateConfig() {
             "YOUR_SUPABASE"
         )
     ) {
+
         errors.push(
             "Supabase project URL is missing."
         );
@@ -233,6 +312,7 @@ export function validateConfig() {
             "YOUR_SUPABASE"
         )
     ) {
+
         errors.push(
             "Supabase publishable key is missing."
         );
@@ -253,10 +333,11 @@ export function validateConfig() {
 
 
 // ============================================================
-// COMPATIBILITY GLOBAL
+// GLOBAL COMPATIBILITY
 // ============================================================
 
-window.APP_CONFIG = APP_CONFIG;
+window.APP_CONFIG =
+    APP_CONFIG;
 
 
 // ============================================================
@@ -268,6 +349,4 @@ if (validateConfig()) {
     console.log(
         `${APP_CONFIG.appName} configuration loaded.`
     );
-
 }
-```
