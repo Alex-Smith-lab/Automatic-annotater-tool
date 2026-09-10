@@ -71,17 +71,7 @@
 
                 <div id="workspaceGreeting" class="workspace-greeting"></div>
 
-                <div class="account-actions">
-                    <button id="settingsButton" type="button" class="export-button">
-                        ⚙ Settings
-                    </button>
-                    <button id="workHistoryButton" type="button" class="export-button">
-                        ▣ Work History
-                    </button>
-                    <button id="logoutBtn" type="button" class="export-button">
-                        ↪ Sign Out
-                    </button>
-                </div>
+                <div class="account-actions"></div>
 
                 <input id="avatarInput" type="file" accept="image/*" hidden>
                 <button id="changeAvatarBtn" type="button" class="export-button">
@@ -352,76 +342,52 @@ min_confidence: 0.45"></textarea>
 
     <main class="workspace" id="workspaceRoot">
 
-        <header class="workspace-header">
+        <header class="workspace-header modern-header">
 
-            <div>
-                <div id="fileName"
-                     class="file-name">
+            <div class="workspace-brand-context">
+                <div class="workspace-kicker">ANNOTATION WORKSPACE</div>
+                <div id="fileName" class="file-name">
                     No customer data loaded
                 </div>
-
                 <div class="workspace-subtitle">
-                    <span id="objectCount">0</span>
-                    annotations
-
+                    <span id="objectCount">0</span> annotations
                     <span class="separator">•</span>
-
-                    <span id="annotationMode">
-                        2D BOX
-                    </span>
-
+                    <span id="annotationMode">2D BOX</span>
                     <span class="separator">•</span>
-
-                    Task:
-                    <strong id="currentTaskCode">—</strong>
+                    Task: <strong id="currentTaskCode">—</strong>
                 </div>
             </div>
 
-            <div class="zoom-controls">
-
-                <button id="zoomOut"
-                        type="button">
-                    −
+            <nav class="workspace-nav" aria-label="Workspace navigation">
+                <button id="settingsButton" type="button" class="nav-action" title="Settings">
+                    <span class="nav-icon">⚙</span><span>Settings</span>
                 </button>
-
-                <span id="zoomValue">
-                    100%
-                </span>
-
-                <button id="zoomIn"
-                        type="button">
-                    +
+                <button id="workHistoryButton" type="button" class="nav-action" title="Work history">
+                    <span class="nav-icon">▣</span><span>Work history</span>
                 </button>
-
-                <button id="fitView"
-                        type="button">
-                    FIT
+                <button id="profileButton" type="button" class="nav-action" title="Profile">
+                    <span class="nav-icon">●</span><span>Profile</span>
                 </button>
-
-                <button id="resetView"
-                        type="button">
-                    RESET
-                </button>
-
-                <button id="toggleRightPanel"
-                        type="button"
-                        title="Show/hide annotations panel">
-                    ▤
-                </button>
-
-                <button id="maximizeWorkspace"
-                        type="button"
-                        title="Full screen">
-                    ⛶
-                </button>
-
                 <button id="adminCenterButton"
                         type="button"
-                        class="admin-only-button"
-                        style="display:none;">
-                    ☷ Admin
+                        class="nav-action admin-only-button"
+                        style="display:none;"
+                        title="Admin control center">
+                    <span class="nav-icon">♛</span><span>Admin</span>
                 </button>
+                <button id="logoutBtn" type="button" class="nav-action nav-logout" title="Sign out">
+                    <span class="nav-icon">↪</span><span>Sign out</span>
+                </button>
+            </nav>
 
+            <div class="editor-controls" aria-label="Editor controls">
+                <button id="zoomOut" type="button" title="Zoom out">−</button>
+                <span id="zoomValue">100%</span>
+                <button id="zoomIn" type="button" title="Zoom in">+</button>
+                <button id="fitView" type="button">FIT</button>
+                <button id="resetView" type="button">RESET</button>
+                <button id="toggleRightPanel" type="button" title="Show/hide annotations panel">▤</button>
+                <button id="maximizeWorkspace" type="button" title="Full screen">⛶</button>
             </div>
 
         </header>
@@ -432,6 +398,62 @@ min_confidence: 0.45"></textarea>
              style="display:none;">
         </div>
 
+
+        <!-- =====================================================
+             COWORKER HOME / AVAILABLE WORK
+        ====================================================== -->
+        <section id="coworkerDashboard" class="coworker-dashboard">
+            <div class="dashboard-inner">
+                <div class="dashboard-greeting">
+                    <div class="greeting-avatar" id="dashboardAvatar">AM</div>
+                    <div>
+                        <h1 id="dashboardGreeting">Good morning, coworker! ☀️</h1>
+                        <p>Here’s what’s waiting for you today</p>
+                    </div>
+                </div>
+
+                <div class="dashboard-section-head">
+                    <div>
+                        <span class="dashboard-eyebrow">AVAILABLE WORK</span>
+                        <h2>Jobs ready for you</h2>
+                    </div>
+                    <button id="refreshDashboardJobs" type="button" class="dashboard-refresh">↻ Refresh</button>
+                </div>
+
+                <div id="availableJobs" class="available-jobs">
+                    <div class="dashboard-empty">
+                        <strong>Looking for available work…</strong>
+                        <span>Your assigned and role-matched jobs will appear here.</span>
+                    </div>
+                </div>
+
+                <div id="coworkerWorkbench" class="workbench-banner">
+                    <div class="workbench-person">
+                        <div class="workbench-avatar" id="workbenchAvatar">U</div>
+                        <div>
+                            <span>WORKER</span>
+                            <strong id="workbenchName">Coworker</strong>
+                            <small id="workbenchRole">Role</small>
+                        </div>
+                    </div>
+
+                    <div class="workbench-tools">
+                        <button type="button" class="workbench-tool" data-focus-panel="annotationTypePanel">
+                            <span>◇</span><b>Annotation type</b><small id="workbenchAnnotationType">2D Box</small>
+                        </button>
+                        <button type="button" class="workbench-tool" data-focus-panel="editToolsPanel">
+                            <span>↖</span><b>Edit tool</b><small id="workbenchEditTool">Select</small>
+                        </button>
+                        <button type="button" id="workbenchUpload" class="workbench-tool">
+                            <span>↑</span><b>Video upload</b><small>Image / video</small>
+                        </button>
+                        <button type="button" id="workbenchAI" class="workbench-tool">
+                            <span>✦</span><b>Annotation AI</b><small>Auto annotate</small>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
 
         <!-- CANVAS WORKSPACE -->
 
@@ -788,11 +810,16 @@ min_confidence: 0.45"></textarea>
                             All Tasks
                         </h3>
 
-                        <button id="refreshAdminTasks"
-                                type="button"
-                                class="export-button">
-                            ↻ Refresh
-                        </button>
+                        <div class="admin-export-actions">
+                            <button id="exportSelectedCustomerWork" type="button" class="export-button">
+                                ↓ Export customer work
+                            </button>
+                            <button id="refreshAdminTasks"
+                                    type="button"
+                                    class="export-button">
+                                ↻ Refresh
+                            </button>
+                        </div>
                     </div>
 
                     <div id="adminTasksList"
@@ -1042,6 +1069,60 @@ min_confidence: 0.45"></textarea>
 
     </div>
 
+
+    <!-- =====================================================
+         PROFILE — FULL SCREEN
+    ====================================================== -->
+    <div id="profileModal" class="modal-overlay modern-fullscreen-modal" style="display:none;">
+        <div class="modal profile-modal">
+            <div class="modal-head">
+                <div>
+                    <h2>Profile</h2>
+                    <small>Your account and workspace identity</small>
+                </div>
+                <button id="closeProfileModal" type="button" class="popup-icon-btn">×</button>
+            </div>
+            <div class="profile-screen">
+                <div class="profile-hero">
+                    <div class="profile-large-avatar" id="profileLargeAvatar">U</div>
+                    <div>
+                        <h3 id="profileScreenName">User</h3>
+                        <p id="profileScreenRole">Customer</p>
+                        <span id="profileScreenEmail">—</span>
+                    </div>
+                </div>
+                <div class="profile-actions-grid">
+                    <label class="upload-box profile-upload" for="avatarInput">
+                        <div class="upload-icon">↑</div>
+                        <strong>Change profile picture</strong>
+                        <small>JPG • PNG • WEBP</small>
+                    </label>
+                    <button id="profileHistoryAction" type="button" class="profile-action-card">
+                        <span>▣</span><b>Work history</b><small>Review completed activity</small>
+                    </button>
+                    <button id="profileSettingsAction" type="button" class="profile-action-card">
+                        <span>⚙</span><b>Settings</b><small>Workspace preferences</small>
+                    </button>
+                    <button id="profileSignOutAction" type="button" class="profile-action-card danger-card">
+                        <span>↪</span><b>Sign out</b><small>End this session</small>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =====================================================
+         WAITING FOR ADMIN APPROVAL
+    ====================================================== -->
+    <div id="approvalPage" class="approval-page" style="display:none;">
+        <div class="approval-card">
+            <div class="approval-icon">⏳</div>
+            <span class="approval-kicker">ACCOUNT STATUS</span>
+            <h1>Waiting for admin approval</h1>
+            <p>Your account is currently inactive. An administrator must approve your access before you can continue.</p>
+            <button id="approvalSignIn" type="button" class="primary-button">BACK TO SIGN IN</button>
+        </div>
+    </div>
 
     <!-- =====================================================
          FIRST LOGIN PASSWORD RESET
