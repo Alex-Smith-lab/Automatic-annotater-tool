@@ -4147,7 +4147,7 @@ function formatMB(
             );
 
             render();
-    );
+;
 
     exportInput?.addEventListener(
         "change",
