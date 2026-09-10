@@ -52,6 +52,10 @@ import {
     initializeHome
 } from "./js/home.js";
 
+import {
+    initializeWorkspace
+} from "./js/workspace.js";
+
 
 // ============================================================
 // APPLICATION STATE
@@ -114,565 +118,76 @@ function showStartupError(
 
 
     status.textContent =
-        "Application started, but some features could not be loaded.";
+        error?.message ||
+        "Application startup failed.";
 
 
-    status.classList.add(
-        "error"
-    );
+    status.style.display =
+        "block";
 }
 
 
 // ============================================================
-// CLOUD STATUS
+// SAFE INITIALIZER
 // ============================================================
 
-function updateCloudStatus(
-    session
+async function safeInitialize(
+    name,
+    initializer
 ) {
 
-    const element =
-        $("cloudStatus");
-
-
-    if (!element) {
-
-        return;
-    }
-
-
-    if (!supabase) {
-
-        element.textContent =
-            "Cloud connection not configured";
-
-        element.dataset.status =
-            "offline";
-
-        return;
-    }
-
-
-    if (session?.user) {
-
-        element.textContent =
-            "Cloud connected";
-
-        element.dataset.status =
-            "online";
-
-    } else {
-
-        element.textContent =
-            "Not signed in";
-
-        element.dataset.status =
-            "offline";
-    }
-}
-
-
-// ============================================================
-// APPLICATION VISIBILITY
-// ============================================================
-
-function updateApplicationVisibility(
-    session
-) {
-
-    const loginPage =
-        $("loginPage");
-
-    const authLoggedOut =
-        $("authLoggedOut");
-
-    const authLoggedIn =
-        $("authLoggedIn");
-
-
-    if (session?.user) {
-
-        if (loginPage) {
-
-            loginPage.style.display =
-                "none";
-
-            loginPage.hidden =
-                true;
-        }
-
-
-        if (authLoggedOut) {
-
-            authLoggedOut.style.display =
-                "none";
-
-            authLoggedOut.hidden =
-                true;
-        }
-
-
-        if (authLoggedIn) {
-
-            authLoggedIn.style.display =
-                "";
-
-            authLoggedIn.hidden =
-                false;
-        }
-
-    } else {
-
-        if (loginPage) {
-
-            loginPage.style.display =
-                "";
-
-            loginPage.hidden =
-                false;
-        }
-
-
-        if (authLoggedOut) {
-
-            authLoggedOut.style.display =
-                "";
-
-            authLoggedOut.hidden =
-                false;
-        }
-
-
-        if (authLoggedIn) {
-
-            authLoggedIn.style.display =
-                "none";
-
-            authLoggedIn.hidden =
-                true;
-        }
-    }
-}
-
-
-// ============================================================
-// SESSION HANDLER
-// ============================================================
-
-function handleSession(
-    session
-) {
-
-    appState.session =
-        session ||
-        null;
-
-
-    appState.user =
-        session?.user ||
-        null;
-
-
-    updateCloudStatus(
-        session
-    );
-
-
-    updateApplicationVisibility(
-        session
-    );
-
-
-    window.dispatchEvent(
-
-        new CustomEvent(
-            "app:session",
-            {
-                detail: {
-
-                    session:
-                        appState.session,
-
-                    user:
-                        appState.user
-                }
-            }
-        )
-    );
-}
-
-
-// ============================================================
-// AUTH STATE LISTENER
-// ============================================================
-
-function bindAuthStateListener() {
-
-    if (!supabase) {
-
-        return;
-    }
-
-
-    try {
-
-        onAuthStateChange(
-
-            (
-                event,
-                session
-            ) => {
-
-                console.log(
-                    "Auth event:",
-                    event
-                );
-
-
-                handleSession(
-                    session
-                );
-
-
-                window.dispatchEvent(
-
-                    new CustomEvent(
-                        "app:authChange",
-                        {
-                            detail: {
-
-                                event,
-
-                                session
-                            }
-                        }
-                    )
-                );
-            }
-        );
-
-    } catch (error) {
-
-        console.warn(
-            "Auth listener could not be attached:",
-            error
-        );
-    }
-}
-
-
-// ============================================================
-// APPLICATION EVENTS
-// ============================================================
-
-function bindApplicationEvents() {
-
-    window.addEventListener(
-        "auth:login",
-        event => {
-
-            const user =
-                event.detail?.user ||
-                null;
-
-
-            if (user) {
-
-                appState.user =
-                    user;
-
-                appState.session =
-                    event.detail?.session ||
-                    appState.session;
-            }
-
-
-            updateApplicationVisibility(
-                appState.session
-            );
-
-
-            updateCloudStatus(
-                appState.session
-            );
-        }
-    );
-
-
-    window.addEventListener(
-        "auth:logout",
-        () => {
-
-            appState.user =
-                null;
-
-            appState.session =
-                null;
-
-
-            updateApplicationVisibility(
-                null
-            );
-
-
-            updateCloudStatus(
-                null
-            );
-        }
-    );
-
-
-    window.addEventListener(
-        "home:openTask",
-        event => {
-
-            console.log(
-                "Opening task:",
-                event.detail?.taskId
-            );
-        }
-    );
-
-
-    window.addEventListener(
-        "history:openTask",
-        event => {
-
-            console.log(
-                "Opening history task:",
-                event.detail?.taskId
-            );
-        }
-    );
-
-
-    window.addEventListener(
-        "annotation:loadTaskMedia",
-        event => {
-
-            console.log(
-                "Task media requested:",
-                event.detail
-            );
-        }
-    );
-
-
-    window.addEventListener(
-        "annotation:loadMediaURL",
-        event => {
-
-            console.log(
-                "Media URL requested:",
-                event.detail
-            );
-        }
-    );
-
-
-    window.addEventListener(
-        "home:runAI",
-        () => {
-
-            if (
-                typeof window.runAutoAnnotate ===
-                "function"
-            ) {
-
-                window.runAutoAnnotate();
-            }
-        }
-    );
-
-
-    window.addEventListener(
-        "app:ready",
-        () => {
-
-            document.documentElement.dataset.appReady =
-                "true";
-        }
-    );
-}
-
-
-// ============================================================
-// READY EVENT
-// ============================================================
-
-function dispatchReady() {
-
-    window.dispatchEvent(
-
-        new CustomEvent(
-            "app:ready",
-            {
-                detail: {
-
-                    config:
-                        APP_CONFIG,
-
-                    user:
-                        appState.user,
-
-                    session:
-                        appState.session
-                }
-            }
-        )
-    );
-}
-
-
-// ============================================================
-// LOAD INITIAL SESSION
-// ============================================================
-
-async function loadInitialSession() {
-
-    try {
-
-        const session =
-            await getSession();
-
-
-        handleSession(
-            session
-        );
-
-
-        return session;
-
-    } catch (error) {
-
-        console.warn(
-            "Could not load initial session:",
-            error
-        );
-
-
-        handleSession(
-            null
-        );
-
-
-        return null;
-    }
-}
-
-
-// ============================================================
-// INITIALIZE MODULES
-// ============================================================
-
-async function initializeModules() {
-
-    const modules = [
-
-        [
-            "annotation",
-            initializeAnnotation
-        ],
-
-        [
-            "media",
-            initializeMedia
-        ],
-
-        [
-            "ai",
-            initializeAI
-        ],
-
-        [
-            "tasks",
-            initializeTasks
-        ],
-
-        [
-            "admin",
-            initializeAdmin
-        ],
-
-        [
-            "profile",
-            initializeProfile
-        ],
-
-        [
-            "history",
-            initializeHistory
-        ],
-
-        [
-            "home",
-            initializeHome
-        ],
-
-        [
-            "auth",
-            initializeAuth
-        ]
-    ];
-
-
-    for (
-        const [
-            name,
-            initializer
-        ]
-        of modules
+    if (
+        typeof initializer !==
+        "function"
     ) {
 
+        console.warn(
+            `${name} initializer is not available.`
+        );
+
+        return;
+    }
+
+
+    try {
+
+        const result =
+            initializer();
+
+
         if (
-            typeof initializer !==
+            result &&
+            typeof result.then ===
             "function"
         ) {
 
-            console.warn(
-                `Module "${name}" does not expose an initializer.`
-            );
-
-            continue;
+            await result;
         }
 
+    } catch (error) {
 
-        try {
+        console.error(
+            `${name} initialization failed:`,
+            error
+        );
 
-            await initializer();
-
-        } catch (error) {
-
-            console.error(
-                `Failed to initialize ${name}:`,
-                error
-            );
-
-            // Continue loading other modules.
-        }
+        throw error;
     }
 }
 
 
 // ============================================================
-// INITIALIZE APPLICATION
+// APPLICATION STARTUP
 // ============================================================
 
-export async function initializeApp() {
+async function initializeApplication() {
 
     if (
-        appState.initialized
-    ) {
-
-        return appState;
-    }
-
-
-    if (
+        appState.initialized ||
         appState.initializing
     ) {
 
-        return appState;
+        return;
     }
 
 
@@ -682,103 +197,97 @@ export async function initializeApp() {
 
     try {
 
-        console.log(
-            `${APP_CONFIG.appName || "ANNOTATION AI"} starting...`
+        /*
+         * The annotation engine must be initialized
+         * before media, AI and task restoration.
+         */
+
+        await safeInitialize(
+            "Annotation",
+            initializeAnnotation
         );
 
 
-        bindApplicationEvents();
+        await safeInitialize(
+            "Media",
+            initializeMedia
+        );
 
 
-        bindAuthStateListener();
+        await safeInitialize(
+            "AI",
+            initializeAI
+        );
 
 
-        const session =
-            await loadInitialSession();
+        await safeInitialize(
+            "Tasks",
+            initializeTasks
+        );
 
 
-        await initializeModules();
+        await safeInitialize(
+            "History",
+            initializeHistory
+        );
 
 
-        // ----------------------------------------------------
-        // Auth session restore
-        // ----------------------------------------------------
-
-        try {
-
-            const loadedSession =
-                await loadSessionOnStartup();
+        await safeInitialize(
+            "Profile",
+            initializeProfile
+        );
 
 
-            if (
-                loadedSession?.user
-            ) {
-
-                appState.session =
-                    loadedSession;
-
-                appState.user =
-                    loadedSession.user;
+        await safeInitialize(
+            "Home",
+            initializeHome
+        );
 
 
-                handleSession(
-                    loadedSession
-                );
-            }
+        await safeInitialize(
+            "Workspace",
+            initializeWorkspace
+        );
 
-        } catch (error) {
 
-            console.warn(
-                "Auth startup session check failed:",
-                error
-            );
+        await safeInitialize(
+            "Admin",
+            initializeAdmin
+        );
+
+
+        await safeInitialize(
+            "Authentication",
+            initializeAuth
+        );
+
+
+        /*
+         * Restore the existing Supabase session.
+         * This does not create another Supabase client.
+         */
+
+        if (
+            typeof loadSessionOnStartup ===
+            "function"
+        ) {
+
+            await loadSessionOnStartup();
         }
 
 
-        // ----------------------------------------------------
-        // Refresh user
-        // ----------------------------------------------------
-
-        try {
-
-            const user =
-                await getCurrentUser();
+        appState.session =
+            typeof getSession ===
+            "function"
+                ? await getSession()
+                : null;
 
 
-            if (user) {
-
-                appState.user =
-                    user;
-
-
-                if (
-                    !appState.session
-                ) {
-
-                    appState.session = {
-
-                        user
-                    };
-                }
-
-
-                updateApplicationVisibility(
-                    appState.session
-                );
-
-
-                updateCloudStatus(
-                    appState.session
-                );
-            }
-
-        } catch (error) {
-
-            console.warn(
-                "Could not refresh current user:",
-                error
-            );
-        }
+        appState.user =
+            typeof getCurrentUser ===
+            "function"
+                ? await getCurrentUser()
+                : null;
 
 
         appState.initialized =
@@ -787,134 +296,116 @@ export async function initializeApp() {
         appState.ready =
             true;
 
-        appState.initializing =
-            false;
 
+        window.dispatchEvent(
+            new CustomEvent(
+                "application-ready",
+                {
+                    detail: {
+                        session:
+                            appState.session,
 
-        document.documentElement.dataset.app =
-            "annotation-ai";
-
-        document.documentElement.dataset.appReady =
-            "true";
-
-
-        dispatchReady();
-
-
-        console.log(
-            "ANNOTATION AI is ready."
+                        user:
+                            appState.user
+                    }
+                }
+            )
         );
 
 
-        return appState;
+        console.log(
+            "ANNOTATION AI initialized successfully."
+        );
 
     } catch (error) {
-
-        appState.initializing =
-            false;
-
-        appState.ready =
-            false;
-
 
         showStartupError(
             error
         );
 
+    } finally {
 
-        console.error(
-            "Fatal application startup error:",
-            error
-        );
-
-
-        throw error;
+        appState.initializing =
+            false;
     }
 }
 
 
 // ============================================================
-// RESTART / REFRESH APPLICATION
+// AUTH STATE LISTENER
 // ============================================================
 
-export async function restartApp() {
+if (
+    typeof onAuthStateChange ===
+    "function"
+) {
 
-    try {
-
-        const session =
-            await getSession();
-
-
-        handleSession(
+    onAuthStateChange(
+        async (
+            event,
             session
-        );
+        ) => {
+
+            try {
+
+                appState.session =
+                    session ||
+                    null;
 
 
-        if (
-            session?.user
-        ) {
+                appState.user =
+                    session?.user ||
+                    null;
 
-            window.dispatchEvent(
 
-                new CustomEvent(
-                    "app:refresh",
-                    {
-                        detail: {
-
-                            session,
-
-                            user:
-                                session.user
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "application-auth-state",
+                        {
+                            detail: {
+                                event,
+                                session,
+                                user:
+                                    session?.user ||
+                                    null
+                            }
                         }
-                    }
-                )
-            );
+                    )
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "Auth state event error:",
+                    error
+                );
+            }
         }
-
-
-        return session;
-
-    } catch (error) {
-
-        console.error(
-            "Application refresh failed:",
-            error
-        );
-
-
-        return null;
-    }
+    );
 }
 
 
 // ============================================================
-// GET APPLICATION STATE
+// GLOBAL APPLICATION OBJECT
 // ============================================================
 
-export function getAppState() {
+window.AnnotationApp = {
 
-    return {
-        ...appState
-    };
-}
+    config:
+        APP_CONFIG,
 
+    state:
+        appState,
 
-// ============================================================
-// GLOBAL COMPATIBILITY
-// ============================================================
+    supabase,
 
-window.initializeApp =
-    initializeApp;
-
-window.restartApp =
-    restartApp;
-
-window.getAppState =
-    getAppState;
+    initialize:
+        initializeApplication
+};
 
 
 // ============================================================
-// STARTUP
+// START
 // ============================================================
 
 if (
@@ -923,47 +414,15 @@ if (
 ) {
 
     document.addEventListener(
-
         "DOMContentLoaded",
-
-        () => {
-
-            initializeApp()
-                .catch(
-                    error => {
-
-                        console.error(
-                            "Application failed to start:",
-                            error
-                        );
-                    }
-                );
-        },
-
+        initializeApplication,
         {
-            once: true
+            once:
+                true
         }
     );
 
 } else {
 
-    initializeApp()
-        .catch(
-            error => {
-
-                console.error(
-                    "Application failed to start:",
-                    error
-                );
-            }
-        );
+    initializeApplication();
 }
-
-
-// ============================================================
-// EXPORT
-// ============================================================
-
-export {
-    appState
-};
