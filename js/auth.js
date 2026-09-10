@@ -1,923 +1,411 @@
-/* ============================================================
-   AUTHENTICATION
-   js/auth.js
-============================================================ */
-
-import {
-    supabase,
-    getSession,
-    getCurrentUser,
-    signOutUser,
-    onAuthStateChange
-} from "./supabase.js";
+// ============================================================
+// ANNOTATION AI
+// AUTHENTICATION MODULE
+// ============================================================
 
 import {
     APP_CONFIG,
-    ROLES,
     normalizeRole,
     isAdminRole,
-    isReviewerRole,
     isStaffRole,
-    canAnnotateRole,
-    canUseUploadRole
+    isReviewerRole,
+    canAnnotateRole
 } from "./config.js";
 
+import {
+    getSupabase,
+    getCurrentSession,
+    getCurrentUser,
+    signOutUser,
+    onAuthStateChange,
+    saveLocalSession,
+    clearLocalSession,
+    updateCloudStatus,
+    isSupabaseReady
+} from "./supabase.js";
 
-/* ============================================================
-   AUTH STATE
-============================================================ */
+
+// ============================================================
+// AUTH STATE
+// ============================================================
 
 const authState = {
-
     user: null,
-
     session: null,
-
     profile: null,
-
-    role:
-        ROLES.CUSTOMER,
-
-    initialized:
-        false
+    role: APP_CONFIG.defaultRole,
+    initialized: false
 };
 
 
-/* ============================================================
-   DOM
-============================================================ */
+// ============================================================
+// DOM HELPERS
+// ============================================================
 
-const $ =
-    id =>
-        document.getElementById(id);
-
-
-const loginPage =
-    $("loginPage");
-
-const appEl =
-    document.querySelector(".app");
-
-const authLoggedOut =
-    $("authLoggedOut");
-
-const authLoggedIn =
-    $("authLoggedIn");
-
-const authEmail =
-    $("authEmail");
-
-const authPassword =
-    $("authPassword");
-
-const authStatus =
-    $("authStatus");
-
-const signInBtn =
-    $("signInBtn");
-
-const signUpBtn =
-    $("signUpBtn");
-
-const forgotPassword =
-    $("forgotPassword");
-
-const logoutBtn =
-    $("logoutBtn");
-
-const approvalPage =
-    $("approvalPage");
-
-const approvalSignIn =
-    $("approvalSignIn");
-
-const profileName =
-    $("profileName");
-
-const profileRole =
-    $("profileRole");
-
-const profileAvatar =
-    $("profileAvatar");
-
-const cloudStatus =
-    $("cloudStatus");
-
-const adminButton =
-    $("adminCenterButton");
+function $(id) {
+    return document.getElementById(id);
+}
 
 
-/* ============================================================
-   STATUS
-============================================================ */
+// ============================================================
+// STATUS
+// ============================================================
 
 function setAuthStatus(
     message,
     type = "info"
 ) {
 
-    if (!authStatus) {
+    const element = $("authStatus");
+
+    if (!element) {
         return;
     }
 
+    element.textContent = message || "";
 
-    authStatus.textContent =
-        message;
+    element.dataset.type = type;
 
-
-    authStatus.dataset.status =
-        type;
-}
-
-
-function setCloudStatus(
-    message
-) {
-
-    if (!cloudStatus) {
-        return;
-    }
-
-
-    cloudStatus.textContent =
-        message;
-}
-
-
-/* ============================================================
-   PROFILE NAME
-============================================================ */
-
-function getUserDisplayName(
-    user,
-    profile = null
-) {
-
-    if (profile) {
-
-        return (
-            profile.full_name ||
-            profile.name ||
-            profile.display_name ||
-            profile.username ||
-            user?.user_metadata?.full_name ||
-            user?.email ||
-            "User"
-        );
-    }
-
-
-    return (
-        user?.user_metadata?.full_name ||
-        user?.user_metadata?.name ||
-        user?.email ||
-        "User"
+    element.classList.remove(
+        "success",
+        "error",
+        "warning",
+        "info"
     );
+
+    element.classList.add(type);
 }
 
 
-/* ============================================================
-   AVATAR INITIALS
-============================================================ */
+// ============================================================
+// GET ROLE FROM USER
+// ============================================================
 
-function getInitials(
-    name
-) {
-
-    const clean =
-        String(name || "User")
-            .trim();
-
-
-    if (!clean) {
-        return "U";
-    }
-
-
-    const parts =
-        clean.split(/\s+/);
-
-
-    if (parts.length === 1) {
-
-        return parts[0]
-            .slice(0, 2)
-            .toUpperCase();
-    }
-
-
-    return (
-        parts[0][0] +
-        parts[parts.length - 1][0]
-    ).toUpperCase();
-}
-
-
-/* ============================================================
-   UPDATE ACCOUNT UI
-============================================================ */
-
-function updateAccountUI() {
-
-    const user =
-        authState.user;
-
-    const profile =
-        authState.profile;
-
-    const role =
-        authState.role;
-
+function getRoleFromUser(user) {
 
     if (!user) {
-
-        if (authLoggedOut) {
-            authLoggedOut.style.display =
-                "";
-        }
-
-        if (authLoggedIn) {
-            authLoggedIn.style.display =
-                "none";
-        }
-
-        if (adminButton) {
-            adminButton.style.display =
-                "none";
-        }
-
-        return;
+        return APP_CONFIG.defaultRole;
     }
-
-
-    const name =
-        getUserDisplayName(
-            user,
-            profile
-        );
-
-
-    if (authLoggedOut) {
-        authLoggedOut.style.display =
-            "none";
-    }
-
-
-    if (authLoggedIn) {
-        authLoggedIn.style.display =
-            "";
-    }
-
-
-    if (profileName) {
-        profileName.textContent =
-            name;
-    }
-
-
-    if (profileRole) {
-        profileRole.textContent =
-            formatRole(role);
-    }
-
-
-    if (profileAvatar) {
-
-        const avatar =
-            profile?.avatar_url ||
-            user?.user_metadata?.avatar_url;
-
-
-        if (avatar) {
-
-            profileAvatar.style.backgroundImage =
-                `url("${avatar}")`;
-
-            profileAvatar.textContent =
-                "";
-
-        } else {
-
-            profileAvatar.style.backgroundImage =
-                "";
-
-            profileAvatar.textContent =
-                getInitials(name);
-        }
-    }
-
-
-    if (adminButton) {
-
-        adminButton.style.display =
-            isAdminRole(role)
-                ? ""
-                : "none";
-    }
-}
-
-
-/* ============================================================
-   FORMAT ROLE
-============================================================ */
-
-function formatRole(
-    role
-) {
-
-    const normalized =
-        normalizeRole(role);
-
-
-    return normalized
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, char =>
-            char.toUpperCase()
-        );
-}
-
-
-/* ============================================================
-   LOAD PROFILE
-============================================================ */
-
-export async function loadCurrentProfile(
-    user = authState.user
-) {
-
-    if (!user) {
-
-        authState.profile =
-            null;
-
-        authState.role =
-            ROLES.CUSTOMER;
-
-        return null;
-    }
-
-
-    /*
-     * The original uploaded source does not contain the
-     * database profile query/table definition.
-     *
-     * We first use Supabase user metadata so authentication
-     * itself does not break.
-     */
 
     const metadata =
         user.user_metadata || {};
 
+    const appMetadata =
+        user.app_metadata || {};
 
-    authState.profile = {
-        id:
-            user.id,
-
-        email:
-            user.email || "",
-
-        full_name:
-            metadata.full_name ||
-            metadata.name ||
-            "",
-
-        name:
-            metadata.name ||
-            "",
-
-        display_name:
-            metadata.display_name ||
-            "",
-
-        avatar_url:
-            metadata.avatar_url ||
-            "",
-
-        role:
-            metadata.role ||
-            ROLES.CUSTOMER
-    };
+    return normalizeRole(
+        metadata.role ||
+        metadata.user_role ||
+        metadata.account_role ||
+        appMetadata.role ||
+        appMetadata.user_role ||
+        APP_CONFIG.defaultRole
+    );
+}
 
 
-    authState.role =
-        normalizeRole(
-            authState.profile.role
+// ============================================================
+// UPDATE PROFILE UI
+// ============================================================
+
+function updateProfileUI() {
+
+    const user = authState.user;
+
+    if (!user) {
+        return;
+    }
+
+    const metadata =
+        user.user_metadata || {};
+
+    const email =
+        user.email || "";
+
+    const name =
+        metadata.full_name ||
+        metadata.name ||
+        metadata.display_name ||
+        metadata.username ||
+        email.split("@")[0] ||
+        "User";
+
+    const role =
+        authState.role ||
+        APP_CONFIG.defaultRole;
+
+
+    // --------------------------------------------------------
+    // AVATAR
+    // --------------------------------------------------------
+
+    const avatar =
+        metadata.avatar_url ||
+        metadata.avatar ||
+        "";
+
+    const profileAvatar =
+        $("profileAvatar");
+
+    if (profileAvatar) {
+
+        if (avatar) {
+
+            profileAvatar.src = avatar;
+
+            profileAvatar.style.display =
+                "block";
+
+        } else {
+
+            profileAvatar.removeAttribute(
+                "src"
+            );
+        }
+    }
+
+
+    // --------------------------------------------------------
+    // NAME
+    // --------------------------------------------------------
+
+    const profileName =
+        $("profileName");
+
+    if (profileName) {
+        profileName.textContent = name;
+    }
+
+
+    // --------------------------------------------------------
+    // ROLE
+    // --------------------------------------------------------
+
+    const profileRole =
+        $("profileRole");
+
+    if (profileRole) {
+        profileRole.textContent = role;
+    }
+
+
+    // --------------------------------------------------------
+    // LARGE PROFILE
+    // --------------------------------------------------------
+
+    const largeAvatar =
+        $("profileLargeAvatar");
+
+    if (largeAvatar && avatar) {
+        largeAvatar.src = avatar;
+    }
+
+
+    const screenName =
+        $("profileScreenName");
+
+    if (screenName) {
+        screenName.textContent = name;
+    }
+
+
+    const screenRole =
+        $("profileScreenRole");
+
+    if (screenRole) {
+        screenRole.textContent = role;
+    }
+
+
+    const screenEmail =
+        $("profileScreenEmail");
+
+    if (screenEmail) {
+        screenEmail.textContent = email;
+    }
+}
+
+
+// ============================================================
+// SHOW LOGGED OUT STATE
+// ============================================================
+
+function showLoggedOutUI() {
+
+    const loginPage =
+        $("loginPage");
+
+    const loggedOut =
+        $("authLoggedOut");
+
+    const loggedIn =
+        $("authLoggedIn");
+
+    if (loginPage) {
+        loginPage.style.display = "";
+    }
+
+    if (loggedOut) {
+        loggedOut.style.display = "";
+    }
+
+    if (loggedIn) {
+        loggedIn.style.display = "none";
+    }
+
+
+    // --------------------------------------------------------
+    // MAIN APPLICATION
+    // --------------------------------------------------------
+
+    const mainApp =
+        document.querySelector(
+            "[data-authenticated-app]"
         );
 
+    if (mainApp) {
+        mainApp.style.display = "none";
+    }
 
-    updateAccountUI();
+
+    document.body.classList.remove(
+        "authenticated"
+    );
+
+    document.body.classList.add(
+        "logged-out"
+    );
+}
 
 
+// ============================================================
+// SHOW LOGGED IN STATE
+// ============================================================
+
+function showLoggedInUI() {
+
+    const loginPage =
+        $("loginPage");
+
+    const loggedOut =
+        $("authLoggedOut");
+
+    const loggedIn =
+        $("authLoggedIn");
+
+    if (loginPage) {
+        loginPage.style.display = "";
+    }
+
+    if (loggedOut) {
+        loggedOut.style.display = "none";
+    }
+
+    if (loggedIn) {
+        loggedIn.style.display = "";
+    }
+
+
+    document.body.classList.remove(
+        "logged-out"
+    );
+
+    document.body.classList.add(
+        "authenticated"
+    );
+
+
+    updateProfileUI();
+}
+
+
+// ============================================================
+// AUTHENTICATED APPLICATION HELPER
+// ============================================================
+
+export function isLoggedIn() {
+    return Boolean(
+        authState.user &&
+        authState.session
+    );
+}
+
+
+// ============================================================
+// GETTERS
+// ============================================================
+
+export function getAuthState() {
+    return authState;
+}
+
+
+export function getUser() {
+    return authState.user;
+}
+
+
+export function getSession() {
+    return authState.session;
+}
+
+
+export function getRole() {
+    return authState.role;
+}
+
+
+export function getProfile() {
     return authState.profile;
 }
 
 
-/* ============================================================
-   SIGN IN
-============================================================ */
-
-export async function signIn() {
-
-    if (!supabase) {
-
-        setAuthStatus(
-            "Supabase is not configured. Add your existing project URL and anon key to js/config.js.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    const email =
-        authEmail?.value
-            ?.trim();
-
-
-    const password =
-        authPassword?.value || "";
-
-
-    if (!email) {
-
-        setAuthStatus(
-            "Enter your email address.",
-            "error"
-        );
-
-        authEmail?.focus();
-
-        return;
-    }
-
-
-    if (!password) {
-
-        setAuthStatus(
-            "Enter your password.",
-            "error"
-        );
-
-        authPassword?.focus();
-
-        return;
-    }
-
-
-    setAuthStatus(
-        "Signing in…",
-        "loading"
-    );
-
-
-    if (signInBtn) {
-        signInBtn.disabled =
-            true;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await supabase.auth.signInWithPassword({
-                email,
-                password
-            });
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        authState.session =
-            data?.session || null;
-
-        authState.user =
-            data?.user || null;
-
-
-        await loadCurrentProfile();
-
-
-        setAuthStatus(
-            "Signed in successfully.",
-            "success"
-        );
-
-
-        await showAuthenticatedApp();
-
-
-    } catch (error) {
-
-        console.error(
-            "[Auth] Sign in failed:",
-            error
-        );
-
-
-        setAuthStatus(
-            error?.message ||
-            "Unable to sign in.",
-            "error"
-        );
-
-    } finally {
-
-        if (signInBtn) {
-            signInBtn.disabled =
-                false;
-        }
-    }
-}
-
-
-/* ============================================================
-   CREATE ACCOUNT
-============================================================ */
-
-export async function signUp() {
-
-    if (!supabase) {
-
-        setAuthStatus(
-            "Supabase is not configured.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    const email =
-        authEmail?.value
-            ?.trim();
-
-
-    const password =
-        authPassword?.value || "";
-
-
-    if (!email) {
-
-        setAuthStatus(
-            "Enter your email address.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    if (!password) {
-
-        setAuthStatus(
-            "Enter a password.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    if (password.length < 6) {
-
-        setAuthStatus(
-            "Password must contain at least 6 characters.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    if (signUpBtn) {
-        signUpBtn.disabled =
-            true;
-    }
-
-
-    setAuthStatus(
-        "Creating account…",
-        "loading"
-    );
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await supabase.auth.signUp({
-
-                email,
-
-                password,
-
-                options: {
-                    data: {
-                        role:
-                            ROLES.CUSTOMER
-                    }
-                }
-            });
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        /*
-         * Depending on Supabase email-confirmation settings,
-         * session can be null after signup.
-         */
-
-        if (data?.session) {
-
-            authState.session =
-                data.session;
-
-            authState.user =
-                data.user;
-
-            await loadCurrentProfile();
-
-            await showAuthenticatedApp();
-
-            setAuthStatus(
-                "Account created successfully.",
-                "success"
-            );
-
-        } else {
-
-            setAuthStatus(
-                "Account created. Check your email to confirm your account.",
-                "success"
-            );
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            "[Auth] Sign up failed:",
-            error
-        );
-
-
-        setAuthStatus(
-            error?.message ||
-            "Unable to create account.",
-            "error"
-        );
-
-    } finally {
-
-        if (signUpBtn) {
-            signUpBtn.disabled =
-                false;
-        }
-    }
-}
-
-
-/* ============================================================
-   PASSWORD RESET
-============================================================ */
-
-export async function requestPasswordReset() {
-
-    if (!supabase) {
-
-        setAuthStatus(
-            "Supabase is not configured.",
-            "error"
-        );
-
-        return;
-    }
-
-
-    const email =
-        authEmail?.value
-            ?.trim();
-
-
-    if (!email) {
-
-        setAuthStatus(
-            "Enter your email address first.",
-            "error"
-        );
-
-        authEmail?.focus();
-
-        return;
-    }
-
-
-    setAuthStatus(
-        "Sending password reset email…",
-        "loading"
-    );
-
-
-    try {
-
-        const redirectUrl =
-            `${window.location.origin}${window.location.pathname}`;
-
-
-        const {
-            error
-        } =
-            await supabase.auth.resetPasswordForEmail(
-                email,
-                {
-                    redirectTo:
-                        redirectUrl
-                }
-            );
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        setAuthStatus(
-            "Password reset instructions have been sent to your email.",
-            "success"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "[Auth] Password reset failed:",
-            error
-        );
-
-
-        setAuthStatus(
-            error?.message ||
-            "Unable to send password reset email.",
-            "error"
-        );
-    }
-}
-
-
-/* ============================================================
-   SIGN OUT
-============================================================ */
-
-export async function signOut() {
-
-    try {
-
-        await signOutUser();
-
-    } catch (error) {
-
-        console.warn(
-            "[Auth] Sign out:",
-            error
-        );
-    }
-
-
-    authState.user =
-        null;
-
-    authState.session =
-        null;
-
-    authState.profile =
-        null;
-
-    authState.role =
-        ROLES.CUSTOMER;
-
-
-    if (authEmail) {
-        authEmail.value =
-            "";
-    }
-
-
-    if (authPassword) {
-        authPassword.value =
-            "";
-    }
-
-
-    showLoginPage();
-}
-
-
-/* ============================================================
-   SHOW LOGIN
-============================================================ */
-
-export function showLoginPage() {
-
-    if (loginPage) {
-        loginPage.style.display =
-            "";
-    }
-
-
-    if (appEl) {
-        appEl.style.display =
-            "none";
-    }
-
-
-    if (approvalPage) {
-        approvalPage.style.display =
-            "none";
-    }
-
-
-    if (authLoggedOut) {
-        authLoggedOut.style.display =
-            "";
-    }
-
-
-    if (authLoggedIn) {
-        authLoggedIn.style.display =
-            "none";
-    }
-
-
-    if (adminButton) {
-        adminButton.style.display =
-            "none";
-    }
-
-
-    setCloudStatus(
-        "Signed out."
+export function isAdmin() {
+    return isAdminRole(
+        authState.role
     );
 }
 
 
-/* ============================================================
-   SHOW AUTHENTICATED APP
-============================================================ */
-
-export async function showAuthenticatedApp() {
-
-    if (!authState.user) {
-
-        showLoginPage();
-
-        return;
-    }
-
-
-    if (loginPage) {
-        loginPage.style.display =
-            "none";
-    }
-
-
-    if (approvalPage) {
-        approvalPage.style.display =
-            "none";
-    }
-
-
-    if (appEl) {
-        appEl.style.display =
-            "";
-    }
-
-
-    updateAccountUI();
-
-
-    setCloudStatus(
-        "Connected to cloud."
+export function isStaff() {
+    return isStaffRole(
+        authState.role
     );
+}
 
 
-    document.dispatchEvent(
+export function isReviewer() {
+    return isReviewerRole(
+        authState.role
+    );
+}
+
+
+export function canAnnotate() {
+    return canAnnotateRole(
+        authState.role
+    );
+}
+
+
+// ============================================================
+// DISPATCH AUTH EVENT
+// ============================================================
+
+function dispatchAuthEvent(
+    eventName
+) {
+
+    window.dispatchEvent(
         new CustomEvent(
-            "annotation-auth-ready",
+            eventName,
             {
                 detail: {
                     user:
                         authState.user,
+
+                    session:
+                        authState.session,
 
                     profile:
                         authState.profile,
@@ -931,20 +419,603 @@ export async function showAuthenticatedApp() {
 }
 
 
-/* ============================================================
-   SESSION STARTUP
-============================================================ */
+// ============================================================
+// APPLY SESSION
+// ============================================================
 
-export async function loadSessionOnStartup() {
+async function applySession(
+    session
+) {
+
+    authState.session =
+        session || null;
+
+    authState.user =
+        session?.user || null;
+
+
+    if (authState.user) {
+
+        authState.role =
+            getRoleFromUser(
+                authState.user
+            );
+
+        authState.profile = {
+            id:
+                authState.user.id,
+
+            email:
+                authState.user.email,
+
+            role:
+                authState.role,
+
+            metadata:
+                authState.user.user_metadata ||
+                {}
+        };
+
+
+        saveLocalSession(
+            session
+        );
+
+
+        updateCloudStatus(
+            "Cloud connected",
+            true
+        );
+
+        showLoggedInUI();
+
+        dispatchAuthEvent(
+            "annotation-auth-login"
+        );
+
+    } else {
+
+        authState.role =
+            APP_CONFIG.defaultRole;
+
+        authState.profile =
+            null;
+
+        clearLocalSession();
+
+        updateCloudStatus(
+            "Not signed in",
+            false
+        );
+
+        showLoggedOutUI();
+
+        dispatchAuthEvent(
+            "annotation-auth-logout"
+        );
+    }
+}
+
+
+// ============================================================
+// SIGN IN
+// ============================================================
+
+export async function signIn(
+    email,
+    password
+) {
+
+    const supabase =
+        getSupabase();
 
     if (!supabase) {
 
-        showLoginPage();
-
         setAuthStatus(
-            "Supabase connection is not configured.",
+            "Supabase is not configured. Add your Supabase project URL first.",
             "error"
         );
+
+        return {
+            success: false,
+            error: new Error(
+                "Supabase is not configured."
+            )
+        };
+    }
+
+
+    if (!email || !password) {
+
+        setAuthStatus(
+            "Enter your email and password.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error: new Error(
+                "Email and password are required."
+            )
+        };
+    }
+
+
+    setAuthStatus(
+        "Signing in...",
+        "info"
+    );
+
+
+    try {
+
+        const {
+            data,
+            error
+        } =
+            await supabase.auth.signInWithPassword(
+                {
+                    email:
+                        String(email).trim(),
+
+                    password:
+                        String(password)
+                }
+            );
+
+
+        if (error) {
+
+            setAuthStatus(
+                error.message ||
+                "Sign in failed.",
+                "error"
+            );
+
+            return {
+                success: false,
+                error
+            };
+        }
+
+
+        await applySession(
+            data.session
+        );
+
+
+        setAuthStatus(
+            "Signed in successfully.",
+            "success"
+        );
+
+
+        return {
+            success: true,
+            data
+        };
+
+    } catch (error) {
+
+        console.error(
+            "[Auth] Sign in error:",
+            error
+        );
+
+        setAuthStatus(
+            error.message ||
+            "Unable to sign in.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error
+        };
+    }
+}
+
+
+// ============================================================
+// SIGN UP
+// ============================================================
+
+export async function signUp(
+    email,
+    password
+) {
+
+    const supabase =
+        getSupabase();
+
+    if (!supabase) {
+
+        setAuthStatus(
+            "Supabase is not configured. Add your Supabase project URL first.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error: new Error(
+                "Supabase is not configured."
+            )
+        };
+    }
+
+
+    if (!email || !password) {
+
+        setAuthStatus(
+            "Enter an email and password.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error: new Error(
+                "Email and password are required."
+            )
+        };
+    }
+
+
+    if (String(password).length < 6) {
+
+        setAuthStatus(
+            "Password must contain at least 6 characters.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error: new Error(
+                "Password is too short."
+            )
+        };
+    }
+
+
+    setAuthStatus(
+        "Creating account...",
+        "info"
+    );
+
+
+    try {
+
+        const {
+            data,
+            error
+        } =
+            await supabase.auth.signUp(
+                {
+                    email:
+                        String(email).trim(),
+
+                    password:
+                        String(password),
+
+                    options: {
+                        data: {
+                            role:
+                                APP_CONFIG.defaultRole
+                        }
+                    }
+                }
+            );
+
+
+        if (error) {
+
+            setAuthStatus(
+                error.message ||
+                "Account creation failed.",
+                "error"
+            );
+
+            return {
+                success: false,
+                error
+            };
+        }
+
+
+        if (
+            data.user &&
+            !data.session
+        ) {
+
+            setAuthStatus(
+                "Account created. Check your email to confirm your account.",
+                "success"
+            );
+
+        } else {
+
+            await applySession(
+                data.session
+            );
+
+            setAuthStatus(
+                "Account created successfully.",
+                "success"
+            );
+        }
+
+
+        return {
+            success: true,
+            data
+        };
+
+    } catch (error) {
+
+        console.error(
+            "[Auth] Sign up error:",
+            error
+        );
+
+        setAuthStatus(
+            error.message ||
+            "Unable to create account.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error
+        };
+    }
+}
+
+
+// ============================================================
+// PASSWORD RESET REQUEST
+// ============================================================
+
+export async function requestPasswordReset(
+    email
+) {
+
+    const supabase =
+        getSupabase();
+
+    if (!supabase) {
+
+        setAuthStatus(
+            "Supabase is not configured.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error: new Error(
+                "Supabase is not configured."
+            )
+        };
+    }
+
+
+    if (!email) {
+
+        setAuthStatus(
+            "Enter your email address.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error: new Error(
+                "Email is required."
+            )
+        };
+    }
+
+
+    setAuthStatus(
+        "Sending password reset email...",
+        "info"
+    );
+
+
+    try {
+
+        const redirectUrl =
+            `${window.location.origin}${window.location.pathname}`;
+
+
+        const {
+            error
+        } =
+            await supabase.auth.resetPasswordForEmail(
+                String(email).trim(),
+                {
+                    redirectTo:
+                        redirectUrl
+                }
+            );
+
+
+        if (error) {
+
+            setAuthStatus(
+                error.message ||
+                "Unable to send reset email.",
+                "error"
+            );
+
+            return {
+                success: false,
+                error
+            };
+        }
+
+
+        setAuthStatus(
+            "Password reset email sent. Check your inbox.",
+            "success"
+        );
+
+
+        return {
+            success: true
+        };
+
+    } catch (error) {
+
+        console.error(
+            "[Auth] Password reset error:",
+            error
+        );
+
+        setAuthStatus(
+            error.message ||
+            "Unable to send password reset email.",
+            "error"
+        );
+
+        return {
+            success: false,
+            error
+        };
+    }
+}
+
+
+// ============================================================
+// SAVE NEW PASSWORD
+// ============================================================
+
+export async function updatePassword(
+    newPassword
+) {
+
+    const supabase =
+        getSupabase();
+
+    if (!supabase) {
+
+        return {
+            success: false,
+            error: new Error(
+                "Supabase is not configured."
+            )
+        };
+    }
+
+
+    if (
+        !newPassword ||
+        String(newPassword).length < 6
+    ) {
+
+        return {
+            success: false,
+            error: new Error(
+                "Password must contain at least 6 characters."
+            )
+        };
+    }
+
+
+    try {
+
+        const {
+            data,
+            error
+        } =
+            await supabase.auth.updateUser(
+                {
+                    password:
+                        String(newPassword)
+                }
+            );
+
+
+        if (error) {
+
+            return {
+                success: false,
+                error
+            };
+        }
+
+
+        return {
+            success: true,
+            data
+        };
+
+    } catch (error) {
+
+        console.error(
+            "[Auth] updatePassword error:",
+            error
+        );
+
+        return {
+            success: false,
+            error
+        };
+    }
+}
+
+
+// ============================================================
+// SIGN OUT
+// ============================================================
+
+export async function signOut() {
+
+    try {
+
+        const result =
+            await signOutUser();
+
+        if (result.error) {
+
+            console.error(
+                "[Auth] Sign out error:",
+                result.error
+            );
+        }
+
+    } catch (error) {
+
+        console.error(
+            "[Auth] Sign out exception:",
+            error
+        );
+    }
+
+
+    authState.user = null;
+    authState.session = null;
+    authState.profile = null;
+    authState.role =
+        APP_CONFIG.defaultRole;
+
+
+    clearLocalSession();
+
+    showLoggedOutUI();
+
+    dispatchAuthEvent(
+        "annotation-auth-logout"
+    );
+}
+
+
+// ============================================================
+// LOAD SESSION ON STARTUP
+// ============================================================
+
+export async function loadSessionOnStartup() {
+
+    if (!isSupabaseReady()) {
+
+        showLoggedOutUI();
 
         authState.initialized =
             true;
@@ -955,32 +1026,25 @@ export async function loadSessionOnStartup() {
 
     try {
 
-        const session =
-            await getSession();
+        const {
+            session,
+            error
+        } =
+            await getCurrentSession();
 
 
-        if (!session) {
+        if (error) {
 
-            showLoginPage();
-
-            authState.initialized =
-                true;
-
-            return null;
+            console.warn(
+                "[Auth] Session restore warning:",
+                error
+            );
         }
 
 
-        authState.session =
-            session;
-
-        authState.user =
-            session.user;
-
-
-        await loadCurrentProfile();
-
-
-        await showAuthenticatedApp();
+        await applySession(
+            session
+        );
 
 
         authState.initialized =
@@ -989,32 +1053,30 @@ export async function loadSessionOnStartup() {
 
         return session;
 
-
     } catch (error) {
 
         console.error(
-            "[Auth] Session restore failed:",
+            "[Auth] Session startup error:",
             error
         );
 
-
-        showLoginPage();
-
         authState.initialized =
             true;
+
+        showLoggedOutUI();
 
         return null;
     }
 }
 
 
-/* ============================================================
-   AUTH STATE LISTENER
-============================================================ */
+// ============================================================
+// AUTH STATE CHANGES
+// ============================================================
 
 function initializeAuthListener() {
 
-    if (!supabase) {
+    if (!isSupabaseReady()) {
         return;
     }
 
@@ -1026,246 +1088,341 @@ function initializeAuthListener() {
         ) => {
 
             console.log(
-                "[Auth]",
+                "[Auth] State change:",
                 event
             );
 
 
             if (
                 event ===
+                "SIGNED_IN"
+            ) {
+
+                await applySession(
+                    session
+                );
+
+            } else if (
+                event ===
                 "SIGNED_OUT"
             ) {
 
-                authState.user =
-                    null;
+                await applySession(
+                    null
+                );
 
-                authState.session =
-                    null;
+            } else if (
+                event ===
+                "TOKEN_REFRESHED"
+            ) {
 
-                authState.profile =
-                    null;
+                await applySession(
+                    session
+                );
 
-                authState.role =
-                    ROLES.CUSTOMER;
+            } else if (
+                event ===
+                "USER_UPDATED"
+            ) {
 
-                showLoginPage();
+                await applySession(
+                    session
+                );
+            }
+        }
+    );
+}
+
+
+// ============================================================
+// LOGIN FORM
+// ============================================================
+
+function initializeLoginForm() {
+
+    const emailInput =
+        $("authEmail");
+
+    const passwordInput =
+        $("authPassword");
+
+    const signInButton =
+        $("signInBtn");
+
+    const signUpButton =
+        $("signUpBtn");
+
+
+    if (signInButton) {
+
+        signInButton.addEventListener(
+            "click",
+            async (event) => {
+
+                event.preventDefault();
+
+                await signIn(
+                    emailInput?.value || "",
+                    passwordInput?.value || ""
+                );
+            }
+        );
+    }
+
+
+    if (signUpButton) {
+
+        signUpButton.addEventListener(
+            "click",
+            async (event) => {
+
+                event.preventDefault();
+
+                await signUp(
+                    emailInput?.value || "",
+                    passwordInput?.value || ""
+                );
+            }
+        );
+    }
+
+
+    if (passwordInput) {
+
+        passwordInput.addEventListener(
+            "keydown",
+            async (event) => {
+
+                if (
+                    event.key ===
+                    "Enter"
+                ) {
+
+                    event.preventDefault();
+
+                    await signIn(
+                        emailInput?.value || "",
+                        passwordInput?.value || ""
+                    );
+                }
+            }
+        );
+    }
+}
+
+
+// ============================================================
+// FORGOT PASSWORD
+// ============================================================
+
+function initializeForgotPassword() {
+
+    const button =
+        $("forgotPassword");
+
+    if (!button) {
+        return;
+    }
+
+
+    button.addEventListener(
+        "click",
+        async (event) => {
+
+            event.preventDefault();
+
+            const email =
+                $("authEmail")?.value || "";
+
+
+            if (!email) {
+
+                setAuthStatus(
+                    "Enter your email address first.",
+                    "error"
+                );
+
+                $("authEmail")?.focus();
 
                 return;
             }
 
 
-            if (session?.user) {
+            await requestPasswordReset(
+                email
+            );
+        }
+    );
+}
 
-                authState.session =
-                    session;
 
-                authState.user =
-                    session.user;
+// ============================================================
+// LOGOUT BUTTON
+// ============================================================
+
+function initializeLogout() {
+
+    const button =
+        $("logoutBtn");
+
+    if (!button) {
+        return;
+    }
 
 
-                /*
-                 * Avoid unnecessarily reloading everything during
-                 * token refresh.
-                 */
+    button.addEventListener(
+        "click",
+        async (event) => {
 
-                if (
-                    !authState.profile ||
-                    event === "SIGNED_IN"
-                ) {
+            event.preventDefault();
 
-                    await loadCurrentProfile();
+            await signOut();
+        }
+    );
+}
+
+
+// ============================================================
+// PASSWORD RESET MODAL
+// ============================================================
+
+function initializePasswordResetModal() {
+
+    const saveButton =
+        $("saveNewPassword");
+
+    if (!saveButton) {
+        return;
+    }
+
+
+    saveButton.addEventListener(
+        "click",
+        async (event) => {
+
+            event.preventDefault();
+
+
+            const password =
+                $("newPassword")?.value ||
+                "";
+
+            const confirmation =
+                $("confirmPassword")?.value ||
+                "";
+
+            const status =
+                $("passwordResetStatus");
+
+
+            if (!password) {
+
+                if (status) {
+                    status.textContent =
+                        "Enter a new password.";
                 }
 
-
-                await showAuthenticatedApp();
-            }
-        }
-    );
-}
-
-
-/* ============================================================
-   ROLE / PERMISSION API
-============================================================ */
-
-export function getAuthState() {
-
-    return {
-        ...authState
-    };
-}
-
-
-export function getCurrentRole() {
-
-    return authState.role;
-}
-
-
-export function isAdmin() {
-
-    return isAdminRole(
-        authState.role
-    );
-}
-
-
-export function isReviewer() {
-
-    return isReviewerRole(
-        authState.role
-    );
-}
-
-
-export function isStaff() {
-
-    return isStaffRole(
-        authState.role
-    );
-}
-
-
-export function canAnnotate() {
-
-    return canAnnotateRole(
-        authState.role
-    );
-}
-
-
-export function canUseUpload() {
-
-    return canUseUploadRole(
-        authState.role
-    );
-}
-
-
-/* ============================================================
-   GLOBAL COMPATIBILITY
-   Existing annotation code calls these functions directly.
-============================================================ */
-
-window.loadSessionOnStartup =
-    loadSessionOnStartup;
-
-window.canUseUpload =
-    canUseUpload;
-
-window.getCurrentProfile =
-    () =>
-        authState.profile;
-
-window.getCurrentUser =
-    () =>
-        authState.user;
-
-window.getCurrentRole =
-    getCurrentRole;
-
-window.isAdmin =
-    isAdmin;
-
-window.isReviewer =
-    isReviewer;
-
-window.isStaff =
-    isStaff;
-
-window.canAnnotate =
-    canAnnotate;
-
-window.signOut =
-    signOut;
-
-
-/* ============================================================
-   BUTTON EVENTS
-============================================================ */
-
-function bindAuthButtons() {
-
-    signInBtn?.addEventListener(
-        "click",
-        signIn
-    );
-
-
-    signUpBtn?.addEventListener(
-        "click",
-        signUp
-    );
-
-
-    forgotPassword?.addEventListener(
-        "click",
-        requestPasswordReset
-    );
-
-
-    logoutBtn?.addEventListener(
-        "click",
-        signOut
-    );
-
-
-    approvalSignIn?.addEventListener(
-        "click",
-        () => {
-
-            if (approvalPage) {
-                approvalPage.style.display =
-                    "none";
+                return;
             }
 
-            showLoginPage();
-        }
-    );
-
-
-    authPassword?.addEventListener(
-        "keydown",
-        event => {
 
             if (
-                event.key ===
-                "Enter"
+                password !==
+                confirmation
             ) {
+
+                if (status) {
+                    status.textContent =
+                        "Passwords do not match.";
+                }
+
+                return;
+            }
+
+
+            const result =
+                await updatePassword(
+                    password
+                );
+
+
+            if (!result.success) {
+
+                if (status) {
+                    status.textContent =
+                        result.error?.message ||
+                        "Unable to update password.";
+                }
+
+                return;
+            }
+
+
+            if (status) {
+                status.textContent =
+                    "Password updated successfully.";
+            }
+
+
+            const modal =
+                $("passwordResetModal");
+
+            if (modal) {
+
+                setTimeout(
+                    () => {
+
+                        modal.style.display =
+                            "none";
+
+                    },
+                    1000
+                );
+            }
+        }
+    );
+}
+
+
+// ============================================================
+// PROFILE SIGN OUT
+// ============================================================
+
+function initializeProfileActions() {
+
+    const signOutAction =
+        $("profileSignOutAction");
+
+    if (signOutAction) {
+
+        signOutAction.addEventListener(
+            "click",
+            async (event) => {
 
                 event.preventDefault();
 
-                signIn();
+                await signOut();
             }
-        }
-    );
-
-
-    authEmail?.addEventListener(
-        "keydown",
-        event => {
-
-            if (
-                event.key ===
-                "Enter"
-            ) {
-
-                event.preventDefault();
-
-                signIn();
-            }
-        }
-    );
+        );
+    }
 }
 
 
-/* ============================================================
-   INITIALIZE
-============================================================ */
+// ============================================================
+// INITIALIZE AUTH
+// ============================================================
 
 export async function initializeAuth() {
 
-    bindAuthButtons();
+    initializeLoginForm();
+
+    initializeForgotPassword();
+
+    initializeLogout();
+
+    initializePasswordResetModal();
+
+    initializeProfileActions();
 
     initializeAuthListener();
 
@@ -1273,33 +1430,71 @@ export async function initializeAuth() {
 }
 
 
-/* ============================================================
-   AUTO START
-============================================================ */
+// ============================================================
+// COMPATIBILITY GLOBALS
+// ============================================================
+//
+// Existing parts of the original application may call these
+// functions directly. Keep them available globally so the
+// modular version does not break those calls.
+// ============================================================
 
-if (
-    document.readyState ===
-    "loading"
-) {
+window.loadSessionOnStartup =
+    loadSessionOnStartup;
 
-    document.addEventListener(
-        "DOMContentLoaded",
-        initializeAuth,
-        {
-            once: true
-        }
+window.getCurrentUser =
+    getUser;
+
+window.getCurrentProfile =
+    getProfile;
+
+window.getCurrentRole =
+    getRole;
+
+window.isAdmin =
+    isAdmin;
+
+window.isStaff =
+    isStaff;
+
+window.isReviewer =
+    isReviewer;
+
+window.canAnnotate =
+    canAnnotate;
+
+window.signOut =
+    signOut;
+
+window.signOutUser =
+    signOut;
+
+window.signIn =
+    signIn;
+
+window.signUp =
+    signUp;
+
+window.requestPasswordReset =
+    requestPasswordReset;
+
+window.updatePassword =
+    updatePassword;
+
+
+// ============================================================
+// UPLOAD COMPATIBILITY
+// ============================================================
+//
+// The annotation module will provide the real upload
+// permission logic. This temporary compatibility function
+// prevents the old application from crashing before that
+// module is loaded.
+// ============================================================
+
+window.canUseUpload = function () {
+
+    return Boolean(
+        authState.user
     );
-
-} else {
-
-    initializeAuth();
-}
-
-
-/* ============================================================
-   PUBLIC API
-============================================================ */
-
-export {
-    authState
 };
