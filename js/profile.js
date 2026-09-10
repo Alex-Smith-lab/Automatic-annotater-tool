@@ -14,10 +14,24 @@
 ============================================================ */
 
 import {
-    supabase,
+    getSupabase,
     getCurrentUser,
-    signOut
+    getCurrentSession
 } from "./supabase.js";
+
+import {
+    signOut
+} from "./auth.js";
+
+
+/* ============================================================
+   SUPABASE
+============================================================ */
+
+const supabase =
+    typeof getSupabase === "function"
+        ? getSupabase()
+        : null;
 
 
 /* ============================================================
@@ -201,6 +215,10 @@ async function loadProfileUser() {
 
     try {
 
+        /*
+         * Prefer the authenticated user helper.
+         */
+
         const user =
             await getCurrentUser();
 
@@ -218,10 +236,42 @@ async function loadProfileUser() {
             error
         );
 
-        profileState.user =
-            null;
+        /*
+         * Fallback to the current session
+         * if getCurrentUser() fails.
+         */
 
-        return null;
+        try {
+
+            const result =
+                await getCurrentSession();
+
+            const session =
+                result?.session ||
+                result ||
+                null;
+
+            const user =
+                session?.user ||
+                null;
+
+            profileState.user =
+                user;
+
+            return user;
+
+        } catch (sessionError) {
+
+            console.warn(
+                "Could not load current session:",
+                sessionError
+            );
+
+            profileState.user =
+                null;
+
+            return null;
+        }
     }
 }
 
@@ -385,13 +435,18 @@ function setAvatarElement(
 
     if (avatarURL) {
 
-        element.style.backgroundImage =
-            `url("${String(
+        const safeURL =
+            String(
                 avatarURL
-            ).replaceAll(
-                '"',
-                "%22"
-            )}")`;
+            )
+                .replaceAll(
+                    '"',
+                    "%22"
+                );
+
+
+        element.style.backgroundImage =
+            `url("${safeURL}")`;
 
         element.style.backgroundSize =
             "cover";
@@ -401,6 +456,7 @@ function setAvatarElement(
 
         element.dataset.avatar =
             avatarURL;
+
 
         /*
          * If this is an <img>, also set src.
@@ -439,7 +495,7 @@ function setAvatarElement(
 
 
     /*
-     * Remove background image
+     * Remove background image.
      */
 
     element.style.backgroundImage =
@@ -450,10 +506,6 @@ function setAvatarElement(
         element.tagName ===
         "IMG"
     ) {
-
-        /*
-         * Don't keep a broken image URL.
-         */
 
         element.removeAttribute(
             "src"
@@ -488,15 +540,55 @@ async function refreshProfileUI() {
         profileState.avatarURL =
             null;
 
+
         if (profileName) {
+
             profileName.textContent =
                 "Guest";
         }
 
+
         if (profileRole) {
+
             profileRole.textContent =
                 "";
         }
+
+
+        if (profileScreenName) {
+
+            profileScreenName.textContent =
+                "Guest";
+        }
+
+
+        if (profileScreenRole) {
+
+            profileScreenRole.textContent =
+                "";
+        }
+
+
+        if (profileScreenEmail) {
+
+            profileScreenEmail.textContent =
+                "";
+        }
+
+
+        setAvatarElement(
+            profileAvatar,
+            null,
+            "Guest"
+        );
+
+
+        setAvatarElement(
+            profileLargeAvatar,
+            null,
+            "Guest"
+        );
+
 
         return null;
     }
@@ -617,11 +709,6 @@ async function openProfile() {
 
     if (!user) {
 
-        /*
-         * If not logged in, let the normal auth
-         * system handle the login screen.
-         */
-
         return false;
     }
 
@@ -707,6 +794,9 @@ function openPasswordReset() {
 
         passwordResetStatus.textContent =
             "";
+
+        passwordResetStatus.dataset.type =
+            "";
     }
 
 
@@ -726,7 +816,9 @@ function openPasswordReset() {
 
     setTimeout(
         () => {
+
             newPassword?.focus();
+
         },
         50
     );
@@ -793,7 +885,14 @@ function setPasswordStatus(
 
 async function changePassword() {
 
-    if (!supabase) {
+    const client =
+        typeof getSupabase ===
+        "function"
+            ? getSupabase()
+            : supabase;
+
+
+    if (!client) {
 
         setPasswordStatus(
             "Supabase is not configured.",
@@ -852,7 +951,7 @@ async function changePassword() {
         const {
             error
         } =
-            await supabase.auth
+            await client.auth
                 .updateUser({
                     password
                 });
@@ -882,7 +981,9 @@ async function changePassword() {
 
         setTimeout(
             () => {
+
                 closePasswordReset();
+
             },
             1200
         );
@@ -924,7 +1025,10 @@ function validateAvatarFile(
 
 
     if (
-        !file.type.startsWith(
+        !String(
+            file.type ||
+            ""
+        ).startsWith(
             "image/"
         )
     ) {
@@ -934,7 +1038,7 @@ function validateAvatarFile(
 
 
     /*
-     * Keep profile images reasonably small.
+     * Maximum avatar size: 5 MB.
      */
 
     const maxSize =
@@ -980,6 +1084,7 @@ function previewAvatar(
             );
         }
 
+
         return false;
     }
 
@@ -1018,12 +1123,6 @@ function previewAvatar(
     );
 
 
-    /*
-     * Do not upload automatically.
-     * Uploading requires a configured storage bucket
-     * and appropriate RLS policies.
-     */
-
     return true;
 }
 
@@ -1061,7 +1160,14 @@ async function uploadAvatar(
     }
 
 
-    if (!supabase) {
+    const client =
+        typeof getSupabase ===
+        "function"
+            ? getSupabase()
+            : supabase;
+
+
+    if (!client) {
 
         throw new Error(
             "Supabase is not configured."
@@ -1070,8 +1176,8 @@ async function uploadAvatar(
 
 
     /*
-     * Storage bucket can be customized
-     * from the page if necessary.
+     * Use configured avatar bucket when
+     * available, otherwise use "avatars".
      */
 
     const bucket =
@@ -1080,7 +1186,10 @@ async function uploadAvatar(
 
 
     const extension =
-        file.name
+        String(
+            file.name ||
+            ""
+        )
             .split(".")
             .pop()
             ?.toLowerCase() ||
@@ -1094,7 +1203,7 @@ async function uploadAvatar(
     const {
         error: uploadError
     } =
-        await supabase.storage
+        await client.storage
             .from(
                 bucket
             )
@@ -1122,7 +1231,7 @@ async function uploadAvatar(
     const {
         data
     } =
-        supabase.storage
+        client.storage
             .from(
                 bucket
             )
@@ -1145,13 +1254,13 @@ async function uploadAvatar(
 
 
     /*
-     * Save the avatar URL in user metadata.
+     * Save avatar URL in Supabase Auth metadata.
      */
 
     const {
         error: updateError
     } =
-        await supabase.auth
+        await client.auth
             .updateUser({
                 data: {
                     avatar_url:
@@ -1214,9 +1323,15 @@ async function handleAvatarChange(
      * Show immediate preview.
      */
 
-    previewAvatar(
-        file
-    );
+    const previewOK =
+        previewAvatar(
+            file
+        );
+
+
+    if (!previewOK) {
+        return false;
+    }
 
 
     try {
@@ -1261,8 +1376,8 @@ async function handleAvatarChange(
 
 
         /*
-         * Refresh from the actual saved
-         * account state if upload failed.
+         * Restore the saved avatar if
+         * the upload failed.
          */
 
         await refreshProfileUI();
@@ -1295,7 +1410,8 @@ function openSettings() {
         candidates.find(
             fn =>
                 typeof fn ===
-                "function"
+                "function" &&
+                fn !== openSettings
         );
 
 
@@ -1338,8 +1454,7 @@ function openSettings() {
 function openWorkHistory() {
 
     /*
-     * Prefer exported/global history functions
-     * when the history module is connected.
+     * Prefer existing global history functions.
      */
 
     const candidates = [
@@ -1353,7 +1468,8 @@ function openWorkHistory() {
         candidates.find(
             fn =>
                 typeof fn ===
-                "function"
+                "function" &&
+                fn !== openWorkHistory
         );
 
 
@@ -1366,7 +1482,7 @@ function openWorkHistory() {
 
 
     /*
-     * Fall back to the existing navigation button.
+     * Fall back to existing navigation button.
      */
 
     const historyButton =
@@ -1397,27 +1513,30 @@ async function profileSignOut() {
 
     try {
 
+        /*
+         * signOut is owned by auth.js.
+         */
+
         if (
-            typeof signOut ===
+            typeof signOut !==
             "function"
         ) {
 
-            await signOut();
-
-        } else if (
-            supabase
-        ) {
-
-            await supabase.auth.signOut();
+            throw new Error(
+                "Authentication sign-out function is unavailable."
+            );
         }
+
+
+        await signOut();
 
 
         closeProfile();
 
 
         /*
-         * Let the auth module decide whether
-         * to display login/home.
+         * Let the auth system and other modules
+         * know that authentication changed.
          */
 
         window.dispatchEvent(
@@ -1903,7 +2022,9 @@ if (
     document.addEventListener(
         "DOMContentLoaded",
         () => {
+
             initializeProfile();
+
         },
         {
             once:
