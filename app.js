@@ -498,481 +498,25 @@ if (mediaInput) {
 
                 return;
             }
+                        sourceVideo.currentTime =
+                time;
 
 
-            const file =
-                event.target.files &&
-                event.target.files[0];
-
-
-            if (!file) {
-                return;
-            }
-
-
-            try {
-
-                await loadCustomerMedia(
-                    file
-                );
-
-            } catch (
-                error
+            /*
+             * Some browsers do not emit seeked when
+             * the requested time is effectively the
+             * current time.
+             */
+            if (
+                Math.abs(
+                    sourceVideo.currentTime -
+                    time
+                ) <
+                0.001
             ) {
 
-                console.error(
-                    error
-                );
-
-                alert(
-                    "Could not load this media file.\n\n" +
-                    error.message
-                );
-
-            }
-
-        }
-    );
-
-}
-
-
-/* ============================================================
-   CUSTOMER MEDIA
-============================================================ */
-
-async function loadCustomerMedia(
-    file
-) {
-
-    cleanupMedia();
-
-
-    state.mediaType =
-        file.type.startsWith(
-            "video/"
-        )
-            ? "video"
-            : "image";
-
-
-    if ($("fileName")) {
-
-        $("fileName")
-            .textContent =
-            file.name;
-
-    }
-
-
-    if ($("mediaInfo")) {
-
-        $("mediaInfo")
-            .textContent =
-            `${file.type || "media"} • ${formatMB(file.size)} MB`;
-
-    }
-
-
-    if (emptyWorkspace) {
-
-        emptyWorkspace.style.display =
-            "none";
-
-    }
-
-
-    if ($("allFramesRow")) {
-
-        $("allFramesRow")
-            .style.display =
-            state.mediaType ===
-            "video"
-                ? "flex"
-                : "none";
-
-    }
-
-
-    if (filmstripBar) {
-
-        filmstripBar.style.display =
-            state.mediaType ===
-            "video"
-                ? "flex"
-                : "none";
-
-    }
-
-
-    if (
-        state.mediaType ===
-        "image"
-    ) {
-
-        await loadImageFile(
-            file
-        );
-
-    } else {
-
-        await loadVideoFile(
-            file
-        );
-
-    }
-
-
-    fitView();
-
-    render();
-
-    saveSession();
-
-}
-
-
-/* ============================================================
-   IMAGE
-============================================================ */
-
-function loadImageFile(
-    file
-) {
-
-    return new Promise(
-        (
-            resolve,
-            reject
-        ) => {
-
-            const url =
-                URL.createObjectURL(
-                    file
-                );
-
-
-            const image =
-                new Image();
-
-
-            image.onload = () => {
-
-                state.image =
-                    image;
-
-                state.imageURL =
-                    url;
-
-                state.annotations =
-                    [];
-
-                state.selectedId =
-                    null;
-
-
-                resetHistory(
-                    state.annotations
-                );
-
-
-                updateCounts();
-
-                hidePopup();
-
-                updateAnnotationsList();
-
-
-                resolve();
-
-            };
-
-
-            image.onerror = () => {
-
-                URL.revokeObjectURL(
-                    url
-                );
-
-                reject(
-                    new Error(
-                        "The image could not be decoded."
-                    )
-                );
-
-            };
-
-
-            image.src =
-                url;
-
-        }
-    );
-
-}
-
-
-/* ============================================================
-   VIDEO
-============================================================ */
-
-function loadVideoFile(
-    file
-) {
-
-    return new Promise(
-        (
-            resolve,
-            reject
-        ) => {
-
-            const url =
-                URL.createObjectURL(
-                    file
-                );
-
-
-            state.videoURL =
-                url;
-
-
-            if (!sourceVideo) {
-
-                reject(
-                    new Error(
-                        "Video element is missing from index.html."
-                    )
-                );
-
-                return;
-
-            }
-
-
-            sourceVideo.src =
-                url;
-
-            sourceVideo.load();
-
-
-            sourceVideo.onloadedmetadata =
-                () => {
-
-                    state.videoDuration =
-                        sourceVideo.duration;
-
-                    state.fps =
-                        30;
-
-
-                    state.totalFrames =
-                        Math.max(
-                            1,
-                            Math.ceil(
-                                state.videoDuration *
-                                state.fps
-                            )
-                        );
-
-
-                    if (
-                        $("videoControlsPanel")
-                    ) {
-
-                        $("videoControlsPanel")
-                            .style.display =
-                            "block";
-
-                    }
-
-
-                    if (
-                        $("totalFrames")
-                    ) {
-
-                        $("totalFrames")
-                            .textContent =
-                            state.totalFrames;
-
-                    }
-
-
-                    if (
-                        $("frameSlider")
-                    ) {
-
-                        $("frameSlider")
-                            .max =
-                            state.totalFrames -
-                            1;
-
-                    }
-
-
-                    state.currentFrame =
-                        0;
-
-
-                    if (
-                        state.pendingVideoRestore &&
-                        state.pendingVideoRestore.fileName ===
-                        file.name
-                    ) {
-
-                        state.frameAnnotations =
-                            new Map(
-                                state
-                                    .pendingVideoRestore
-                                    .frameAnnotations ||
-                                []
-                            );
-
-
-                        state.pendingVideoRestore =
-                            null;
-
-
-                        if (
-                            $("sessionBanner")
-                        ) {
-
-                            $("sessionBanner")
-                                .style.display =
-                                "none";
-
-                        }
-
-
-                        showToast(
-                            "Video annotations restored"
-                        );
-
-                    }
-
-
-                    buildFilmstrip();
-
-
-                    seekVideoFrame(
-                        0
-                    ).then(
-                        resolve
-                    );
-
-                };
-
-
-            sourceVideo.onerror =
-                () => {
-
-                    reject(
-                        new Error(
-                            "The video could not be loaded by the browser."
-                        )
-                    );
-
-                };
-
-        }
-    );
-
-}
-
-
-/* ============================================================
-   VIDEO FRAME SEEK
-============================================================ */
-
-async function seekVideoFrame(
-    frame
-) {
-
-    if (
-        state.mediaType !==
-        "video"
-    ) {
-
-        return;
-
-    }
-
-
-    frame =
-        Math.max(
-            0,
-            Math.min(
-                state.totalFrames -
-                1,
-                Math.round(
-                    frame
-                )
-            )
-        );
-
-
-    state.currentFrame =
-        frame;
-
-
-    const time =
-        Math.min(
-            state.videoDuration,
-            frame /
-                state.fps
-        );
-
-
-    state.currentTime =
-        time;
-
-
-    updateVideoUI();
-
-
-    await seekVideoTime(
-        time
-    );
-
-
-    await captureVideoFrame();
-
-
-    loadFrameAnnotations();
-
-
-    fitView();
-
-
-    render();
-
-}
-
-
-/* ============================================================
-   VIDEO TIME
-============================================================ */
-
-function seekVideoTime(
-    time
-) {
-
-    return new Promise(
-        resolve => {
-
-            if (!sourceVideo) {
-
-                resolve();
-
-                return;
-
-            }
-
-
-            state.videoSeeking =
-                true;
-
-
-            const done = () => {
+                state.videoSeeking =
+                    false;
 
                 sourceVideo
                     .removeEventListener(
@@ -980,25 +524,9 @@ function seekVideoTime(
                         done
                     );
 
-
-                state.videoSeeking =
-                    false;
-
-
                 resolve();
 
-            };
-
-
-            sourceVideo
-                .addEventListener(
-                    "seeked",
-                    done
-                );
-
-
-            sourceVideo.currentTime =
-                time;
+            }
 
         }
     );
@@ -1014,8 +542,8 @@ async function captureVideoFrame() {
 
     if (
         !sourceVideo ||
-        !sourceVideo.videoWidth ||
-        !sourceVideo.videoHeight
+        sourceVideo.readyState <
+            2
     ) {
 
         return;
@@ -1038,6 +566,23 @@ async function captureVideoFrame() {
 
     try {
 
+        const width =
+            sourceVideo.videoWidth;
+
+        const height =
+            sourceVideo.videoHeight;
+
+
+        if (
+            !width ||
+            !height
+        ) {
+
+            return;
+
+        }
+
+
         const frameCanvas =
             document.createElement(
                 "canvas"
@@ -1045,24 +590,24 @@ async function captureVideoFrame() {
 
 
         frameCanvas.width =
-            sourceVideo.videoWidth;
+            width;
 
         frameCanvas.height =
-            sourceVideo.videoHeight;
+            height;
 
 
-        const frameContext =
+        const frameCtx =
             frameCanvas.getContext(
                 "2d"
             );
 
 
-        frameContext.drawImage(
+        frameCtx.drawImage(
             sourceVideo,
             0,
             0,
-            frameCanvas.width,
-            frameCanvas.height
+            width,
+            height
         );
 
 
@@ -1070,18 +615,24 @@ async function captureVideoFrame() {
             new Image();
 
 
+        image.src =
+            frameCanvas.toDataURL(
+                "image/jpeg",
+                0.92
+            );
+
+
         await new Promise(
-            resolve => {
+            (
+                resolve,
+                reject
+            ) => {
 
                 image.onload =
                     resolve;
 
-
-                image.src =
-                    frameCanvas.toDataURL(
-                        "image/jpeg",
-                        0.92
-                    );
+                image.onerror =
+                    reject;
 
             }
         );
@@ -1089,11 +640,6 @@ async function captureVideoFrame() {
 
         state.image =
             image;
-
-
-        state.currentTime =
-            sourceVideo.currentTime;
-
 
     } finally {
 
@@ -1106,7 +652,612 @@ async function captureVideoFrame() {
 
 
 /* ============================================================
-   CANVAS
+   CLEANUP MEDIA
+============================================================ */
+
+function cleanupMedia() {
+
+    if (
+        state.imageURL
+    ) {
+
+        URL.revokeObjectURL(
+            state.imageURL
+        );
+
+        state.imageURL =
+            null;
+
+    }
+
+
+    if (
+        state.videoURL
+    ) {
+
+        URL.revokeObjectURL(
+            state.videoURL
+        );
+
+        state.videoURL =
+            null;
+
+    }
+
+
+    if (sourceVideo) {
+
+        sourceVideo.pause();
+
+        sourceVideo.removeAttribute(
+            "src"
+        );
+
+        sourceVideo.load();
+
+    }
+
+
+    state.image =
+        null;
+
+    state.mediaType =
+        null;
+
+    state.videoDuration =
+        0;
+
+    state.currentFrame =
+        0;
+
+    state.currentTime =
+        0;
+
+    state.totalFrames =
+        0;
+
+    state.annotations =
+        [];
+
+    state.frameAnnotations =
+        new Map();
+
+    state.selectedId =
+        null;
+
+
+    if (
+        $("videoControlsPanel")
+    ) {
+
+        $("videoControlsPanel")
+            .style.display =
+            "none";
+
+    }
+
+
+    if (filmstripBar) {
+
+        filmstripBar.style.display =
+            "none";
+
+    }
+
+
+    hidePopup();
+
+    updateCounts();
+
+    updateAnnotationsList();
+
+}
+
+
+/* ============================================================
+   VIDEO UI
+============================================================ */
+
+function updateVideoUI() {
+
+    if (
+        $("currentFrame")
+    ) {
+
+        $("currentFrame")
+            .textContent =
+            String(
+                state.currentFrame +
+                1
+            );
+
+    }
+
+
+    if (
+        $("totalFrames")
+    ) {
+
+        $("totalFrames")
+            .textContent =
+            String(
+                Math.max(
+                    1,
+                    state.totalFrames
+                )
+            );
+
+    }
+
+
+    if (
+        $("currentTime")
+    ) {
+
+        $("currentTime")
+            .textContent =
+            formatVideoTime(
+                state.currentTime
+            );
+
+    }
+
+
+    if (
+        $("duration")
+    ) {
+
+        $("duration")
+            .textContent =
+            formatVideoTime(
+                state.videoDuration
+            );
+
+    }
+
+
+    const slider =
+        $("frameSlider");
+
+
+    if (slider) {
+
+        slider.max =
+            Math.max(
+                0,
+                state.totalFrames -
+                1
+            );
+
+        slider.value =
+            state.currentFrame;
+
+    }
+
+
+    if (
+        filmstripCurrentLabel
+    ) {
+
+        filmstripCurrentLabel
+            .textContent =
+            `Frame ${state.currentFrame + 1}`;
+
+    }
+
+}
+
+
+function formatVideoTime(
+    seconds
+) {
+
+    const value =
+        Number(
+            seconds
+        );
+
+
+    if (
+        !Number.isFinite(
+            value
+        )
+    ) {
+
+        return "00:00";
+
+    }
+
+
+    const total =
+        Math.max(
+            0,
+            Math.floor(
+                value
+            )
+        );
+
+
+    const minutes =
+        Math.floor(
+            total / 60
+        );
+
+
+    const secs =
+        total % 60;
+
+
+    return (
+        String(
+            minutes
+        ).padStart(
+            2,
+            "0"
+        ) +
+        ":" +
+        String(
+            secs
+        ).padStart(
+            2,
+            "0"
+        )
+    );
+
+}
+
+
+/* ============================================================
+   FRAME CONTROLS
+============================================================ */
+
+$("frameSlider")?.addEventListener(
+    "input",
+    async event => {
+
+        const frame =
+            Number(
+                event.target.value
+            );
+
+
+        await seekVideoFrame(
+            frame
+        );
+
+    }
+);
+
+
+$("prevFrame")?.addEventListener(
+    "click",
+    async () => {
+
+        await seekVideoFrame(
+            state.currentFrame -
+            1
+        );
+
+    }
+);
+
+
+$("nextFrame")?.addEventListener(
+    "click",
+    async () => {
+
+        await seekVideoFrame(
+            state.currentFrame +
+            1
+        );
+
+    }
+);
+
+
+$("playVideo")?.addEventListener(
+    "click",
+    toggleVideoPlayback
+);
+
+
+async function toggleVideoPlayback() {
+
+    if (
+        !sourceVideo ||
+        state.mediaType !==
+            "video"
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        state.videoPlaying
+    ) {
+
+        sourceVideo.pause();
+
+        state.videoPlaying =
+            false;
+
+        updatePlayButton();
+
+        return;
+
+    }
+
+
+    try {
+
+        await sourceVideo.play();
+
+        state.videoPlaying =
+            true;
+
+        updatePlayButton();
+
+    } catch (
+        error
+    ) {
+
+        console.warn(
+            "Video playback failed:",
+            error
+        );
+
+        showToast(
+            "Unable to play this video."
+        );
+
+    }
+
+}
+
+
+function updatePlayButton() {
+
+    const button =
+        $("playVideo");
+
+
+    if (!button) {
+        return;
+    }
+
+
+    button.textContent =
+        state.videoPlaying
+            ? "❚❚"
+            : "▶";
+
+}
+
+
+/* ============================================================
+   VIDEO EVENTS
+============================================================ */
+
+sourceVideo?.addEventListener(
+    "timeupdate",
+    () => {
+
+        if (
+            state.videoSeeking
+        ) {
+
+            return;
+
+        }
+
+
+        state.currentTime =
+            sourceVideo.currentTime;
+
+
+        if (
+            state.fps > 0
+        ) {
+
+            state.currentFrame =
+                Math.max(
+                    0,
+                    Math.min(
+                        state.totalFrames -
+                        1,
+                        Math.round(
+                            sourceVideo.currentTime *
+                            state.fps
+                        )
+                    )
+                );
+
+        }
+
+
+        updateVideoUI();
+
+    }
+);
+
+
+sourceVideo?.addEventListener(
+    "play",
+    () => {
+
+        state.videoPlaying =
+            true;
+
+        updatePlayButton();
+
+    }
+);
+
+
+sourceVideo?.addEventListener(
+    "pause",
+    () => {
+
+        state.videoPlaying =
+            false;
+
+        updatePlayButton();
+
+    }
+);
+
+
+sourceVideo?.addEventListener(
+    "ended",
+    () => {
+
+        state.videoPlaying =
+            false;
+
+        updatePlayButton();
+
+    }
+);
+
+
+/* ============================================================
+   FILMSTRIP
+============================================================ */
+
+function buildFilmstrip() {
+
+    if (
+        !filmstripTrack ||
+        state.mediaType !==
+            "video"
+    ) {
+
+        return;
+
+    }
+
+
+    filmstripTrack.innerHTML =
+        "";
+
+
+    const count =
+        Math.min(
+            12,
+            Math.max(
+                1,
+                state.totalFrames
+            )
+        );
+
+
+    for (
+        let index = 0;
+        index < count;
+        index++
+    ) {
+
+        const frame =
+            Math.round(
+                (
+                    index /
+                    Math.max(
+                        1,
+                        count -
+                        1
+                    )
+                ) *
+                Math.max(
+                    0,
+                    state.totalFrames -
+                    1
+                )
+            );
+
+
+        const item =
+            document.createElement(
+                "button"
+            );
+
+
+        item.type =
+            "button";
+
+        item.className =
+            "filmstrip-item";
+
+
+        item.dataset.frame =
+            String(
+                frame
+            );
+
+
+        item.innerHTML = `
+            <span class="filmstrip-frame">
+                ${frame + 1}
+            </span>
+        `;
+
+
+        item.addEventListener(
+            "click",
+            () =>
+                seekVideoFrame(
+                    frame
+                )
+        );
+
+
+        filmstripTrack.appendChild(
+            item
+        );
+
+    }
+
+
+    updateFilmstripSelection();
+
+}
+
+
+function updateFilmstripSelection() {
+
+    if (!filmstripTrack) {
+        return;
+    }
+
+
+    filmstripTrack
+        .querySelectorAll(
+            ".filmstrip-item"
+        )
+        .forEach(
+            item => {
+
+                const frame =
+                    Number(
+                        item.dataset.frame
+                    );
+
+
+                item.classList.toggle(
+                    "active",
+                    frame ===
+                    state.currentFrame
+                );
+
+            }
+        );
+
+}
+
+
+/* ============================================================
+   CANVAS RESIZE
 ============================================================ */
 
 function resizeCanvas() {
@@ -1125,48 +1276,49 @@ function resizeCanvas() {
         workspace.getBoundingClientRect();
 
 
-    const dpr =
+    if (
+        rect.width <= 0 ||
+        rect.height <= 0
+    ) {
+
+        return;
+
+    }
+
+
+    const ratio =
         window.devicePixelRatio ||
         1;
 
 
     canvas.width =
-        Math.max(
-            1,
-            Math.floor(
-                rect.width *
-                dpr
-            )
+        Math.round(
+            rect.width *
+            ratio
         );
 
 
     canvas.height =
-        Math.max(
-            1,
-            Math.floor(
-                rect.height *
-                dpr
-            )
+        Math.round(
+            rect.height *
+            ratio
         );
 
 
     canvas.style.width =
-        rect.width +
-        "px";
-
+        `${rect.width}px`;
 
     canvas.style.height =
-        rect.height +
-        "px";
+        `${rect.height}px`;
 
 
     if (ctx) {
 
         ctx.setTransform(
-            dpr,
+            ratio,
             0,
             0,
-            dpr,
+            ratio,
             0,
             0
         );
@@ -1180,145 +1332,60 @@ function resizeCanvas() {
 
 
 /* ============================================================
-   CLEAR CANVAS
-============================================================ */
-
-function clearCanvas(
-    width,
-    height
-) {
-
-    if (!ctx) {
-        return;
-    }
-
-
-    ctx.clearRect(
-        0,
-        0,
-        width,
-        height
-    );
-
-}
-
-
-/* ============================================================
-   IMAGE / SCREEN COORDINATES
-============================================================ */
-
-function imageToScreen(
-    x,
-    y
-) {
-
-    return {
-
-        x:
-            x *
-            state.scale +
-            state.offsetX,
-
-        y:
-            y *
-            state.scale +
-            state.offsetY
-
-    };
-
-}
-
-
-function screenToImage(
-    x,
-    y
-) {
-
-    return {
-
-        x:
-            (x -
-                state.offsetX) /
-            state.scale,
-
-        y:
-            (y -
-                state.offsetY) /
-            state.scale
-
-    };
-
-}
-
-
-/* ============================================================
-   FIT VIEW
+   VIEW TRANSFORM
 ============================================================ */
 
 function fitView() {
 
     if (
-        !state.image &&
-        state.mediaType !==
-        "video"
+        !canvas ||
+        !state.image
     ) {
 
         return;
 
-    }
-
-
-    if (!workspace) {
-        return;
     }
 
 
     const rect =
-        workspace.getBoundingClientRect();
+        canvas.getBoundingClientRect();
 
 
-    let width;
+    const imageWidth =
+        state.image.naturalWidth ||
+        state.image.width;
 
-    let height;
+    const imageHeight =
+        state.image.naturalHeight ||
+        state.image.height;
 
 
     if (
-        state.mediaType ===
-            "video" &&
-        sourceVideo &&
-        sourceVideo.videoWidth
+        !imageWidth ||
+        !imageHeight
     ) {
 
-        width =
-            sourceVideo.videoWidth;
-
-        height =
-            sourceVideo.videoHeight;
-
-    } else {
-
-        width =
-            state.image?.naturalWidth ||
-            state.image?.width ||
-            1;
-
-
-        height =
-            state.image?.naturalHeight ||
-            state.image?.height ||
-            1;
+        return;
 
     }
 
 
-    const sx =
-        (rect.width - 40) /
-        width;
+    const scaleX =
+        rect.width /
+        imageWidth;
 
 
-    const sy =
-        (rect.height - 40) /
-        height;
+    const scaleY =
+        rect.height /
+        imageHeight;
+
+
+    state.scale =
+        Math.min(
+            scaleX,
+            scaleY
+        ) *
+        0.92;
 
 
     state.scale =
@@ -1326,10 +1393,7 @@ function fitView() {
             state.minScale,
             Math.min(
                 state.maxScale,
-                Math.min(
-                    sx,
-                    sy
-                )
+                state.scale
             )
         );
 
@@ -1337,8 +1401,8 @@ function fitView() {
     state.offsetX =
         (
             rect.width -
-            width *
-                state.scale
+            imageWidth *
+            state.scale
         ) /
         2;
 
@@ -1346,400 +1410,29 @@ function fitView() {
     state.offsetY =
         (
             rect.height -
-            height *
-                state.scale
+            imageHeight *
+            state.scale
         ) /
         2;
 
 
     updateZoomUI();
 
-    render();
-
 }
 
 
 /* ============================================================
-   FIT BUTTON
+   COORDINATE HELPERS
 ============================================================ */
 
-$("fitView")?.addEventListener(
-    "click",
-    fitView
-);
-
-
-/* ============================================================
-   RESET VIEW
-============================================================ */
-
-$("resetView")?.addEventListener(
-    "click",
-    () => {
-
-        state.scale =
-            1;
-
-        state.offsetX =
-            0;
-
-        state.offsetY =
-            0;
-
-
-        updateZoomUI();
-
-        render();
-
-    }
-);
-
-
-/* ============================================================
-   ZOOM BUTTONS
-============================================================ */
-
-$("zoomIn")?.addEventListener(
-    "click",
-    () =>
-        zoomCenter(
-            1.20
-        )
-);
-
-
-$("zoomOut")?.addEventListener(
-    "click",
-    () =>
-        zoomCenter(
-            1 / 1.20
-        )
-);
-
-
-function zoomCenter(
-    factor
+function screenToImage(
+    clientX,
+    clientY
 ) {
-
-    if (!workspace) {
-        return;
-    }
-
-
-    const rect =
-        workspace.getBoundingClientRect();
-
-
-    zoomAt(
-        factor,
-        rect.width / 2,
-        rect.height / 2
-    );
-
-}
-
-
-/* ============================================================
-   ZOOM WITH MOUSE
-============================================================ */
-
-workspace?.addEventListener(
-    "wheel",
-    event => {
-
-        event.preventDefault();
-
-
-        const rect =
-            workspace.getBoundingClientRect();
-
-
-        const x =
-            event.clientX -
-            rect.left;
-
-
-        const y =
-            event.clientY -
-            rect.top;
-
-
-        const factor =
-            event.deltaY < 0
-                ? 1.12
-                : 1 / 1.12;
-
-
-        zoomAt(
-            factor,
-            x,
-            y
-        );
-
-    },
-    {
-        passive: false
-    }
-);
-
-
-/* ============================================================
-   ZOOM AT POINT
-============================================================ */
-
-function zoomAt(
-    factor,
-    x,
-    y
-) {
-
-    const imagePoint =
-        screenToImage(
-            x,
-            y
-        );
-
-
-    state.scale =
-        Math.max(
-            state.minScale,
-            Math.min(
-                state.maxScale,
-                state.scale *
-                    factor
-            )
-        );
-
-
-    state.offsetX =
-        x -
-        imagePoint.x *
-            state.scale;
-
-
-    state.offsetY =
-        y -
-        imagePoint.y *
-            state.scale;
-
-
-    updateZoomUI();
-
-    render();
-
-}
-
-
-/* ============================================================
-   MAXIMIZE WORKSPACE
-============================================================ */
-
-$("maximizeWorkspace")?.addEventListener(
-    "click",
-    toggleFullscreen
-);
-
-
-function toggleFullscreen() {
 
     if (
-        !document.fullscreenElement
+        !canvas
     ) {
-
-        workspaceRoot
-            ?.requestFullscreen?.()
-            .catch(
-                () => {}
-            );
-
-    } else {
-
-        document
-            .exitFullscreen?.();
-
-    }
-
-}
-
-
-/* ============================================================
-   FULLSCREEN CHANGE
-============================================================ */
-
-document.addEventListener(
-    "fullscreenchange",
-    () => {
-
-        const active =
-            document.fullscreenElement ===
-            workspaceRoot;
-
-
-        const button =
-            $("maximizeWorkspace");
-
-
-        if (button) {
-
-            button.textContent =
-                active
-                    ? "⤢"
-                    : "⛶";
-
-
-            button.classList.toggle(
-                "active",
-                active
-            );
-
-        }
-
-
-        setTimeout(
-            resizeCanvas,
-            50
-        );
-
-    }
-);
-
-
-/* ============================================================
-   RIGHT PANEL
-============================================================ */
-
-$("toggleRightPanel")?.addEventListener(
-    "click",
-    toggleRightPanelVisibility
-);
-
-
-$("closeRightPanel")?.addEventListener(
-    "click",
-    closeRightPanelFn
-);
-
-
-$("reopenRightPanel")?.addEventListener(
-    "click",
-    openRightPanelFn
-);
-
-
-function toggleRightPanelVisibility() {
-
-    state.rightPanelOpen
-        ? closeRightPanelFn()
-        : openRightPanelFn();
-
-}
-
-
-function closeRightPanelFn() {
-
-    state.rightPanelOpen =
-        false;
-
-
-    appEl?.classList.add(
-        "panel-collapsed"
-    );
-
-
-    const button =
-        $("reopenRightPanel");
-
-
-    if (button) {
-
-        button.style.display =
-            "block";
-
-    }
-
-
-    setTimeout(
-        resizeCanvas,
-        50
-    );
-
-}
-
-
-function openRightPanelFn() {
-
-    state.rightPanelOpen =
-        true;
-
-
-    appEl?.classList.remove(
-        "panel-collapsed"
-    );
-
-
-    const button =
-        $("reopenRightPanel");
-
-
-    if (button) {
-
-        button.style.display =
-            "none";
-
-    }
-
-
-    setTimeout(
-        resizeCanvas,
-        50
-    );
-
-}
-
-
-/* ============================================================
-   POINTER EVENTS
-============================================================ */
-
-canvas?.addEventListener(
-    "pointerdown",
-    pointerDown
-);
-
-
-canvas?.addEventListener(
-    "pointermove",
-    pointerMove
-);
-
-
-canvas?.addEventListener(
-    "pointerup",
-    pointerUp
-);
-
-
-canvas?.addEventListener(
-    "pointercancel",
-    pointerUp
-);
-
-
-canvas?.addEventListener(
-    "dblclick",
-    doubleClick
-);
-
-
-/* ============================================================
-   POINTER POSITION
-============================================================ */
-
-function pointerPosition(
-    event
-) {
-
-    if (!canvas) {
 
         return {
             x: 0,
@@ -1753,467 +1446,319 @@ function pointerPosition(
         canvas.getBoundingClientRect();
 
 
+    const x =
+        clientX -
+        rect.left;
+
+
+    const y =
+        clientY -
+        rect.top;
+
+
     return {
 
         x:
-            event.clientX -
-            rect.left,
+            (
+                x -
+                state.offsetX
+            ) /
+            state.scale,
 
         y:
-            event.clientY -
-            rect.top
+            (
+                y -
+                state.offsetY
+            ) /
+            state.scale
 
     };
 
 }
 
 
-/* ============================================================
-   POINTER DOWN
-============================================================ */
-
-function pointerDown(
-    event
-) {
-
-    const p =
-        pointerPosition(
-            event
-        );
-
-
-    try {
-
-        canvas.setPointerCapture(
-            event.pointerId
-        );
-
-    } catch {}
-
-
-    state.pointerDown =
-        true;
-
-
-    if (
-        state.mode ===
-            "pan" ||
-        event.button === 1 ||
-        event.shiftKey ||
-        state.spacePan
-    ) {
-
-        state.panning =
-            true;
-
-
-        state.panStart = {
-
-            x:
-                p.x,
-
-            y:
-                p.y,
-
-            offsetX:
-                state.offsetX,
-
-            offsetY:
-                state.offsetY
-
-        };
-
-
-        updateCursor();
-
-        return;
-
-    }
-
-
-    if (
-        state.mode ===
-        "select"
-    ) {
-
-        const hit =
-            hitTest(
-                p.x,
-                p.y
-            );
-
-
-        if (hit) {
-
-            state.selectedId =
-                hit.id;
-
-
-            state.resizeHandle =
-                hit.handle ||
-                null;
-
-
-            const imagePoint =
-                screenToImage(
-                    p.x,
-                    p.y
-                );
-
-
-            state.dragStartImage =
-                imagePoint;
-
-
-            state.dragLastImage =
-                imagePoint;
-
-
-            state.dragging =
-                true;
-
-
-            updateSelected();
-
-        } else {
-
-            state.selectedId =
-                null;
-
-
-            updateSelected();
-
-        }
-
-
-        render();
-
-        return;
-
-    }
-
-
-    if (
-        state.mode ===
-        "erase"
-    ) {
-
-        const hit =
-            hitTest(
-                p.x,
-                p.y
-            );
-
-
-        if (hit) {
-
-            state.selectedId =
-                hit.id;
-
-
-            deleteSelected();
-
-        }
-
-
-        return;
-
-    }
-
-
-    if (
-        state.mode ===
-        "draw"
-    ) {
-
-        if (
-            state.annotationType ===
-            "box"
-        ) {
-
-            beginDrawing(
-                p.x,
-                p.y
-            );
-
-        } else {
-
-            addPolygonPoint(
-                p.x,
-                p.y
-            );
-
-        }
-
-    }
-
-}
-
-
-/* ============================================================
-   POINTER MOVE
-============================================================ */
-
-function pointerMove(
-    event
-) {
-
-    const p =
-        pointerPosition(
-            event
-        );
-
-
-    if (
-        state.panning
-    ) {
-
-        const dx =
-            p.x -
-            state.panStart.x;
-
-
-        const dy =
-            p.y -
-            state.panStart.y;
-
-
-        state.offsetX =
-            state.panStart.offsetX +
-            dx;
-
-
-        state.offsetY =
-            state.panStart.offsetY +
-            dy;
-
-
-        render();
-
-        return;
-
-    }
-
-
-    if (
-        state.mode ===
-            "select" &&
-        state.dragging &&
-        state.selectedId
-    ) {
-
-        const a =
-            getSelected();
-
-
-        if (!a) {
-            return;
-        }
-
-
-        const current =
-            screenToImage(
-                p.x,
-                p.y
-            );
-
-
-        const last =
-            state.dragLastImage;
-
-
-        if (
-            state.resizeHandle &&
-            a.type ===
-                "box"
-        ) {
-
-            resizeBox(
-                a,
-                state.resizeHandle,
-                current
-            );
-
-        } else {
-
-            const dx =
-                current.x -
-                last.x;
-
-
-            const dy =
-                current.y -
-                last.y;
-
-
-            moveAnnotation(
-                a,
-                dx,
-                dy
-            );
-
-        }
-
-
-        state.dragLastImage =
-            current;
-
-
-        a.corrected =
-            true;
-
-
-        saveFrame();
-
-        render();
-
-        renderPopupBody(
-            a
-        );
-
-        updateAnnotationsList();
-
-        return;
-
-    }
-
-
-    if (
-        state.mode ===
-            "draw" &&
-        state.drawing
-    ) {
-
-        state.drawCurrent =
-            screenToImage(
-                p.x,
-                p.y
-            );
-
-
-        render();
-
-    }
-
-}
-
-
-/* ============================================================
-   POINTER UP
-============================================================ */
-
-function pointerUp() {
-
-    const wasDraggingAnnotation =
-        state.mode ===
-            "select" &&
-        state.dragging &&
-        state.selectedId;
-
-
-    if (
-        state.mode ===
-            "draw" &&
-        state.drawing &&
-        state.annotationType ===
-            "box"
-    ) {
-
-        finishBoxDrawing();
-
-    }
-
-
-    if (
-        wasDraggingAnnotation
-    ) {
-
-        saveFrame();
-
-        pushHistory();
-
-        saveSession();
-
-    }
-
-
-    state.pointerDown =
-        false;
-
-
-    state.dragging =
-        false;
-
-
-    state.panning =
-        false;
-
-
-    state.resizeHandle =
-        null;
-
-
-    updateCursor();
-
-}
-
-
-/* ============================================================
-   BOX DRAWING
-============================================================ */
-
-function beginDrawing(
+function imageToScreen(
     x,
     y
 ) {
 
-    const point =
-        screenToImage(
-            x,
-            y
+    return {
+
+        x:
+            state.offsetX +
+            x *
+            state.scale,
+
+        y:
+            state.offsetY +
+            y *
+            state.scale
+
+    };
+
+}
+
+
+function clamp(
+    value,
+    min,
+    max
+) {
+
+    return Math.max(
+        min,
+        Math.min(
+            max,
+            value
+        )
+    );
+
+}
+
+
+/* ============================================================
+   ZOOM
+============================================================ */
+
+function setZoom(
+    nextScale,
+    centerX,
+    centerY
+) {
+
+    if (
+        !canvas
+    ) {
+
+        return;
+
+    }
+
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    const cx =
+        Number.isFinite(
+            centerX
+        )
+            ? centerX -
+              rect.left
+            : rect.width /
+              2;
+
+
+    const cy =
+        Number.isFinite(
+            centerY
+        )
+            ? centerY -
+              rect.top
+            : rect.height /
+              2;
+
+
+    const oldScale =
+        state.scale;
+
+
+    const newScale =
+        clamp(
+            nextScale,
+            state.minScale,
+            state.maxScale
         );
 
 
-    state.drawing =
-        true;
+    if (
+        oldScale ===
+        newScale
+    ) {
+
+        return;
+
+    }
 
 
-    state.drawStart =
-        point;
+    const imageX =
+        (
+            cx -
+            state.offsetX
+        ) /
+        oldScale;
 
 
-    state.drawCurrent =
-        point;
+    const imageY =
+        (
+            cy -
+            state.offsetY
+        ) /
+        oldScale;
 
+
+    state.scale =
+        newScale;
+
+
+    state.offsetX =
+        cx -
+        imageX *
+        newScale;
+
+
+    state.offsetY =
+        cy -
+        imageY *
+        newScale;
+
+
+    updateZoomUI();
 
     render();
 
 }
 
 
-function finishBoxDrawing() {
+function zoomIn() {
 
-    if (
-        !state.drawing ||
-        !state.drawStart ||
-        !state.drawCurrent
-    ) {
+    setZoom(
+        state.scale *
+        1.2
+    );
 
-        state.drawing =
-            false;
+}
 
-        return;
+
+function zoomOut() {
+
+    setZoom(
+        state.scale /
+        1.2
+    );
+
+}
+
+
+function resetZoom() {
+
+    fitView();
+
+    render();
+
+}
+
+
+$("zoomIn")?.addEventListener(
+    "click",
+    zoomIn
+);
+
+
+$("zoomOut")?.addEventListener(
+    "click",
+    zoomOut
+);
+
+
+$("resetZoom")?.addEventListener(
+    "click",
+    resetZoom
+);
+
+
+function updateZoomUI() {
+
+    const zoom =
+        $("zoomLevel");
+
+
+    if (zoom) {
+
+        zoom.textContent =
+            `${Math.round(
+                state.scale *
+                100
+            )}%`;
 
     }
 
-
-    const start =
-        state.drawStart;
+}
 
 
-    const end =
-        state.drawCurrent;
+/* ============================================================
+   MOUSE WHEEL ZOOM
+============================================================ */
 
+canvas?.addEventListener(
+    "wheel",
+    event => {
+
+        event.preventDefault();
+
+
+        const factor =
+            event.deltaY < 0
+                ? 1.12
+                : 0.89;
+
+
+        setZoom(
+            state.scale *
+            factor,
+            event.clientX,
+            event.clientY
+        );
+
+    },
+    {
+        passive: false
+    }
+);
+
+
+/* ============================================================
+   POINTER HELPERS
+============================================================ */
+
+function getPointerPosition(
+    event
+) {
+
+    return screenToImage(
+        event.clientX,
+        event.clientY
+    );
+
+}
+
+
+function distance(
+    a,
+    b
+) {
+
+    const dx =
+        a.x -
+        b.x;
+
+    const dy =
+        a.y -
+        b.y;
+
+
+    return Math.sqrt(
+        dx * dx +
+        dy * dy
+    );
+
+}
+
+
+function normalizeBox(
+    start,
+    end
+) {
 
     const x =
         Math.min(
@@ -2243,306 +1788,488 @@ function finishBoxDrawing() {
         );
 
 
-    state.drawing =
-        false;
-
-
-    state.drawStart =
-        null;
-
-
-    state.drawCurrent =
-        null;
-
-
-    if (
-        width < 3 ||
-        height < 3
-    ) {
-
-        render();
-
-        return;
-
-    }
-
-
-    createAnnotation({
-
-        type:
-            "box",
-
+    return {
         x,
-
         y,
-
         width,
-
-        height,
-
-        label:
-            "object",
-
-        score:
-            1,
-
-        occlusion:
-            0,
-
-        truncation:
-            "NONE",
-
-        aiGenerated:
-            false,
-
-        corrected:
-            true
-
-    });
-
-
-    render();
-
-}
-
-
-
-
-
-/* ============================================================
-   DOUBLE CLICK
-============================================================ */
-
-function doubleClick(
-    event
-) {
-
-    if (
-        state.mode ===
-            "draw" &&
-        (
-            state.annotationType ===
-                "polygon" ||
-            state.annotationType ===
-                "segmentation"
-        )
-    ) {
-
-        finishPolygon();
-
-        return;
-
-    }
-
-
-    const p =
-        pointerPosition(
-            event
-        );
-
-
-    const hit =
-        hitTest(
-            p.x,
-            p.y
-        );
-
-
-    if (hit) {
-
-        state.selectedId =
-            hit.id;
-
-
-        showAnnotationPopup(
-            hit.annotation ||
-            getSelected()
-        );
-
-    }
+        height
+    };
 
 }
 
 
 /* ============================================================
-   FINISH POLYGON
+   CANVAS POINTER DOWN
 ============================================================ */
 
-function finishPolygon() {
-
-    if (
-        state.polygonPoints.length <
-        3
-    ) {
-
-        state.drawing =
-            false;
-
-        state.polygonPoints =
-            [];
-
-        render();
-
-        return;
-
-    }
-
-
-    const points =
-        state.polygonPoints
-            .map(
-                point => ({
-                    x:
-                        point.x,
-
-                    y:
-                        point.y
-                })
-            );
-
-
-    const xs =
-        points.map(
-            point =>
-                point.x
-        );
-
-
-    const ys =
-        points.map(
-            point =>
-                point.y
-        );
-
-
-    const minX =
-        Math.min(
-            ...xs
-        );
-
-
-    const minY =
-        Math.min(
-            ...ys
-        );
-
-
-    const maxX =
-        Math.max(
-            ...xs
-        );
-
-
-    const maxY =
-        Math.max(
-            ...ys
-        );
-
-
-    createAnnotation({
-
-        type:
-            state.annotationType,
-
-        x:
-            minX,
-
-        y:
-            minY,
-
-        width:
-            maxX -
-            minX,
-
-        height:
-            maxY -
-            minY,
-
-        points,
-
-        label:
-            "object",
-
-        score:
-            1,
-
-        occlusion:
-            0,
-
-        truncation:
-            "NONE",
-
-        aiGenerated:
-            false,
-
-        corrected:
-            true
-
-    });
-
-
-    state.drawing =
-        false;
-
-
-    state.polygonPoints =
-        [];
-
-
-    render();
-
-}
-
-
-/* ============================================================
-   KEYBOARD
-============================================================ */
-
-document.addEventListener(
-    "keydown",
+canvas?.addEventListener(
+    "pointerdown",
     event => {
 
         if (
-            event.code ===
-            "Space" &&
-            !event.repeat
+            event.button !==
+            0
         ) {
 
-            state.spacePan =
+            return;
+
+        }
+
+
+        canvas.setPointerCapture(
+            event.pointerId
+        );
+
+
+        state.pointerDown =
+            true;
+
+
+        const point =
+            getPointerPosition(
+                event
+            );
+
+
+        if (
+            state.spacePan ||
+            state.mode ===
+            "pan"
+        ) {
+
+            state.panning =
                 true;
 
-            updateCursor();
+            state.panStart = {
+
+                clientX:
+                    event.clientX,
+
+                clientY:
+                    event.clientY,
+
+                offsetX:
+                    state.offsetX,
+
+                offsetY:
+                    state.offsetY
+
+            };
+
+            return;
 
         }
 
 
         if (
-            event.key ===
-            "Escape"
+            state.annotationType ===
+            "polygon"
         ) {
 
+            handlePolygonPointerDown(
+                point
+            );
+
+            return;
+
+        }
+
+
+        if (
+            state.annotationType ===
+            "segmentation"
+        ) {
+
+            handleSegmentationPointerDown(
+                point
+            );
+
+            return;
+
+        }
+
+
+        if (
+            state.mode ===
+            "select"
+        ) {
+
+            const selected =
+                findAnnotationAtPoint(
+                    point
+                );
+
+
+            if (selected) {
+
+                state.selectedId =
+                    selected.id;
+
+                state.dragging =
+                    true;
+
+                state.dragStartImage =
+                    point;
+
+                state.dragLastImage =
+                    point;
+
+                pushHistory();
+
+                updateAnnotationsList();
+
+                render();
+
+                return;
+
+            }
+
+
+            state.selectedId =
+                null;
+
+            hidePopup();
+
+            updateAnnotationsList();
+
+            render();
+
+            return;
+
+        }
+
+
+        if (
+            state.mode ===
+            "draw"
+        ) {
+
+            state.drawing =
+                true;
+
+            state.drawStart =
+                point;
+
+            state.drawCurrent =
+                point;
+
+            return;
+
+        }
+
+    }
+);
+
+
+/* ============================================================
+   CANVAS POINTER MOVE
+============================================================ */
+
+canvas?.addEventListener(
+    "pointermove",
+    event => {
+
+        if (
+            !state.pointerDown
+        ) {
+
+            const point =
+                getPointerPosition(
+                    event
+                );
+
+
+            const hovered =
+                findAnnotationAtPoint(
+                    point
+                );
+
+
+            const id =
+                hovered?.id ||
+                null;
+
+
             if (
-                state.drawing
+                id !==
+                state.hoveredId
             ) {
 
-                state.drawing =
-                    false;
-
-                state.polygonPoints =
-                    [];
-
-                state.drawStart =
-                    null;
-
-                state.drawCurrent =
-                    null;
+                state.hoveredId =
+                    id;
 
                 render();
 
             }
 
 
-            hidePopup();
+            return;
+
+        }
+
+
+        if (
+            state.panning &&
+            state.panStart
+        ) {
+
+            const dx =
+                event.clientX -
+                state.panStart.clientX;
+
+
+            const dy =
+                event.clientY -
+                state.panStart.clientY;
+
+
+            state.offsetX =
+                state.panStart.offsetX +
+                dx;
+
+
+            state.offsetY =
+                state.panStart.offsetY +
+                dy;
+
+
+            render();
+
+            return;
+
+        }
+
+
+        const point =
+            getPointerPosition(
+                event
+            );
+
+
+        if (
+            state.dragging &&
+            state.selectedId
+        ) {
+
+            moveSelectedAnnotation(
+                point
+            );
+
+            return;
+
+        }
+
+
+        if (
+            state.drawing
+        ) {
+
+            state.drawCurrent =
+                point;
+
+            render();
+
+            return;
+
+        }
+
+
+        if (
+            state.annotationType ===
+            "polygon" &&
+            state.polygonPoints.length
+        ) {
+
+            state.drawCurrent =
+                point;
+
+            render();
+
+        }
+
+    }
+);
+
+
+/* ============================================================
+   CANVAS POINTER UP
+============================================================ */
+
+canvas?.addEventListener(
+    "pointerup",
+    event => {
+
+        state.pointerDown =
+            false;
+
+
+        if (
+            canvas.hasPointerCapture(
+                event.pointerId
+            )
+        ) {
+
+            canvas.releasePointerCapture(
+                event.pointerId
+            );
+
+        }
+
+
+        if (
+            state.panning
+        ) {
+
+            state.panning =
+                false;
+
+            state.panStart =
+                null;
+
+            return;
+
+        }
+
+
+        if (
+            state.dragging
+        ) {
+
+            state.dragging =
+                false;
+
+            state.dragStartImage =
+                null;
+
+            state.dragLastImage =
+                null;
+
+            saveFrame();
+
+            updateAnnotationsList();
+
+            render();
+
+            return;
+
+        }
+
+
+        if (
+            state.drawing
+        ) {
+
+            state.drawing =
+                false;
+
+            const start =
+                state.drawStart;
+
+            const end =
+                getPointerPosition(
+                    event
+                );
+
+
+            state.drawStart =
+                null;
+
+            state.drawCurrent =
+                null;
+
+
+            if (
+                start &&
+                end
+            ) {
+
+                createBoxAnnotation(
+                    start,
+                    end
+                );
+
+            }
+
+
+            return;
+
+        }
+
+    }
+);
+
+
+/* ============================================================
+   POINTER CANCEL
+============================================================ */
+
+canvas?.addEventListener(
+    "pointercancel",
+    () => {
+
+        state.pointerDown =
+            false;
+
+        state.panning =
+            false;
+
+        state.dragging =
+            false;
+
+        state.drawing =
+            false;
+
+        state.drawStart =
+            null;
+
+        state.drawCurrent =
+            null;
+
+        state.panStart =
+            null;
+
+    }
+);
+
+
+/* ============================================================
+   KEYBOARD
+============================================================ */
+
+window.addEventListener(
+    "keydown",
+    event => {
+
+        if (
+            event.code ===
+            "Space" &&
+            !isTypingTarget(
+                event.target
+            )
+        ) {
+
+            state.spacePan =
+                true;
+
+            event.preventDefault();
+
+        }
+
+
+        if (
+            event.key ===
+            "Delete"
+        ) {
+
+            if (
+                !isTypingTarget(
+                    event.target
+                )
+            ) {
+
+                deleteSelectedAnnotation();
+
+            }
 
         }
 
@@ -2593,7 +2320,7 @@ document.addEventListener(
 );
 
 
-document.addEventListener(
+window.addEventListener(
     "keyup",
     event => {
 
@@ -2605,70 +2332,751 @@ document.addEventListener(
             state.spacePan =
                 false;
 
-            updateCursor();
-
         }
 
     }
 );
 
 
-/* ============================================================
-   CURSOR
-============================================================ */
+function isTypingTarget(
+    target
+) {
 
-function updateCursor() {
-
-    if (!canvas) {
-        return;
+    if (!target) {
+        return false;
     }
 
 
-    if (
-        state.panning ||
-        state.mode ===
-            "pan" ||
-        state.spacePan
-    ) {
-
-        canvas.style.cursor =
-            "grab";
-
-        return;
-
-    }
+    const tag =
+        target.tagName?.toLowerCase();
 
 
-    if (
-        state.mode ===
-        "draw"
-    ) {
-
-        canvas.style.cursor =
-            "crosshair";
-
-        return;
-
-    }
-
-
-    if (
-        state.mode ===
-        "erase"
-    ) {
-
-        canvas.style.cursor =
-            "not-allowed";
-
-        return;
-
-    }
-
-
-    canvas.style.cursor =
-        "default";
+    return (
+        tag ===
+            "input" ||
+        tag ===
+            "textarea" ||
+        tag ===
+            "select" ||
+        target.isContentEditable
+    );
 
 }
+
+
+/* ============================================================
+   ANNOTATION CREATION
+============================================================ */
+
+function createBoxAnnotation(
+    start,
+    end
+) {
+
+    const box =
+        normalizeBox(
+            start,
+            end
+        );
+
+
+    if (
+        box.width <
+            2 ||
+        box.height <
+            2
+    ) {
+
+        return;
+
+    }
+
+
+    const annotation = {
+
+        id:
+            `ann-${Date.now()}-${state.nextId++}`,
+
+        type:
+            "box",
+
+        class_name:
+            $("className")
+                ?.value
+                ?.trim() ||
+            "object",
+
+        x:
+            box.x,
+
+        y:
+            box.y,
+
+        width:
+            box.width,
+
+        height:
+            box.height,
+
+        score:
+            1,
+
+        ai_generated:
+            false,
+
+        corrected:
+            false,
+
+        frame_number:
+            state.currentFrame
+
+    };
+
+
+    pushHistory();
+
+
+    state.annotations.push(
+        annotation
+    );
+
+
+    state.selectedId =
+        annotation.id;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+/* ============================================================
+   POLYGON
+============================================================ */
+
+function handlePolygonPointerDown(
+    point
+) {
+
+    if (
+        !state.polygonPoints.length
+    ) {
+
+        pushHistory();
+
+        state.polygonPoints = [
+            point
+        ];
+
+        state.mode =
+            "draw";
+
+        render();
+
+        return;
+
+    }
+
+
+    const first =
+        state.polygonPoints[0];
+
+
+    if (
+        distance(
+            point,
+            first
+        ) <
+        12 /
+        Math.max(
+            state.scale,
+            0.01
+        )
+    ) {
+
+        finishPolygon();
+
+        return;
+
+    }
+
+
+    state.polygonPoints.push(
+        point
+    );
+
+
+    render();
+
+}
+
+
+function finishPolygon() {
+
+    const points =
+        state.polygonPoints;
+
+
+    if (
+        points.length <
+        3
+    ) {
+
+        state.polygonPoints =
+            [];
+
+        render();
+
+        return;
+
+    }
+
+
+    const annotation = {
+
+        id:
+            `ann-${Date.now()}-${state.nextId++}`,
+
+        type:
+            "polygon",
+
+        class_name:
+            $("className")
+                ?.value
+                ?.trim() ||
+            "object",
+
+        points:
+            points.map(
+                point => ({
+                    x:
+                        point.x,
+
+                    y:
+                        point.y
+                })
+            ),
+
+        score:
+            1,
+
+        ai_generated:
+            false,
+
+        corrected:
+            false,
+
+        frame_number:
+            state.currentFrame
+
+    };
+
+
+    state.annotations.push(
+        annotation
+    );
+
+
+    state.selectedId =
+        annotation.id;
+
+
+    state.polygonPoints =
+        [];
+
+    state.drawCurrent =
+        null;
+
+    state.mode =
+        "select";
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+/* ============================================================
+   SEGMENTATION
+============================================================ */
+
+function handleSegmentationPointerDown(
+    point
+) {
+
+    /*
+     * Segmentation is represented as a polygon
+     * in the saved annotation structure.
+     */
+
+    handlePolygonPointerDown(
+        point
+    );
+
+}
+
+
+/* ============================================================
+   MOVE SELECTED
+============================================================ */
+
+function moveSelectedAnnotation(
+    point
+) {
+
+    const annotation =
+        state.annotations.find(
+            item =>
+                item.id ===
+                state.selectedId
+        );
+
+
+    if (!annotation) {
+        return;
+    }
+
+
+    const previous =
+        state.dragLastImage;
+
+
+    if (!previous) {
+
+        state.dragLastImage =
+            point;
+
+        return;
+
+    }
+
+
+    const dx =
+        point.x -
+        previous.x;
+
+
+    const dy =
+        point.y -
+        previous.y;
+
+
+    if (
+        annotation.type ===
+        "box"
+    ) {
+
+        annotation.x +=
+            dx;
+
+        annotation.y +=
+            dy;
+
+    } else if (
+        Array.isArray(
+            annotation.points
+        )
+    ) {
+
+        annotation.points =
+            annotation.points.map(
+                item => ({
+                    x:
+                        item.x +
+                        dx,
+
+                    y:
+                        item.y +
+                        dy
+                })
+            );
+
+    }
+
+
+    state.dragLastImage =
+        point;
+
+
+    render();
+
+}
+
+
+/* ============================================================
+   ANNOTATION HIT TEST
+============================================================ */
+
+function findAnnotationAtPoint(
+    point
+) {
+
+    for (
+        let index =
+            state.annotations.length -
+            1;
+        index >= 0;
+        index--
+    ) {
+
+        const annotation =
+            state.annotations[
+                index
+            ];
+
+
+        if (
+            annotation.type ===
+            "box"
+        ) {
+
+            if (
+                point.x >=
+                    annotation.x &&
+                point.x <=
+                    annotation.x +
+                    annotation.width &&
+                point.y >=
+                    annotation.y &&
+                point.y <=
+                    annotation.y +
+                    annotation.height
+            ) {
+
+                return annotation;
+
+            }
+
+        }
+
+
+        if (
+            Array.isArray(
+                annotation.points
+            ) &&
+            pointInPolygon(
+                point,
+                annotation.points
+            )
+        ) {
+
+            return annotation;
+
+        }
+
+    }
+
+
+    return null;
+
+}
+
+
+function pointInPolygon(
+    point,
+    points
+) {
+
+    let inside =
+        false;
+
+
+    for (
+        let i = 0,
+            j = points.length - 1;
+        i < points.length;
+        j = i++
+    ) {
+
+        const xi =
+            points[i].x;
+
+        const yi =
+            points[i].y;
+
+        const xj =
+            points[j].x;
+
+        const yj =
+            points[j].y;
+
+
+        const intersect =
+            (
+                yi >
+                    point.y
+            ) !==
+            (
+                yj >
+                    point.y
+            ) &&
+            point.x <
+                (
+                    xj -
+                    xi
+                ) *
+                (
+                    point.y -
+                    yi
+                ) /
+                (
+                    yj -
+                    yi
+                ) +
+                xi;
+
+
+        if (
+            intersect
+        ) {
+
+            inside =
+                !inside;
+
+        }
+
+    }
+
+
+    return inside;
+
+}
+
+
+/* ============================================================
+   DELETE
+============================================================ */
+
+$("deleteSelected")?.addEventListener(
+    "click",
+    deleteSelectedAnnotation
+);
+
+
+function deleteSelectedAnnotation() {
+
+    if (
+        !state.selectedId
+    ) {
+
+        showToast(
+            "Select an annotation first."
+        );
+
+        return;
+
+    }
+
+
+    const index =
+        state.annotations.findIndex(
+            annotation =>
+                annotation.id ===
+                state.selectedId
+        );
+
+
+    if (
+        index ===
+        -1
+    ) {
+
+        return;
+
+    }
+
+
+    pushHistory();
+
+
+    state.annotations.splice(
+        index,
+        1
+    );
+
+
+    state.selectedId =
+        null;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+/* ============================================================
+   ANNOTATION TYPE BUTTONS
+============================================================ */
+
+document
+    .querySelectorAll(
+        "[data-annotation-type]"
+    )
+    .forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    const type =
+                        button.dataset
+                            .annotationType;
+
+
+                    if (
+                        type ===
+                        "box"
+                    ) {
+
+                        state.annotationType =
+                            "box";
+
+                        state.mode =
+                            "draw";
+
+                    } else if (
+                        type ===
+                        "polygon"
+                    ) {
+
+                        state.annotationType =
+                            "polygon";
+
+                        state.mode =
+                            "draw";
+
+                    } else if (
+                        type ===
+                        "segmentation"
+                    ) {
+
+                        state.annotationType =
+                            "segmentation";
+
+                        state.mode =
+                            "draw";
+
+                    } else {
+
+                        state.annotationType =
+                            type;
+
+                    }
+
+
+                    state.polygonPoints =
+                        [];
+
+
+                    document
+                        .querySelectorAll(
+                            "[data-annotation-type]"
+                        )
+                        .forEach(
+                            item =>
+                                item.classList.toggle(
+                                    "active",
+                                    item ===
+                                    button
+                                )
+                        );
+
+
+                    render();
+
+                }
+            );
+
+        }
+    );
+
+
+/* ============================================================
+   SELECT / PAN / DRAW TOOLS
+============================================================ */
+
+document
+    .querySelectorAll(
+        "[data-tool]"
+    )
+    .forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    const tool =
+                        button.dataset.tool;
+
+
+                    if (
+                        tool ===
+                        "select"
+                    ) {
+
+                        state.mode =
+                            "select";
+
+                    } else if (
+                        tool ===
+                        "draw"
+                    ) {
+
+                        state.mode =
+                            "draw";
+
+                    } else if (
+                        tool ===
+                        "pan"
+                    ) {
+
+                        state.mode =
+                            "pan";
+
+                    }
+
+
+                    document
+                        .querySelectorAll(
+                            "[data-tool]"
+                        )
+                        .forEach(
+                            item =>
+                                item.classList.toggle(
+                                    "active",
+                                    item ===
+                                    button
+                                )
+                        );
+
+
+                    render();
+
+                }
+            );
+
+        }
+    );
 
 
 /* ============================================================
@@ -2691,1449 +3099,1041 @@ function render() {
         canvas.getBoundingClientRect();
 
 
-    clearCanvas(
-        rect.width,
-        rect.height
+    const width =
+        rect.width;
+
+    const height =
+        rect.height;
+
+
+    ctx.clearRect(
+        0,
+        0,
+        width,
+        height
     );
-
-
-    if (
-        !state.image
-    ) {
-
-        return;
-
-    }
 
 
     ctx.save();
 
 
-    ctx.translate(
-        state.offsetX,
-        state.offsetY
+    /*
+     * Canvas background.
+     */
+
+    ctx.fillStyle =
+        "#101214";
+
+    ctx.fillRect(
+        0,
+        0,
+        width,
+        height
     );
 
 
-    ctx.scale(
-        state.scale,
-        state.scale
-    );
+    if (
+        state.image
+    ) {
+
+        const imageWidth =
+            state.image.naturalWidth ||
+            state.image.width;
 
 
-    try {
+        const imageHeight =
+            state.image.naturalHeight ||
+            state.image.height;
+
 
         ctx.drawImage(
             state.image,
-            0,
-            0
+            state.offsetX,
+            state.offsetY,
+            imageWidth *
+                state.scale,
+            imageHeight *
+                state.scale
         );
 
-    } catch (
-        error
-    ) {
 
-        console.warn(
-            "Could not render image:",
-            error
-        );
+        renderAnnotations();
+
+        renderDrawingPreview();
 
     }
-
-
-    state.annotations.forEach(
-        drawAnnotation
-    );
 
 
     ctx.restore();
 
 
-    renderDrawingPreview();
+    updateFilmstripSelection();
 
-}
-
-/* ============================================================
-   DRAWING — POLYGON / SEGMENTATION
-============================================================ */
-
-function addPolygonPoint(x, y) {
-    const point =
-        screenToImage(x, y);
-
-    if (!state.drawing) {
-        state.drawing = true;
-        state.polygonPoints = [point];
-    } else {
-        state.polygonPoints.push(point);
-    }
-
-    state.drawCurrent = point;
-    render();
-}
-
-function cancelDrawing() {
-    state.drawing = false;
-    state.drawStart = null;
-    state.drawCurrent = null;
-    state.polygonPoints = [];
-
-    render();
-}
-
-/* ============================================================
-   CREATE ANNOTATION
-============================================================ */
-
-function createAnnotation(data) {
-    const annotation = {
-        id: String(state.nextId++),
-        type: data.type,
-
-        x: data.x,
-        y: data.y,
-        width: data.width,
-        height: data.height,
-
-        points: data.points
-            ? data.points.map(
-                p => ({
-                    x: p.x,
-                    y: p.y
-                })
-            )
-            : undefined,
-
-        label:
-            data.label ||
-            "unknown",
-
-        score:
-            data.score ??
-            null,
-
-        occlusion:
-            Number(
-                data.occlusion ??
-                0
-            ),
-
-        truncation:
-            data.truncation ||
-            "NONE",
-
-        aiGenerated:
-            !!data.aiGenerated,
-
-        corrected:
-            !!data.corrected,
-
-        export:
-            data.export !== false
-    };
-
-    state.annotations.push(
-        annotation
-    );
-
-    state.selectedId =
-        annotation.id;
-
-    updateSelected();
-    updateAnnotationsList();
     updateCounts();
 
-    pushHistory();
-    saveFrame();
-    saveSession();
+    updateZoomUI();
 
-    cloudSaveAnnotation(
-        annotation
-    );
-
-    return annotation;
 }
+
 
 /* ============================================================
-   ANNOTATION SELECTION
+   RENDER ANNOTATIONS
 ============================================================ */
 
-function getSelected() {
-    return state.annotations.find(
-        a =>
-            a.id ===
-            state.selectedId
-    ) || null;
-}
+function renderAnnotations() {
 
-function updateSelected() {
-    updateAnnotationsList();
+    state.annotations
+        .forEach(
+            annotation => {
 
-    const selected =
-        getSelected();
+                const selected =
+                    annotation.id ===
+                    state.selectedId;
 
-    if (selected) {
-        renderPopup(
-            selected
-        );
-    } else {
-        hidePopup();
-    }
 
-    render();
-}
+                const hovered =
+                    annotation.id ===
+                    state.hoveredId;
 
-/* ============================================================
-   HIT TESTING
-============================================================ */
 
-function hitTest(
-    screenX,
-    screenY
-) {
-    const point =
-        screenToImage(
-            screenX,
-            screenY
-        );
+                if (
+                    annotation.type ===
+                    "box"
+                ) {
 
-    for (
-        let i =
-            state.annotations.length - 1;
-        i >= 0;
-        i--
-    ) {
-        const a =
-            state.annotations[i];
+                    renderBoxAnnotation(
+                        annotation,
+                        selected,
+                        hovered
+                    );
 
-        if (
-            a.type === "box"
-        ) {
-            const handle =
-                getResizeHandle(
-                    a,
-                    point
-                );
+                } else if (
+                    Array.isArray(
+                        annotation.points
+                    )
+                ) {
 
-            if (handle) {
-                return {
-                    id: a.id,
-                    handle
-                };
-            }
+                    renderPolygonAnnotation(
+                        annotation,
+                        selected,
+                        hovered
+                    );
 
-            if (
-                point.x >= a.x &&
-                point.x <=
-                    a.x + a.width &&
-                point.y >= a.y &&
-                point.y <=
-                    a.y + a.height
-            ) {
-                return {
-                    id: a.id,
-                    handle: null
-                };
-            }
-        } else if (
-            a.points &&
-            pointInPolygon(
-                point,
-                a.points
-            )
-        ) {
-            return {
-                id: a.id,
-                handle: null
-            };
-        }
-    }
+                }
 
-    return null;
-}
-
-function getResizeHandle(
-    a,
-    p
-) {
-    if (
-        a.type !== "box"
-    ) {
-        return null;
-    }
-
-    const threshold =
-        8 / state.scale;
-
-    const left =
-        a.x;
-
-    const right =
-        a.x + a.width;
-
-    const top =
-        a.y;
-
-    const bottom =
-        a.y + a.height;
-
-    const nearLeft =
-        Math.abs(
-            p.x - left
-        ) <= threshold;
-
-    const nearRight =
-        Math.abs(
-            p.x - right
-        ) <= threshold;
-
-    const nearTop =
-        Math.abs(
-            p.y - top
-        ) <= threshold;
-
-    const nearBottom =
-        Math.abs(
-            p.y - bottom
-        ) <= threshold;
-
-    if (
-        nearLeft &&
-        nearTop
-    ) {
-        return "nw";
-    }
-
-    if (
-        nearRight &&
-        nearTop
-    ) {
-        return "ne";
-    }
-
-    if (
-        nearLeft &&
-        nearBottom
-    ) {
-        return "sw";
-    }
-
-    if (
-        nearRight &&
-        nearBottom
-    ) {
-        return "se";
-    }
-
-    if (nearTop) {
-        return "n";
-    }
-
-    if (nearBottom) {
-        return "s";
-    }
-
-    if (nearLeft) {
-        return "w";
-    }
-
-    if (nearRight) {
-        return "e";
-    }
-
-    return null;
-}
-
-function pointInPolygon(
-    point,
-    points
-) {
-    let inside = false;
-
-    for (
-        let i = 0,
-            j = points.length - 1;
-        i < points.length;
-        j = i++
-    ) {
-        const xi =
-            points[i].x;
-
-        const yi =
-            points[i].y;
-
-        const xj =
-            points[j].x;
-
-        const yj =
-            points[j].y;
-
-        const intersect =
-            (
-                (yi > point.y) !==
-                (yj > point.y)
-            ) &&
-            (
-                point.x <
-                (xj - xi) *
-                    (point.y - yi) /
-                    ((yj - yi) || 1e-9) +
-                xi
-            );
-
-        if (intersect) {
-            inside = !inside;
-        }
-    }
-
-    return inside;
-}
-
-/* ============================================================
-   MOVE / RESIZE
-============================================================ */
-
-function moveAnnotation(
-    a,
-    dx,
-    dy
-) {
-    if (
-        a.type === "box"
-    ) {
-        a.x += dx;
-        a.y += dy;
-    } else if (
-        a.points
-    ) {
-        a.points.forEach(
-            p => {
-                p.x += dx;
-                p.y += dy;
             }
         );
-    }
+
 }
 
-function resizeBox(
-    a,
-    handle,
-    point
+
+/* ============================================================
+   RENDER BOX
+============================================================ */
+
+function renderBoxAnnotation(
+    annotation,
+    selected,
+    hovered
 ) {
-    const oldRight =
-        a.x + a.width;
 
-    const oldBottom =
-        a.y + a.height;
-
-    let left =
-        a.x;
-
-    let right =
-        oldRight;
-
-    let top =
-        a.y;
-
-    let bottom =
-        oldBottom;
-
-    if (
-        handle.includes("w")
-    ) {
-        left =
-            point.x;
-    }
-
-    if (
-        handle.includes("e")
-    ) {
-        right =
-            point.x;
-    }
-
-    if (
-        handle.includes("n")
-    ) {
-        top =
-            point.y;
-    }
-
-    if (
-        handle.includes("s")
-    ) {
-        bottom =
-            point.y;
-    }
-
-    if (
-        right < left
-    ) {
-        [
-            left,
-            right
-        ] =
-            [
-                right,
-                left
-            ];
-    }
-
-    if (
-        bottom < top
-    ) {
-        [
-            top,
-            bottom
-        ] =
-            [
-                bottom,
-                top
-            ];
-    }
-
-    a.x =
-        left;
-
-    a.y =
-        top;
-
-    a.width =
-        Math.max(
-            1,
-            right - left
+    const topLeft =
+        imageToScreen(
+            annotation.x,
+            annotation.y
         );
 
-    a.height =
-        Math.max(
-            1,
-            bottom - top
-        );
-}
 
-/* ============================================================
-   DELETE
-============================================================ */
+    const width =
+        annotation.width *
+        state.scale;
 
-$("deleteAnnotation")?.addEventListener(
-    "click",
-    deleteSelected
-);
 
-function deleteSelected() {
-    if (
-        !state.selectedId
-    ) {
-        return;
-    }
+    const height =
+        annotation.height *
+        state.scale;
 
-    const id =
-        state.selectedId;
 
-    const index =
-        state.annotations.findIndex(
-            a =>
-                a.id === id
-        );
-
-    if (
-        index === -1
-    ) {
-        return;
-    }
-
-    state.annotations.splice(
-        index,
-        1
-    );
-
-    state.selectedId =
-        null;
-
-    updateSelected();
-    updateCounts();
-
-    pushHistory();
-    saveFrame();
-    saveSession();
-
-    cloudDeleteAnnotation(
-        id
-    );
-
-    showToast(
-        "Annotation deleted"
-    );
-}
-
-/* ============================================================
-   DRAW ANNOTATION
-============================================================ */
-
-function drawAnnotation(a) {
     ctx.save();
 
-    const selected =
-        a.id ===
-        state.selectedId;
-
-    const stroke =
-        selected
-            ? "#a78bfa"
-            : "#00ff55";
-
-    const fill =
-        selected
-            ? "rgba(167,139,250,.18)"
-            : "rgba(0,255,85,.12)";
-
-    ctx.strokeStyle =
-        stroke;
-
-    ctx.fillStyle =
-        fill;
 
     ctx.lineWidth =
-        Math.max(
-            1.5,
-            2 / state.scale
-        );
+        selected
+            ? 3
+            : hovered
+                ? 2.5
+                : 2;
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#ff6b00"
+            : "#22c55e";
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(255,107,0,.12)"
+            : "rgba(34,197,94,.08)";
+
+
+    ctx.fillRect(
+        topLeft.x,
+        topLeft.y,
+        width,
+        height
+    );
+
+
+    ctx.strokeRect(
+        topLeft.x,
+        topLeft.y,
+        width,
+        height
+    );
+
+
+    renderAnnotationLabel(
+        annotation,
+        topLeft.x,
+        topLeft.y
+    );
+
 
     if (
-        a.type === "box"
+        selected
     ) {
-        ctx.strokeRect(
-            a.x,
-            a.y,
-            a.width,
-            a.height
+
+        renderResizeHandles(
+            topLeft.x,
+            topLeft.y,
+            width,
+            height
         );
 
-        ctx.fillRect(
-            a.x,
-            a.y,
-            a.width,
-            a.height
-        );
+    }
 
-        drawBoxLabel(
-            a
-        );
 
-        if (selected) {
-            drawResizeHandles(
-                a
-            );
-        }
-    } else if (
-        a.points &&
-        a.points.length >= 2
+    ctx.restore();
+
+}
+
+
+/* ============================================================
+   RENDER POLYGON
+============================================================ */
+
+function renderPolygonAnnotation(
+    annotation,
+    selected,
+    hovered
+) {
+
+    if (
+        !annotation.points ||
+        annotation.points.length <
+            2
     ) {
-        ctx.beginPath();
 
-        a.points.forEach(
+        return;
+
+    }
+
+
+    ctx.save();
+
+
+    ctx.beginPath();
+
+
+    annotation.points
+        .forEach(
             (
                 point,
                 index
             ) => {
+
+                const screen =
+                    imageToScreen(
+                        point.x,
+                        point.y
+                    );
+
+
                 if (
-                    index === 0
+                    index ===
+                    0
                 ) {
+
                     ctx.moveTo(
-                        point.x,
-                        point.y
+                        screen.x,
+                        screen.y
                     );
+
                 } else {
+
                     ctx.lineTo(
-                        point.x,
-                        point.y
+                        screen.x,
+                        screen.y
                     );
+
                 }
+
             }
         );
 
-        ctx.closePath();
 
-        if (
-            a.type ===
-            "segmentation"
-        ) {
-            ctx.fill();
-        }
+    ctx.closePath();
 
-        ctx.stroke();
 
-        drawPolygonLabel(
-            a
+    ctx.lineWidth =
+        selected
+            ? 3
+            : hovered
+                ? 2.5
+                : 2;
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#ff6b00"
+            : "#22c55e";
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(255,107,0,.12)"
+            : "rgba(34,197,94,.08)";
+
+
+    ctx.fill();
+
+    ctx.stroke();
+
+
+    const first =
+        annotation.points[0];
+
+
+    if (first) {
+
+        const label =
+            imageToScreen(
+                first.x,
+                first.y
+            );
+
+
+        renderAnnotationLabel(
+            annotation,
+            label.x,
+            label.y
         );
+
     }
 
+
     ctx.restore();
+
 }
 
-function drawBoxLabel(a) {
-    const text =
-        `${a.label || "unknown"}${
-            a.score != null
-                ? ` ${(a.score * 100).toFixed(0)}%`
-                : ""
-        }`;
 
-    const fontSize =
-        Math.max(
-            10 / state.scale,
-            12 / state.scale
+/* ============================================================
+   LABEL
+============================================================ */
+
+function renderAnnotationLabel(
+    annotation,
+    x,
+    y
+) {
+
+    const label =
+        annotation.class_name ||
+        annotation.label ||
+        annotation.type ||
+        "object";
+
+
+    const score =
+        Number(
+            annotation.score
         );
 
+
+    const text =
+        Number.isFinite(
+            score
+        ) &&
+        score < 1
+            ? `${label} ${Math.round(
+                score * 100
+            )}%`
+            : label;
+
+
+    ctx.save();
+
+
     ctx.font =
-        `bold ${fontSize}px Arial`;
+        "600 12px Inter, Arial, sans-serif";
+
 
     const metrics =
         ctx.measureText(
             text
         );
 
-    const padding =
-        4 / state.scale;
 
-    const boxHeight =
-        fontSize +
+    const padding =
+        6;
+
+
+    const boxWidth =
+        metrics.width +
         padding * 2;
 
-    const labelX =
-        a.x;
 
-    const labelY =
+    const boxHeight =
+        22;
+
+
+    const top =
         Math.max(
-            boxHeight,
-            a.y
+            0,
+            y -
+            boxHeight
         );
 
+
     ctx.fillStyle =
-        "#111";
+        "#ff6b00";
+
 
     ctx.fillRect(
-        labelX,
-        labelY - boxHeight,
-        metrics.width +
-            padding * 2,
+        x,
+        top,
+        boxWidth,
         boxHeight
     );
 
+
     ctx.fillStyle =
-        "#fff";
+        "#ffffff";
+
+
+    ctx.textBaseline =
+        "middle";
+
 
     ctx.fillText(
         text,
-        labelX + padding,
-        labelY - padding
+        x +
+            padding,
+        top +
+            boxHeight /
+                2
     );
+
+
+    ctx.restore();
+
 }
 
-function drawPolygonLabel(a) {
-    if (
-        !a.points ||
-        !a.points.length
-    ) {
-        return;
-    }
 
-    const p =
-        a.points[0];
+/* ============================================================
+   RESIZE HANDLES
+============================================================ */
 
-    ctx.font =
-        `${12 / state.scale}px Arial`;
+function renderResizeHandles(
+    x,
+    y,
+    width,
+    height
+) {
 
-    ctx.fillStyle =
-        "#fff";
-
-    ctx.fillText(
-        a.label ||
-            "unknown",
-        p.x,
-        p.y
-    );
-}
-
-function drawResizeHandles(a) {
     const size =
-        5 / state.scale;
+        7;
+
 
     const points = [
-        [
-            a.x,
-            a.y
-        ],
-        [
-            a.x + a.width,
-            a.y
-        ],
-        [
-            a.x,
-            a.y + a.height
-        ],
-        [
-            a.x + a.width,
-            a.y + a.height
-        ]
+
+        [x, y],
+
+        [x + width, y],
+
+        [x, y + height],
+
+        [x + width, y + height]
+
     ];
 
-    ctx.fillStyle =
-        "#fff";
-
-    ctx.strokeStyle =
-        "#a78bfa";
-
-    ctx.lineWidth =
-        1 / state.scale;
-
-    points.forEach(
-        ([x, y]) => {
-            ctx.beginPath();
-
-            ctx.rect(
-                x - size,
-                y - size,
-                size * 2,
-                size * 2
-            );
-
-            ctx.fill();
-            ctx.stroke();
-        }
-    );
-}
-
-function renderDrawingPreview() {
-    if (
-        !state.drawing
-    ) {
-        return;
-    }
 
     ctx.save();
 
-    ctx.strokeStyle =
-        "#a78bfa";
 
     ctx.fillStyle =
-        "rgba(167,139,250,.12)";
+        "#ffffff";
 
-    ctx.lineWidth =
-        2;
+    ctx.strokeStyle =
+        "#ff6b00";
+
+
+    points.forEach(
+        point => {
+
+            ctx.beginPath();
+
+            ctx.rect(
+                point[0] -
+                    size /
+                    2,
+                point[1] -
+                    size /
+                    2,
+                size,
+                size
+            );
+
+            ctx.fill();
+
+            ctx.stroke();
+
+        }
+    );
+
+
+    ctx.restore();
+
+}
+
+
+/* ============================================================
+   DRAWING PREVIEW
+============================================================ */
+
+function renderDrawingPreview() {
 
     if (
-        state.annotationType ===
-        "box"
+        state.drawing &&
+        state.drawStart &&
+        state.drawCurrent
     ) {
-        if (
-            !state.drawStart ||
-            !state.drawCurrent
-        ) {
-            ctx.restore();
-            return;
-        }
 
-        const start =
+        const box =
+            normalizeBox(
+                state.drawStart,
+                state.drawCurrent
+            );
+
+
+        const topLeft =
             imageToScreen(
-                state.drawStart.x,
-                state.drawStart.y
+                box.x,
+                box.y
             );
 
-        const current =
-            imageToScreen(
-                state.drawCurrent.x,
-                state.drawCurrent.y
-            );
 
-        const x =
-            Math.min(
-                start.x,
-                current.x
-            );
+        ctx.save();
 
-        const y =
-            Math.min(
-                start.y,
-                current.y
-            );
 
-        const width =
-            Math.abs(
-                current.x -
-                start.x
-            );
-
-        const height =
-            Math.abs(
-                current.y -
-                start.y
-            );
-
-        ctx.fillRect(
-            x,
-            y,
-            width,
-            height
+        ctx.setLineDash(
+            [
+                6,
+                4
+            ]
         );
+
+
+        ctx.lineWidth =
+            2;
+
+        ctx.strokeStyle =
+            "#ff6b00";
 
         ctx.strokeRect(
-            x,
-            y,
-            width,
-            height
+            topLeft.x,
+            topLeft.y,
+            box.width *
+                state.scale,
+            box.height *
+                state.scale
         );
-    } else {
-        const points =
-            state.polygonPoints;
 
-        if (
-            !points.length
-        ) {
-            ctx.restore();
-            return;
-        }
+
+        ctx.restore();
+
+    }
+
+
+    if (
+        state.polygonPoints.length
+    ) {
+
+        ctx.save();
+
+
+        ctx.lineWidth =
+            2;
+
+        ctx.strokeStyle =
+            "#ff6b00";
+
 
         ctx.beginPath();
 
-        points.forEach(
-            (
-                point,
-                index
-            ) => {
-                const screen =
-                    imageToScreen(
-                        point.x,
-                        point.y
-                    );
 
-                if (
-                    index === 0
-                ) {
-                    ctx.moveTo(
-                        screen.x,
-                        screen.y
-                    );
-                } else {
-                    ctx.lineTo(
-                        screen.x,
-                        screen.y
-                    );
+        state.polygonPoints
+            .forEach(
+                (
+                    point,
+                    index
+                ) => {
+
+                    const screen =
+                        imageToScreen(
+                            point.x,
+                            point.y
+                        );
+
+
+                    if (
+                        index ===
+                        0
+                    ) {
+
+                        ctx.moveTo(
+                            screen.x,
+                            screen.y
+                        );
+
+                    } else {
+
+                        ctx.lineTo(
+                            screen.x,
+                            screen.y
+                        );
+
+                    }
+
                 }
-            }
-        );
+            );
+
 
         if (
             state.drawCurrent
         ) {
+
             const current =
                 imageToScreen(
                     state.drawCurrent.x,
                     state.drawCurrent.y
                 );
 
+
             ctx.lineTo(
                 current.x,
                 current.y
             );
+
         }
+
 
         ctx.stroke();
 
-        points.forEach(
-            point => {
-                const screen =
-                    imageToScreen(
-                        point.x,
-                        point.y
+
+        state.polygonPoints
+            .forEach(
+                point => {
+
+                    const screen =
+                        imageToScreen(
+                            point.x,
+                            point.y
+                        );
+
+
+                    ctx.beginPath();
+
+                    ctx.arc(
+                        screen.x,
+                        screen.y,
+                        4,
+                        0,
+                        Math.PI * 2
                     );
 
-                ctx.beginPath();
+                    ctx.fillStyle =
+                        "#ff6b00";
 
-                ctx.arc(
-                    screen.x,
-                    screen.y,
-                    4,
-                    0,
-                    Math.PI * 2
+                    ctx.fill();
+
+                }
+            );
+
+
+        ctx.restore();
+
+    }
+
+}
+
+
+/* ============================================================
+   COUNTS
+============================================================ */
+
+function updateCounts() {
+
+    const count =
+        state.annotations.length;
+
+
+    const objectCount =
+        $("objectCount");
+
+
+    if (
+        objectCount
+    ) {
+
+        objectCount.textContent =
+            String(
+                count
+            );
+
+    }
+
+
+    const selected =
+        $("selectedObject");
+
+
+    if (
+        selected
+    ) {
+
+        selected.textContent =
+            state.selectedId
+                ? "1"
+                : "0";
+
+    }
+
+}
+
+
+/* ============================================================
+   ANNOTATIONS LIST
+============================================================ */
+
+function updateAnnotationsList() {
+
+    if (
+        !annotationsList
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        !state.annotations.length
+    ) {
+
+        annotationsList.innerHTML = `
+            <div class="empty-annotations">
+                No annotations yet.
+            </div>
+        `;
+
+        return;
+
+    }
+
+
+    annotationsList.innerHTML =
+        state.annotations
+            .map(
+                annotation =>
+                    renderAnnotationListItem(
+                        annotation
+                    )
+            )
+            .join("");
+
+
+    annotationsList
+        .querySelectorAll(
+            "[data-annotation-id]"
+        )
+        .forEach(
+            element => {
+
+                element.addEventListener(
+                    "click",
+                    () => {
+
+                        state.selectedId =
+                            element.dataset
+                                .annotationId;
+
+
+                        updateAnnotationsList();
+
+                        render();
+
+                    }
                 );
 
-                ctx.fill();
             }
         );
-    }
 
-    ctx.restore();
 }
 
-/* ============================================================
-   HISTORY
-============================================================ */
 
-function cloneAnnotations(
-    annotations
+function renderAnnotationListItem(
+    annotation
 ) {
-    return annotations.map(
-        a => ({
-            ...a,
 
-            points:
-                a.points
-                    ? a.points.map(
-                        p => ({
-                            x: p.x,
-                            y: p.y
-                        })
+    const selected =
+        annotation.id ===
+        state.selectedId;
+
+
+    return `
+        <button
+            type="button"
+            class="annotation-list-item ${
+                selected
+                    ? "active"
+                    : ""
+            }"
+            data-annotation-id="${escapeHTML(
+                annotation.id
+            )}"
+        >
+            <span class="annotation-list-main">
+                <strong>
+                    ${escapeHTML(
+                        annotation.class_name ||
+                        annotation.label ||
+                        "Object"
+                    )}
+                </strong>
+
+                <small>
+                    ${escapeHTML(
+                        shapeLabel(
+                            annotation.type
+                        )
+                    )}
+                </small>
+            </span>
+
+            <span class="annotation-list-score">
+                ${
+                    Number.isFinite(
+                        Number(
+                            annotation.score
+                        )
                     )
-                    : undefined
-        })
-    );
+                        ? `${Math.round(
+                            Number(
+                                annotation.score
+                            ) *
+                            100
+                        )}%`
+                        : ""
+                }
+            </span>
+        </button>
+    `;
+
 }
 
-function resetHistory(
-    annotations
-) {
-    state.history = [
-        cloneAnnotations(
-            annotations
-        )
-    ];
-
-    state.historyIndex =
-        0;
-
-    updateUndoRedoButtons();
-}
-
-function pushHistory() {
-    const snapshot =
-        cloneAnnotations(
-            state.annotations
-        );
-
-    if (
-        state.historyIndex <
-        state.history.length - 1
-    ) {
-        state.history =
-            state.history.slice(
-                0,
-                state.historyIndex + 1
-            );
-    }
-
-    state.history.push(
-        snapshot
-    );
-
-    state.historyIndex =
-        state.history.length - 1;
-
-    if (
-        state.history.length >
-        100
-    ) {
-        state.history.shift();
-
-        state.historyIndex--;
-    }
-
-    updateUndoRedoButtons();
-}
-
-function undo() {
-    if (
-        state.historyIndex <= 0
-    ) {
-        return;
-    }
-
-    state.historyIndex--;
-
-    state.annotations =
-        cloneAnnotations(
-            state.history[
-                state.historyIndex
-            ]
-        );
-
-    state.selectedId =
-        null;
-
-    updateCounts();
-    updateAnnotationsList();
-    hidePopup();
-
-    saveFrame();
-    saveSession();
-
-    updateUndoRedoButtons();
-
-    render();
-}
-
-function redo() {
-    if (
-        state.historyIndex >=
-        state.history.length - 1
-    ) {
-        return;
-    }
-
-    state.historyIndex++;
-
-    state.annotations =
-        cloneAnnotations(
-            state.history[
-                state.historyIndex
-            ]
-        );
-
-    state.selectedId =
-        null;
-
-    updateCounts();
-    updateAnnotationsList();
-    hidePopup();
-
-    saveFrame();
-    saveSession();
-
-    updateUndoRedoButtons();
-
-    render();
-}
-
-function updateUndoRedoButtons() {
-    const undoButton =
-        $("undoButton");
-
-    const redoButton =
-        $("redoButton");
-
-    if (undoButton) {
-        undoButton.disabled =
-            state.historyIndex <= 0;
-    }
-
-    if (redoButton) {
-        redoButton.disabled =
-            state.historyIndex >=
-            state.history.length - 1;
-    }
-}
-
-$("undoButton")?.addEventListener(
-    "click",
-    undo
-);
-
-$("redoButton")?.addEventListener(
-    "click",
-    redo
-);
 
 /* ============================================================
-   ANNOTATION POPUP
+   POPUP
 ============================================================ */
 
-function renderPopup(a) {
-    if (!popupEl) return;
+function showAnnotationPopup(
+    annotation
+) {
 
-    popupTitle.textContent =
-        a.label ||
-        "Annotation";
+    if (
+        !popupEl
+    ) {
+
+        return;
+
+    }
+
+
+    if (popupTitle) {
+
+        popupTitle.textContent =
+            annotation.class_name ||
+            annotation.label ||
+            "Annotation";
+
+    }
+
+
+    if (popupBody) {
+
+        popupBody.innerHTML = `
+            <div>
+                <span>Type</span>
+                <strong>
+                    ${escapeHTML(
+                        shapeLabel(
+                            annotation.type
+                        )
+                    )}
+                </strong>
+            </div>
+
+            <div>
+                <span>Score</span>
+                <strong>
+                    ${
+                        Number.isFinite(
+                            Number(
+                                annotation.score
+                            )
+                        )
+                            ? `${Math.round(
+                                Number(
+                                    annotation.score
+                                ) *
+                                100
+                            )}%`
+                            : "—"
+                    }
+                </strong>
+            </div>
+        `;
+
+    }
+
 
     popupEl.style.display =
         "block";
 
-    popupEl.dataset.id =
-        a.id;
 
-    positionPopup(a);
-    renderPopupBody(a);
+    popupEl.classList.toggle(
+        "expanded",
+        state.popupExpanded
+    );
+
 }
 
-function positionPopup(a) {
-    if (!popupEl) return;
 
-    let x;
-    let y;
+function hidePopup() {
 
     if (
-        a.type === "box"
+        popupEl
     ) {
-        const topLeft =
-            imageToScreen(
-                a.x,
-                a.y
-            );
 
-        x =
-            topLeft.x +
-            Math.max(
-                8,
-                a.width *
-                    state.scale
-            );
+        popupEl.style.display =
+            "none";
 
-        y =
-            topLeft.y;
-    } else if (
-        a.points &&
-        a.points.length
-    ) {
-        const p =
-            imageToScreen(
-                a.points[0].x,
-                a.points[0].y
-            );
-
-        x =
-            p.x + 15;
-
-        y =
-            p.y;
-    } else {
-        x = 20;
-        y = 20;
     }
 
-    const rect =
-        workspace.getBoundingClientRect();
-
-    const popupWidth =
-        popupEl.offsetWidth ||
-        220;
-
-    const popupHeight =
-        popupEl.offsetHeight ||
-        200;
-
-    x =
-        Math.max(
-            5,
-            Math.min(
-                x,
-                rect.width -
-                    popupWidth -
-                    5
-            )
-        );
-
-    y =
-        Math.max(
-            5,
-            Math.min(
-                y,
-                rect.height -
-                    popupHeight -
-                    5
-            )
-        );
-
-    popupEl.style.left =
-        `${x}px`;
-
-    popupEl.style.top =
-        `${y}px`;
 }
 
-function renderPopupBody(a) {
-    if (!popupBody) return;
 
-    popupBody.innerHTML = `
-        <div class="ann-popup-summary">
-            <span class="ann-chip">
-                ${escapeHTML(a.type)}
-            </span>
+popupExpandBtn?.addEventListener(
+    "click",
+    () => {
 
-            <span class="ann-chip">
-                Occlusion
-                ${Number(a.occlusion ?? 0)}%
-            </span>
+        state.popupExpanded =
+            !state.popupExpanded;
 
-            <span class="ann-chip">
-                Truncation
-                ${escapeHTML(
-                    a.truncation ||
-                    "NONE"
-                )}
-            </span>
 
-            ${
-                a.aiGenerated
-                    ? `<span class="ann-chip">AI</span>`
-                    : ""
-            }
+        popupEl?.classList.toggle(
+            "expanded",
+            state.popupExpanded
+        );
 
-            ${
-                a.corrected
-                    ? `<span class="ann-chip">Corrected</span>`
-                    : ""
-            }
-        </div>
+    }
+);
 
-        <div class="class-field">
-            <label>
-                Classification / Class
-            </label>
 
-            <input
-                id="popupClassInput"
-                value="${escapeHTML(
-                    a.label ||
-                    "unknown"
-                )}"
-                placeholder="Object class"
-            >
-        </div>
+/* ============================================================
+   ESCAPE HTML
+============================================================ */
 
-        <div class="class-field">
-            <label>
-                Occlusion
-            </label>
+function escapeHTML(
+    value
+) {
 
-            <select id="popupOcclusion">
-                ${
-                    [
-                        0,
-                        10,
-                        20,
-                        30,
-                        40,
-                        50,
-                        60,
-                        70,
-                        80,
-                        90,
-                        100
-                    ]
-                        .map(
-                            v =>
-                                `<option value="${v}" ${
-                                    Number(
-                                        a.occlusion ??
-                                        0
-                                    ) === v
-                                        ? "selected"
-                                        : ""
-                                }>${v}%</option>`
-                        )
-                        .join("")
-                }
-            </select>
-        </div>
+    return String(
+        value ??
+        ""
+    )
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
 
-        <div class="class-field">
-            <label>
-                Truncation
-            </label>
+}
 
-            <select id="popupTruncation">
-                ${
-                    [
-                        "NONE",
-                        "LEFT",
-                        "RIGHT",
-                        "TOP",
-                        "BOTTOM",
-                        "MULTIPLE"
-                    ]
-                        .map(
-                            v =>
-                                `<option value="${v}" ${
-                                    a.truncation ===
-                                    v
-                                        ? "selected"
-                                        : ""
-                                }>${v}</option>`
-                        )
-                        .join("")
-                }
-            </select>
-        </div>
 
-        <label class="checkbox-row">
-            <input
-                id="popupExport"
-                type="checkbox"
-                ${
-                    a.export !== false
-                        ? "checked"
-                        : ""
-                }
-            >
+/* ============================================================
+   MB
+============================================================ */
 
-            Include in export
-        </label>
-    `;
+function formatMB(
+    bytes
+) {
 
-    const classInput =
-        $("popupClassInput");
+    const value =
+        Number(
+            bytes
+        );
 
-    const occlusion =
-        $("popupOcclusion");
 
-    const truncation =
-        $("popupTruncation");
+    if (
+        !Number.isFinite(
+            value
+        )
+    ) {
 
-    const exportInput =
-        $("popupExport");
+        return "0.00";
 
-    classInput?.addEventListener(
-        "change",
-        () => {
-            a.label =
-                classInput.value.trim() ||
-                "unknown";
+    }
 
-            a.corrected =
-                true;
 
-            updateAnnotationsList();
-
-            saveFrame();
-            saveSession();
-
-            cloudSaveAnnotation(
-                a
-            );
-
-            render();
-        }
+    return (
+        value /
+        (
+            1024 *
+            1024
+        )
+    ).toFixed(
+        2
     );
 
-    occlusion?.addEventListener(
-        "change",
-        () => {
-            a.occlusion =
-                Number(
-                    occlusion.value
-                );
-
-            a.corrected =
-                true;
-
-            updateAnnotationsList();
-
-            saveFrame();
-            saveSession();
-
-            cloudSaveAnnotation(
-                a
-            );
-
-            render();
-        }
-    );
-
-    truncation?.addEventListener(
-        "change",
-        () => {
-            a.truncation =
-                truncation.value;
-
+}
             a.corrected =
                 true;
 
@@ -5142,45 +5142,6 @@ function normalizeAIPredictions(
     return predictions
         .map(
             prediction => {
-                const bbox =
-                    prediction.bbox ||
-                    prediction.box ||
-                    prediction.boundingBox;
-
-                if (
-                    !bbox ||
-                    bbox.length < 4
-                ) {
-                    return null;
-                }
-
-                let [
-                    x,
-                    y,
-                    width,
-                    height
-                ] = bbox;
-
-                /*
-                 * Some models return x1,y1,x2,y2.
-                 * Detect and normalize those when needed.
-                 */
-                if (
-                    width < x &&
-                    height < y
-                ) {
-                    width =
-                        width - x;
-
-                    height =
-                        height - y;
-                }
-
-                const label =
-                    prediction.class ||
-                    prediction.label ||
-                    prediction.name ||
-                    AI_CONFIG.defaultLabel;
 
                 const score =
                     Number(
@@ -5189,50 +5150,272 @@ function normalizeAIPredictions(
                         0
                     );
 
+                let label =
+                    prediction.class ??
+                    prediction.label ??
+                    prediction.name ??
+                    AI_CONFIG.defaultLabel;
+
+                label =
+                    normalizeLabel(
+                        label
+                    );
+
+
+                let bbox =
+                    prediction.bbox ??
+                    prediction.box ??
+                    prediction.boundingBox;
+
+
+                if (
+                    !Array.isArray(
+                        bbox
+                    )
+                ) {
+
+                    if (
+                        bbox &&
+                        typeof bbox ===
+                            "object"
+                    ) {
+
+                        bbox = [
+                            bbox.x ??
+                                bbox.left ??
+                                0,
+
+                            bbox.y ??
+                                bbox.top ??
+                                0,
+
+                            bbox.width ??
+                                0,
+
+                            bbox.height ??
+                                0
+                        ];
+
+                    }
+
+                }
+
+
+                if (
+                    !Array.isArray(
+                        bbox
+                    ) ||
+                    bbox.length <
+                        4
+                ) {
+
+                    return null;
+
+                }
+
+
+                let [
+                    x,
+                    y,
+                    width,
+                    height
+                ] =
+                    bbox.map(
+                        Number
+                    );
+
+
+                if (
+                    !Number.isFinite(
+                        x
+                    ) ||
+                    !Number.isFinite(
+                        y
+                    ) ||
+                    !Number.isFinite(
+                        width
+                    ) ||
+                    !Number.isFinite(
+                        height
+                    )
+                ) {
+
+                    return null;
+
+                }
+
+
+                /*
+                 * Some detection libraries return
+                 * [x1, y1, x2, y2].
+                 *
+                 * Detect that format when the second
+                 * pair is clearly greater than the
+                 * first pair.
+                 */
+                if (
+                    width >
+                        x &&
+                    height >
+                        y &&
+                    (
+                        width >
+                            (
+                                state.image?.naturalWidth ||
+                                state.image?.width ||
+                                0
+                            ) *
+                            0.25 ||
+                        height >
+                            (
+                                state.image?.naturalHeight ||
+                                state.image?.height ||
+                                0
+                            ) *
+                            0.25
+                    )
+                ) {
+
+                    const x2 =
+                        width;
+
+                    const y2 =
+                        height;
+
+                    width =
+                        x2 -
+                        x;
+
+                    height =
+                        y2 -
+                        y;
+
+                }
+
+
+                const imageWidth =
+                    state.image?.naturalWidth ||
+                    state.image?.width ||
+                    1;
+
+                const imageHeight =
+                    state.image?.naturalHeight ||
+                    state.image?.height ||
+                    1;
+
+
+                /*
+                 * Handle normalized 0–1 coordinates.
+                 */
+                if (
+                    Math.abs(x) <=
+                        1 &&
+                    Math.abs(y) <=
+                        1 &&
+                    Math.abs(width) <=
+                        1 &&
+                    Math.abs(height) <=
+                        1
+                ) {
+
+                    x *=
+                        imageWidth;
+
+                    y *=
+                        imageHeight;
+
+                    width *=
+                        imageWidth;
+
+                    height *=
+                        imageHeight;
+
+                }
+
+
+                x =
+                    clamp(
+                        x,
+                        0,
+                        imageWidth
+                    );
+
+                y =
+                    clamp(
+                        y,
+                        0,
+                        imageHeight
+                    );
+
+                width =
+                    clamp(
+                        width,
+                        1,
+                        imageWidth -
+                            x
+                    );
+
+                height =
+                    clamp(
+                        height,
+                        1,
+                        imageHeight -
+                            y
+                    );
+
+
                 return {
-                    label:
-                        String(
-                            label
-                        ),
+
+                    label,
 
                     score:
-                        Number.isFinite(
-                            score
-                        )
-                            ? score
-                            : 0,
-
-                    x:
-                        Number(x) || 0,
-
-                    y:
-                        Number(y) || 0,
-
-                    width:
-                        Math.max(
-                            1,
-                            Number(
-                                width
-                            ) || 1
+                        clamp(
+                            score,
+                            0,
+                            1
                         ),
 
-                    height:
-                        Math.max(
-                            1,
-                            Number(
-                                height
-                            ) || 1
-                        ),
+                    bbox: {
+                        x,
+                        y,
+                        width,
+                        height
+                    }
 
-                    segmentation:
-                        prediction.segmentation ||
-                        prediction.mask ||
-                        null
                 };
+
             }
         )
-        .filter(Boolean);
+        .filter(
+            Boolean
+        );
+
 }
+
+
+function normalizeLabel(
+    label
+) {
+
+    const clean =
+        String(
+            label ??
+            "object"
+        )
+            .trim()
+            .toLowerCase();
+
+
+    return (
+        LABEL_ALIASES[
+            clean
+        ] ||
+        clean ||
+        "object"
+    );
+
+}
+
 
 /* ============================================================
    CREATE AI ANNOTATION
@@ -5241,6267 +5424,1670 @@ function normalizeAIPredictions(
 function createAIAnnotation(
     prediction
 ) {
-    let type =
-        state.annotationType ||
-        "box";
-
-    /*
-     * When a coworker is assigned a specific work role,
-     * automatically produce the correct annotation shape.
-     */
-    const role =
-        CLOUD.profile?.role;
 
     if (
-        role ===
-        "coworker_polygon"
+        !prediction ||
+        !prediction.bbox
     ) {
-        type =
-            "polygon";
+
+        return null;
+
     }
 
-    if (
-        role ===
-        "coworker_segmentation"
-    ) {
-        type =
-            "segmentation";
-    }
 
-    if (
-        role ===
-        "coworker_2d_box"
-    ) {
-        type =
-            "box";
-    }
+    const annotation = {
 
-    if (
-        type ===
-            "polygon" ||
-        type ===
-            "segmentation"
-    ) {
-        const points =
-            prediction.segmentation
-                ? normalizeSegmentation(
-                    prediction.segmentation
-                )
-                : rectangleToPolygon(
-                    prediction
-                );
+        id:
+            `ann-${Date.now()}-${state.nextId++}`,
 
-        createAnnotation({
-            type,
-            points,
-            label:
-                prediction.label,
-            score:
-                prediction.score,
-            occlusion: 0,
-            truncation:
-                detectTruncation(
-                    prediction
-                ),
-            aiGenerated:
-                true,
-            corrected:
-                false
-        });
-
-        return;
-    }
-
-    createAnnotation({
-        type: "box",
-
-        x:
-            prediction.x,
-
-        y:
-            prediction.y,
-
-        width:
-            prediction.width,
-
-        height:
-            prediction.height,
+        type:
+            "box",
 
         label:
+            prediction.label,
+
+        class_name:
             prediction.label,
 
         score:
             prediction.score,
 
-        occlusion: 0,
+        x:
+            prediction.bbox.x,
+
+        y:
+            prediction.bbox.y,
+
+        width:
+            prediction.bbox.width,
+
+        height:
+            prediction.bbox.height,
+
+        occlusion:
+            0,
 
         truncation:
-            detectTruncation(
-                prediction
-            ),
+            "NONE",
 
-        aiGenerated:
+        ai_generated:
             true,
 
         corrected:
-            false
-    });
+            false,
+
+        export:
+            true,
+
+        frame_number:
+            state.currentFrame
+
+    };
+
+
+    state.annotations.push(
+        annotation
+    );
+
+
+    return annotation;
+
 }
+
 
 /* ============================================================
    FALLBACK DETECTION
 ============================================================ */
 
 async function fallbackDetect() {
+
+    if (
+        !state.image
+    ) {
+
+        return [];
+
+    }
+
+
     /*
-     * This fallback intentionally produces a useful annotation
-     * instead of failing when no browser AI model is installed.
+     * The fallback deliberately produces no
+     * false "AI" detections from arbitrary pixels.
      *
-     * It detects the visible image area as a candidate object.
-     * The annotation is marked AI-generated so a reviewer can
-     * correct it.
+     * It gives the user a safe reviewable region
+     * covering the visible media when no model
+     * library is available.
      */
-
-    if (!state.image) {
-        return [];
-    }
 
     const width =
         state.image.naturalWidth ||
         state.image.width;
 
-    const height =
-        state.image.naturalHeight ||
-        state.image.height;
-
-    if (
-        width <= 0 ||
-        height <= 0
-    ) {
-        return [];
-    }
-
-    const marginX =
-        width * 0.05;
-
-    const marginY =
-        height * 0.05;
-
-    return [
-        {
-            label:
-                "object",
-
-            score:
-                0.50,
-
-            x:
-                marginX,
-
-            y:
-                marginY,
-
-            width:
-                Math.max(
-                    1,
-                    width -
-                        marginX * 2
-                ),
-
-            height:
-                Math.max(
-                    1,
-                    height -
-                        marginY * 2
-                )
-        }
-    ];
-}
-
-/* ============================================================
-   SEGMENTATION HELPERS
-============================================================ */
-
-function rectangleToPolygon(
-    prediction
-) {
-    const x =
-        Number(
-            prediction.x
-        ) || 0;
-
-    const y =
-        Number(
-            prediction.y
-        ) || 0;
-
-    const width =
-        Number(
-            prediction.width
-        ) || 1;
-
-    const height =
-        Number(
-            prediction.height
-        ) || 1;
-
-    return [
-        {
-            x,
-            y
-        },
-        {
-            x:
-                x + width,
-            y
-        },
-        {
-            x:
-                x + width,
-            y:
-                y + height
-        },
-        {
-            x,
-            y:
-                y + height
-        }
-    ];
-}
-
-function normalizeSegmentation(
-    segmentation
-) {
-    if (
-        !segmentation
-    ) {
-        return [];
-    }
-
-    /*
-     * Already in [{x,y},...] form.
-     */
-    if (
-        Array.isArray(
-            segmentation
-        ) &&
-        segmentation.every(
-            p =>
-                p &&
-                typeof p ===
-                    "object" &&
-                "x" in p &&
-                "y" in p
-        )
-    ) {
-        return segmentation.map(
-            p => ({
-                x:
-                    Number(
-                        p.x
-                    ) || 0,
-
-                y:
-                    Number(
-                        p.y
-                    ) || 0
-            })
-        );
-    }
-
-    /*
-     * Flat [x,y,x,y,...] form.
-     */
-    if (
-        Array.isArray(
-            segmentation
-        ) &&
-        typeof segmentation[0] ===
-            "number"
-    ) {
-        const points = [];
-
-        for (
-            let i = 0;
-            i + 1 <
-            segmentation.length;
-            i += 2
-        ) {
-            points.push({
-                x:
-                    Number(
-                        segmentation[i]
-                    ) || 0,
-
-                y:
-                    Number(
-                        segmentation[
-                            i + 1
-                        ]
-                    ) || 0
-            });
-        }
-
-        return points;
-    }
-
-    /*
-     * COCO-style nested segmentation.
-     */
-    if (
-        Array.isArray(
-            segmentation
-        ) &&
-        Array.isArray(
-            segmentation[0]
-        )
-    ) {
-        return normalizeSegmentation(
-            segmentation[0]
-        );
-    }
-
-    return [];
-}
-
-/* ============================================================
-   TRUNCATION DETECTION
-============================================================ */
-
-function detectTruncation(
-    box
-) {
-    if (!state.image) {
-        return "NONE";
-    }
-
-    const width =
-        state.image.naturalWidth ||
-        state.image.width;
 
     const height =
         state.image.naturalHeight ||
         state.image.height;
 
-    const x =
-        Number(box.x) || 0;
-
-    const y =
-        Number(box.y) || 0;
-
-    const right =
-        x +
-        (
-            Number(
-                box.width
-            ) || 0
-        );
-
-    const bottom =
-        y +
-        (
-            Number(
-                box.height
-            ) || 0
-        );
-
-    const touchesLeft =
-        x <= 1;
-
-    const touchesRight =
-        right >=
-        width - 1;
-
-    const touchesTop =
-        y <= 1;
-
-    const touchesBottom =
-        bottom >=
-        height - 1;
-
-    const sides = [];
-
-    if (touchesLeft) {
-        sides.push(
-            "LEFT"
-        );
-    }
-
-    if (touchesRight) {
-        sides.push(
-            "RIGHT"
-        );
-    }
-
-    if (touchesTop) {
-        sides.push(
-            "TOP"
-        );
-    }
-
-    if (touchesBottom) {
-        sides.push(
-            "BOTTOM"
-        );
-    }
-
-    if (!sides.length) {
-        return "NONE";
-    }
-
-    if (
-        sides.length === 1
-    ) {
-        return sides[0];
-    }
-
-    return "MULTIPLE";
-}
-
-/* ============================================================
-   AI CLEAR
-============================================================ */
-
-$("clearAI")?.addEventListener(
-    "click",
-    clearAIAnnotations
-);
-
-function clearAIAnnotations() {
-    const before =
-        state.annotations.length;
-
-    state.annotations =
-        state.annotations.filter(
-            a =>
-                !a.aiGenerated
-        );
-
-    const removed =
-        before -
-        state.annotations.length;
-
-    if (!removed) {
-        showToast(
-            "No AI annotations to remove."
-        );
-
-        return;
-    }
-
-    state.selectedId =
-        null;
-
-    pushHistory();
-    updateCounts();
-    updateAnnotationsList();
-    hidePopup();
-
-    saveFrame();
-    saveSession();
-
-    cloudSaveAllAnnotations();
-
-    render();
-
-    showToast(
-        `${removed} AI annotation${
-            removed === 1
-                ? ""
-                : "s"
-        } removed`
-    );
-}
-
-/* ============================================================
-   AI REVIEW / ACCEPT
-============================================================ */
-
-$("acceptAI")?.addEventListener(
-    "click",
-    acceptAIAnnotations
-);
-
-function acceptAIAnnotations() {
-    let changed = 0;
-
-    state.annotations.forEach(
-        annotation => {
-            if (
-                annotation.aiGenerated &&
-                !annotation.corrected
-            ) {
-                annotation.corrected =
-                    true;
-
-                changed++;
-            }
-        }
-    );
-
-    if (!changed) {
-        showToast(
-            "No AI annotations need accepting."
-        );
-
-        return;
-    }
-
-    pushHistory();
-    updateAnnotationsList();
-
-    saveFrame();
-    saveSession();
-
-    cloudSaveAllAnnotations();
-
-    render();
-
-    showToast(
-        `${changed} AI annotation${
-            changed === 1
-                ? ""
-                : "s"
-        } accepted`
-    );
-}
-
-/* ============================================================
-   CLASSIFICATION PANEL
-============================================================ */
-
-function populateClassSelect() {
-    const select =
-        $("classSelect");
-
-    if (!select) {
-        return;
-    }
-
-    const existing =
-        Array.from(
-            select.options
-        ).map(
-            option =>
-                option.value
-        );
-
-    AI_LABELS.forEach(
-        label => {
-            if (
-                existing.includes(
-                    label
-                )
-            ) {
-                return;
-            }
-
-            const option =
-                document.createElement(
-                    "option"
-                );
-
-            option.value =
-                label;
-
-            option.textContent =
-                label;
-
-            select.appendChild(
-                option
-            );
-        }
-    );
-}
-
-$("classSelect")?.addEventListener(
-    "change",
-    event => {
-        const annotation =
-            getSelected();
-
-        if (!annotation) {
-            return;
-        }
-
-        annotation.label =
-            event.target.value;
-
-        annotation.corrected =
-            true;
-
-        updateAnnotationsList();
-
-        saveFrame();
-        saveSession();
-
-        cloudSaveAnnotation(
-            annotation
-        );
-
-        render();
-    }
-);
-
-/* ============================================================
-   APPLY CLASSIFICATION
-============================================================ */
-
-$("applyClass")?.addEventListener(
-    "click",
-    () => {
-        const annotation =
-            getSelected();
-
-        const select =
-            $("classSelect");
-
-        if (
-            !annotation ||
-            !select
-        ) {
-            return;
-        }
-
-        annotation.label =
-            select.value ||
-            "unknown";
-
-        annotation.corrected =
-            true;
-
-        updateAnnotationsList();
-
-        saveFrame();
-        saveSession();
-
-        cloudSaveAnnotation(
-            annotation
-        );
-
-        render();
-
-        showToast(
-            "Classification updated"
-        );
-    }
-);
-
-/* ============================================================
-   KEYBOARD CLASSIFICATION
-============================================================ */
-
-document.addEventListener(
-    "keydown",
-    event => {
-        if (
-            event.target &&
-            (
-                event.target.tagName ===
-                    "INPUT" ||
-                event.target.tagName ===
-                    "TEXTAREA" ||
-                event.target.tagName ===
-                    "SELECT"
-            )
-        ) {
-            return;
-        }
-
-        if (
-            !state.selectedId
-        ) {
-            return;
-        }
-
-        const number =
-            Number(
-                event.key
-            );
-
-        if (
-            number >= 1 &&
-            number <=
-                AI_LABELS.length
-        ) {
-            const label =
-                AI_LABELS[
-                    number - 1
-                ];
-
-            const annotation =
-                getSelected();
-
-            if (!annotation) {
-                return;
-            }
-
-            annotation.label =
-                label;
-
-            annotation.corrected =
-                true;
-
-            updateAnnotationsList();
-
-            saveFrame();
-            saveSession();
-
-            cloudSaveAnnotation(
-                annotation
-            );
-
-            render();
-        }
-    }
-);
-
-/* ============================================================
-   BULK OCCLUSION / TRUNCATION
-============================================================ */
-
-$("applyOcclusion")?.addEventListener(
-    "click",
-    () => {
-        const value =
-            Number(
-                $("occlusionSelect")
-                    ?.value ?? 0
-            );
-
-        let changed = 0;
-
-        state.annotations.forEach(
-            annotation => {
-                if (
-                    annotation.id ===
-                    state.selectedId
-                ) {
-                    annotation.occlusion =
-                        value;
-
-                    annotation.corrected =
-                        true;
-
-                    changed++;
-                }
-            }
-        );
-
-        if (!changed) {
-            showToast(
-                "Select an annotation first."
-            );
-
-            return;
-        }
-
-        updateAnnotationsList();
-
-        saveFrame();
-        saveSession();
-
-        cloudSaveAllAnnotations();
-
-        render();
-    }
-);
-
-$("applyTruncation")?.addEventListener(
-    "click",
-    () => {
-        const value =
-            $("truncationSelect")
-                ?.value ||
-            "NONE";
-
-        const annotation =
-            getSelected();
-
-        if (!annotation) {
-            showToast(
-                "Select an annotation first."
-            );
-
-            return;
-        }
-
-        annotation.truncation =
-            value;
-
-        annotation.corrected =
-            true;
-
-        updateAnnotationsList();
-
-        saveFrame();
-        saveSession();
-
-        cloudSaveAnnotation(
-            annotation
-        );
-
-        render();
-    }
-);
-
-/* ============================================================
-   UTILITY
-============================================================ */
-
-function escapeHTML(
-    value
-) {
-    return String(
-        value ?? ""
-    )
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /'/g,
-            "&#039;"
-        );
-}
-
-function showToast(
-    message
-) {
-    let toast =
-        document.querySelector(
-            ".app-toast"
-        );
-
-    if (!toast) {
-        toast =
-            document.createElement(
-                "div"
-            );
-
-        toast.className =
-            "app-toast";
-
-        document.body.appendChild(
-            toast
-        );
-    }
-
-    toast.textContent =
-        message;
-
-    toast.classList.add(
-        "visible"
-    );
-
-    clearTimeout(
-        showToast.timer
-    );
-
-    showToast.timer =
-        setTimeout(
-            () => {
-                toast.classList.remove(
-                    "visible"
-                );
-            },
-            2500
-        );
-}
-
-/* ============================================================
-   TASK-SAFE MEDIA CAPTURE
-============================================================ */
-
-function captureCurrentVideoFrame() {
-    if (
-        !sourceVideo ||
-        sourceVideo.readyState <
-            2
-    ) {
-        return false;
-    }
-
-    const width =
-        sourceVideo.videoWidth;
-
-    const height =
-        sourceVideo.videoHeight;
 
     if (
         !width ||
         !height
     ) {
-        return false;
+
+        return [];
+
     }
 
-    const frameCanvas =
-        document.createElement(
-            "canvas"
-        );
 
-    frameCanvas.width =
-        width;
+    return [
+        {
 
-    frameCanvas.height =
-        height;
+            label:
+                "object",
 
-    const frameContext =
-        frameCanvas.getContext(
-            "2d"
-        );
+            score:
+                0.36,
 
-    frameContext.drawImage(
-        sourceVideo,
-        0,
-        0,
-        width,
-        height
-    );
-
-    const image =
-        new Image();
-
-    image.onload =
-        () => {
-            state.image =
-                image;
-
-            state.mediaType =
-                "video";
-
-            render();
-        };
-
-    image.src =
-        frameCanvas.toDataURL(
-            "image/jpeg",
-            0.92
-        );
-
-    return true;
-}
-
-/* ============================================================
-   EXPORT HELPERS
-============================================================ */
-
-function getExportAnnotations() {
-    return state.annotations
-        .filter(
-            annotation =>
-                annotation.export !==
-                false
-        )
-        .map(
-            annotation => ({
-                ...annotation,
-
-                points:
-                    annotation.points
-                        ? annotation.points.map(
-                            p => ({
-                                x: p.x,
-                                y: p.y
-                            })
-                        )
-                        : undefined
-            })
-        );
-}
-
-function annotationsToRows() {
-    return getExportAnnotations()
-        .map(
-            (annotation, index) => ({
-                id:
-                    annotation.id,
-
-                number:
-                    index + 1,
-
-                label:
-                    annotation.label ||
-                    "unknown",
-
-                type:
-                    annotation.type,
+            bbox: {
 
                 x:
-                    annotation.x ??
-                    "",
+                    width *
+                    0.1,
 
                 y:
-                    annotation.y ??
-                    "",
+                    height *
+                    0.1,
 
                 width:
-                    annotation.width ??
-                    "",
+                    width *
+                    0.8,
 
                 height:
-                    annotation.height ??
-                    "",
+                    height *
+                    0.8
 
-                occlusion:
-                    annotation.occlusion ??
-                    0,
-
-                truncation:
-                    annotation.truncation ||
-                    "NONE",
-
-                confidence:
-                    annotation.score ??
-                    "",
-
-                aiGenerated:
-                    annotation.aiGenerated
-                        ? "YES"
-                        : "NO",
-
-                corrected:
-                    annotation.corrected
-                        ? "YES"
-                        : "NO"
-            })
-        );
-}
-
-function rowsToCSV(
-    rows
-) {
-    if (
-        !rows.length
-    ) {
-        return "";
-    }
-
-    const headers =
-        Object.keys(
-            rows[0]
-        );
-
-    const escapeCSV =
-        value => {
-            const text =
-                String(
-                    value ?? ""
-                );
-
-            if (
-                /[",\n]/.test(
-                    text
-                )
-            ) {
-                return (
-                    '"' +
-                    text.replace(
-                        /"/g,
-                        '""'
-                    ) +
-                    '"'
-                );
             }
 
-            return text;
-        };
+        }
+    ];
 
-    return [
-        headers.join(","),
-        ...rows.map(
-            row =>
-                headers
-                    .map(
-                        key =>
-                            escapeCSV(
-                                row[key]
-                            )
-                    )
-                    .join(",")
-        )
-    ].join("\n");
 }
 
-function downloadText(
-    filename,
-    content,
-    mimeType
+
+/* ============================================================
+   ANNOTATION HISTORY
+============================================================ */
+
+function cloneAnnotations(
+    annotations
 ) {
-    const blob =
-        new Blob(
-            [content],
-            {
-                type:
-                    mimeType ||
-                    "text/plain;charset=utf-8"
-            }
-        );
 
-    const url =
-        URL.createObjectURL(
-            blob
-        );
-
-    const link =
-        document.createElement(
-            "a"
-        );
-
-    link.href =
-        url;
-
-    link.download =
-        filename;
-
-    document.body.appendChild(
-        link
-    );
-
-    link.click();
-
-    link.remove();
-
-    setTimeout(
-        () =>
-            URL.revokeObjectURL(
-                url
-            ),
-        1000
-    );
-}
-
-/* ============================================================
-   CUSTOMER CSV EXPORT
-============================================================ */
-
-function exportCSV() {
-    const rows =
-        annotationsToRows();
-
-    if (
-        !rows.length
-    ) {
-        showToast(
-            "There are no annotations to export."
-        );
-
-        return;
-    }
-
-    const csv =
-        rowsToCSV(
-            rows
-        );
-
-    const taskId =
-        CLOUD.currentTaskId ||
-        "annotation-task";
-
-    downloadText(
-        `${taskId}-annotations.csv`,
-        csv,
-        "text/csv;charset=utf-8"
-    );
-
-    showToast(
-        "CSV exported successfully"
-    );
-}
-
-/* ============================================================
-   HTML EXPORT
-============================================================ */
-
-function exportHTML() {
-    const rows =
-        annotationsToRows();
-
-    const taskId =
-        CLOUD.currentTaskId ||
-        "annotation-task";
-
-    const generated =
-        new Date()
-            .toISOString();
-
-    const headers =
-        rows.length
-            ? Object.keys(
-                rows[0]
-            )
-            : [
-                "id",
-                "number",
-                "label",
-                "type",
-                "x",
-                "y",
-                "width",
-                "height",
-                "occlusion",
-                "truncation",
-                "confidence",
-                "aiGenerated",
-                "corrected"
-            ];
-
-    const html =
-        `
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>${escapeHTML(
-    taskId
-)} - Annotation Export</title>
-
-<style>
-body {
-    font-family: Arial, sans-serif;
-    padding: 30px;
-    background: #f6f6f6;
-    color: #222;
-}
-
-h1 {
-    margin-bottom: 5px;
-}
-
-.meta {
-    color: #666;
-    margin-bottom: 20px;
-}
-
-table {
-    border-collapse: collapse;
-    width: 100%;
-    background: white;
-}
-
-th,
-td {
-    border: 1px solid #ddd;
-    padding: 8px;
-    text-align: left;
-    font-size: 12px;
-}
-
-th {
-    background: #eee;
-}
-
-tr:nth-child(even) {
-    background: #fafafa;
-}
-</style>
-</head>
-
-<body>
-
-<h1>Annotation Export</h1>
-
-<div class="meta">
-Task: ${escapeHTML(taskId)}<br>
-Generated: ${escapeHTML(generated)}<br>
-Annotations: ${rows.length}
-</div>
-
-<table>
-<thead>
-<tr>
-${headers
-    .map(
-        header =>
-            `<th>${escapeHTML(
-                header
-            )}</th>`
-    )
-    .join("")}
-</tr>
-</thead>
-
-<tbody>
-${
-    rows
-        .map(
-            row =>
-                `<tr>
-${headers
-    .map(
-        header =>
-            `<td>${escapeHTML(
-                row[header]
-            )}</td>`
-    )
-    .join("")}
-</tr>`
-        )
-        .join("")
-}
-</tbody>
-
-</table>
-
-</body>
-</html>
-`;
-
-    downloadText(
-        `${taskId}-annotations.html`,
-        html,
-        "text/html;charset=utf-8"
-    );
-
-    showToast(
-        "HTML exported successfully"
-    );
-}
-
-/* ============================================================
-   GOOGLE SHEETS COMPATIBLE EXPORT
-============================================================ */
-
-$("exportSheets")?.addEventListener(
-    "click",
-    exportGoogleSheetsCompatible
-);
-
-function exportGoogleSheetsCompatible() {
-    const rows =
-        annotationsToRows();
-
-    if (
-        !rows.length
-    ) {
-        showToast(
-            "There are no annotations to export."
-        );
-
-        return;
-    }
-
-    /*
-     * CSV is directly importable into Google Sheets.
-     */
-    const csv =
-        rowsToCSV(
-            rows
-        );
-
-    const taskId =
-        CLOUD.currentTaskId ||
-        "annotation-task";
-
-    downloadText(
-        `${taskId}-google-sheets.csv`,
-        csv,
-        "text/csv;charset=utf-8"
-    );
-
-    showToast(
-        "Google Sheets-compatible CSV exported"
-    );
-}
-
-/* ============================================================
-   COPY CSV
-============================================================ */
-
-$("copyCSV")?.addEventListener(
-    "click",
-    async () => {
-        const rows =
-            annotationsToRows();
-
-        if (
-            !rows.length
-        ) {
-            showToast(
-                "There are no annotations to copy."
-            );
-
-            return;
-        }
-
-        const csv =
-            rowsToCSV(
-                rows
-            );
-
-        try {
-            await navigator.clipboard.writeText(
-                csv
-            );
-
-            showToast(
-                "CSV copied to clipboard"
-            );
-        } catch (error) {
-            console.error(
-                error
-            );
-
-            showToast(
-                "Clipboard access failed."
-            );
-        }
-    }
-);
-
-/* ============================================================
-   INITIAL AI UI
-============================================================ */
-
-populateClassSelect();
-updateColorLegend();
-updateCounts();
-updateUndoRedoButtons();
-setAIProgress(0);
-/* ============================================================
-   CLOUD / SUPABASE CONFIGURATION
-============================================================ */
-
-const SUPABASE_URL =
-    "https://ozcwfcfcwzjjanxfvico.supabase.co";
-
-const SUPABASE_PUBLISHABLE_KEY =
-    "sb_publishable_KwVoNQtwp23fiZnrqCao_g_ROVmU3KZ";
-
-let supabaseClient = null;
-
-const ALL_ROLES = [
-    "customer",
-    "staff",
-    "reviewer",
-    "coworker_2d_box",
-    "coworker_polygon",
-    "coworker_segmentation",
-    "admin"
-];
-
-const WORK_ROLE = {
-    "2d_box":
-        "coworker_2d_box",
-
-    polygon:
-        "coworker_polygon",
-
-    segmentation:
-        "coworker_segmentation"
-};
-
-const ROOT_ADMIN_EMAIL =
-    "antonymbali96@gmail.com";
-
-const CLOUD = {
-    session: null,
-    profile: null,
-
-    currentTaskId:
-        null,
-
-    currentTask:
-        null,
-
-    channel:
-        null,
-
-    ready:
-        false
-};
-
-window.CLOUD =
-    CLOUD;
-
-/* ============================================================
-   SUPABASE CLIENT
-============================================================ */
-
-function createSupabaseClient() {
-    if (supabaseClient) {
-        return supabaseClient;
-    }
-
-    try {
-        supabaseClient = createClient(
-            SUPABASE_URL,
-            SUPABASE_PUBLISHABLE_KEY,
-            {
-                auth: {
-                    persistSession: true,
-                    autoRefreshToken: true,
-                    detectSessionInUrl: true
-                }
-            }
-        );
-
-        return supabaseClient;
-
-    } catch (error) {
-        console.error("Could not create Supabase client:", error);
-        return null;
-    }
-}
-
-const supabase = createSupabaseClient();
-
-/* ============================================================
-   CLOUD INITIALIZATION
-============================================================ */
-
-async function initCloud() {
-    const client =
-        createSupabaseClient();
-
-    if (!client) {
-        setAuthStatus(
-            "Cloud connection is unavailable."
-        );
-
-        showAuthGate();
-
-        return;
-    }
-
-    try {
-        const {
-            data,
-            error
-        } =
-            await client.auth.getSession();
-
-        if (error) {
-            throw error;
-        }
-
-        CLOUD.session =
-            data?.session ||
-            null;
-
-        if (
-            CLOUD.session
-        ) {
-            await handleSession(
-                CLOUD.session,
-                false
-            );
-        } else {
-            showAuthGate();
-        }
-
-        client.auth.onAuthStateChange(
-            async (
-                event,
-                session
-            ) => {
-                try {
-                    CLOUD.session =
-                        session ||
-                        null;
-
-                    if (
-                        session
-                    ) {
-                        await handleSession(
-                            session,
-                            event ===
-                                "SIGNED_IN"
-                        );
-                    } else {
-                        await handleSignedOut();
-                    }
-
-                } catch (error) {
-                    console.error(
-                        "Auth state handling error:",
-                        error
-                    );
-                }
-            }
-        );
-
-        CLOUD.ready =
-            true;
-
-    } catch (error) {
-        console.error(
-            "Cloud initialization failed:",
-            error
-        );
-
-        setAuthStatus(
-            error.message ||
-            "Unable to connect to cloud."
-        );
-
-        showAuthGate();
-    }
-}
-
-/* ============================================================
-   AUTH GATE
-============================================================ */
-
-function showAuthGate() {
-    const page =
-        $("loginPage");
-
-    const app =
-        document.querySelector(
-            ".app"
-        );
-
-    const loggedOut =
-        $("authLoggedOut");
-
-    const loggedIn =
-        $("authLoggedIn");
-
-    if (page) {
-
-        page.style.display =
-            "grid";
-
-    }
-
-    if (app) {
-
-        app.style.display =
-            "none";
-
-    }
-
-    if (loggedOut) {
-
-        loggedOut.style.display =
-            "block";
-
-    }
-
-    if (loggedIn) {
-
-        loggedIn.style.display =
-            "none";
-
-    }
-}
-
-function hideAuthGate() {
-    const page =
-        $("loginPage");
-
-    const app =
-        document.querySelector(
-            ".app"
-        );
-
-    const loggedOut =
-        $("authLoggedOut");
-
-    const loggedIn =
-        $("authLoggedIn");
-
-    if (page) {
-        page.style.display =
-            "none";
-    }
-
-    if (app) {
-        app.style.display =
-            "";
-    }
-
-    if (loggedOut) {
-        loggedOut.style.display =
-            "none";
-    }
-
-    if (loggedIn) {
-        loggedIn.style.display =
-            "block";
-    }
-
-    updateGreeting();
-    applyRolePermissions();
-}
-
-/* ============================================================
-   AUTH STATUS
-============================================================ */
-
-function setAuthStatus(
-    message,
-    isError = false
-) {
-    const status =
-        $("authStatus");
-
-    if (!status) {
-        return;
-    }
-
-    status.textContent =
-        message;
-
-    status.classList.toggle(
-        "error",
-        !!isError
-    );
-}
-
-/* ============================================================
-   SIGN IN
-============================================================ */
-
-$("signInBtn")?.addEventListener(
-    "click",
-    signIn
-);
-
-$("authPassword")?.addEventListener(
-    "keydown",
-    event => {
-        if (
-            event.key ===
-            "Enter"
-        ) {
-            signIn();
-        }
-    }
-);
-
-$("authEmail")?.addEventListener(
-    "keydown",
-    event => {
-        if (
-            event.key ===
-            "Enter"
-        ) {
-            signIn();
-        }
-    }
-);
-
-async function signIn() {
-    const email =
-        $("authEmail")
-            ?.value
-            ?.trim();
-
-    const password =
-        $("authPassword")
-            ?.value ||
-        "";
-
-    if (!email) {
-        setAuthStatus(
-            "Enter your email address.",
-            true
-        );
-
-        return;
-    }
-
-    if (!password) {
-        setAuthStatus(
-            "Enter your password.",
-            true
-        );
-
-        return;
-    }
-
-    const button =
-        $("signInBtn");
-
-    if (button) {
-        button.disabled =
-            true;
-
-        button.textContent =
-            "SIGNING IN...";
-    }
-
-    setAuthStatus(
-        "Signing in..."
-    );
-
-    try {
-        const client =
-            createSupabaseClient();
-
-        if (!client) {
-            throw new Error(
-                "Supabase is unavailable."
-            );
-        }
-
-        const {
-            data,
-            error
-        } =
-            await client.auth.signInWithPassword(
-                {
-                    email,
-                    password
-                }
-            );
-
-        if (error) {
-            throw error;
-        }
-
-        if (
-            data?.session
-        ) {
-            CLOUD.session =
-                data.session;
-
-            await handleSession(
-                data.session,
-                true
-            );
-        }
-
-    } catch (error) {
-        console.error(
-            "Sign-in error:",
-            error
-        );
-
-        setAuthStatus(
-            friendlyAuthError(
-                error
-            ),
-            true
-        );
-
-    } finally {
-        if (button) {
-            button.disabled =
-                false;
-
-            button.textContent =
-                "SIGN IN";
-        }
-    }
-}
-
-/* ============================================================
-   CREATE ACCOUNT
-============================================================ */
-
-$("signUpBtn")?.addEventListener(
-    "click",
-    signUp
-);
-
-async function signUp() {
-    const email =
-        $("authEmail")
-            ?.value
-            ?.trim();
-
-    const password =
-        $("authPassword")
-            ?.value ||
-        "";
-
-    if (!email) {
-        setAuthStatus(
-            "Enter an email address first.",
-            true
-        );
-
-        return;
-    }
-
-    if (
-        password.length < 8
-    ) {
-        setAuthStatus(
-            "Password must be at least 8 characters.",
-            true
-        );
-
-        return;
-    }
-
-    const button =
-        $("signUpBtn");
-
-    if (button) {
-        button.disabled =
-            true;
-
-        button.textContent =
-            "CREATING...";
-    }
-
-    setAuthStatus(
-        "Creating account..."
-    );
-
-    try {
-        const client =
-            createSupabaseClient();
-
-        if (!client) {
-            throw new Error(
-                "Supabase is unavailable."
-            );
-        }
-
-        const {
-            data,
-            error
-        } =
-            await client.auth.signUp(
-                {
-                    email,
-                    password,
-
-                    options: {
-                        data: {
-                            full_name:
-                                email.split(
-                                    "@"
-                                )[0]
-                        }
-                    }
-                }
-            );
-
-        if (error) {
-            throw error;
-        }
-
-        /*
-         * If email confirmation is enabled,
-         * Supabase will not immediately provide
-         * an authenticated session.
-         */
-        if (
-            data?.session
-        ) {
-            CLOUD.session =
-                data.session;
-
-            await handleSession(
-                data.session,
-                true
-            );
-
-        } else {
-            setAuthStatus(
-                "Account created. Check your email if confirmation is required."
-            );
-        }
-
-    } catch (error) {
-        console.error(
-            "Sign-up error:",
-            error
-        );
-
-        setAuthStatus(
-            friendlyAuthError(
-                error
-            ),
-            true
-        );
-
-    } finally {
-        if (button) {
-            button.disabled =
-                false;
-
-            button.textContent =
-                "CREATE ACCOUNT";
-        }
-    }
-}
-
-/* ============================================================
-   FORGOT PASSWORD
-============================================================ */
-
-$("forgotPassword")?.addEventListener(
-    "click",
-    sendPasswordReset
-);
-
-async function sendPasswordReset() {
-    const email =
-        $("authEmail")
-            ?.value
-            ?.trim();
-
-    if (!email) {
-        setAuthStatus(
-            "Enter your email first so we can send the reset link.",
-            true
-        );
-
-        return;
-    }
-
-    try {
-        const client =
-            createSupabaseClient();
-
-        if (!client) {
-            throw new Error(
-                "Supabase is unavailable."
-            );
-        }
-
-        const {
-            error
-        } =
-            await client.auth.resetPasswordForEmail(
-                email,
-                {
-                    redirectTo:
-                        window.location.href
-                }
-            );
-
-        if (error) {
-            throw error;
-        }
-
-        setAuthStatus(
-            "Password reset instructions have been sent."
-        );
-
-    } catch (error) {
-        console.error(
-            "Password reset error:",
-            error
-        );
-
-        setAuthStatus(
-            friendlyAuthError(
-                error
-            ),
-            true
-        );
-    }
-}
-
-/* ============================================================
-   SIGN OUT
-============================================================ */
-
-$("logoutButton")?.addEventListener(
-    "click",
-    signOut
-);
-
-async function signOut() {
-    try {
-        await recordLogout();
-
-        if (
-            CLOUD.channel &&
-            supabaseClient
-        ) {
-            await supabaseClient
-                .removeChannel(
-                    CLOUD.channel
-                );
-
-            CLOUD.channel =
-                null;
-        }
-
-        if (
-            supabaseClient
-        ) {
-            await supabaseClient.auth.signOut();
-        }
-
-    } catch (error) {
-        console.error(
-            "Sign-out error:",
-            error
-        );
-
-        /*
-         * Even if the activity log fails,
-         * clear the local application state.
-         */
-        CLOUD.session =
-            null;
-
-        CLOUD.profile =
-            null;
-
-        CLOUD.currentTaskId =
-            null;
-
-        CLOUD.currentTask =
-            null;
-
-        showAuthGate();
-    }
-}
-
-async function handleSignedOut() {
-    CLOUD.session =
-        null;
-
-    CLOUD.profile =
-        null;
-
-    CLOUD.currentTaskId =
-        null;
-
-    CLOUD.currentTask =
-        null;
-
-    if (
-        CLOUD.channel &&
-        supabaseClient
-    ) {
-        try {
-            await supabaseClient
-                .removeChannel(
-                    CLOUD.channel
-                );
-        } catch (_) {}
-
-        CLOUD.channel =
-            null;
-    }
-
-    showAuthGate();
-
-    clearCloudWorkspace();
-}
-
-/* ============================================================
-   HANDLE SESSION
-============================================================ */
-
-async function handleSession(
-    session,
-    shouldLogLogin
-) {
-    if (!session?.user) {
-        showAuthGate();
-
-        return;
-    }
-
-    CLOUD.session =
-        session;
-
-    try {
-        await loadCloudProfile();
-
-        if (
-            !CLOUD.profile
-        ) {
-            throw new Error(
-                "Your account profile could not be loaded."
-            );
-        }
-
-        if (
-            CLOUD.profile.active ===
-            false
-        ) {
-            await supabaseClient.auth.signOut();
-
-            setAuthStatus(
-                "This account has been deactivated.",
-                true
-            );
-
-            showAuthGate();
-
-            return;
-        }
-
-        hideAuthGate();
-
-        enforceRoleUI();
-
-        applyRolePermissions();
-
-        if (
-            shouldLogLogin
-        ) {
-            await recordLogin();
-        }
-
-        subscribeRealtime();
-
-        await loadCloudTasks();
-
-        await loadWorkHistory();
-
-        updateWorkspaceGreeting();
-
-        /*
-         * Users marked by the administrator for a password
-         * change are sent directly to the password reset UI.
-         */
-        if (
-            CLOUD.profile.must_change_password
-        ) {
-            openPasswordResetModal();
-        }
-
-    } catch (error) {
-        console.error(
-            "Session setup failed:",
-            error
-        );
-
-        setAuthStatus(
-            error.message ||
-            "Unable to load your workspace.",
-            true
-        );
-
-        /*
-         * Do not leave a partially authenticated user
-         * inside the application.
-         */
-        showAuthGate();
-    }
-}
-
-/* ============================================================
-   LOAD PROFILE
-============================================================ */
-
-async function loadCloudProfile() {
-    if (
-        !CLOUD.session?.user
-    ) {
-        return null;
-    }
-
-    const userId =
-        CLOUD.session.user.id;
-
-    const {
-        data,
-        error
-    } =
-        await supabaseClient
-            .from("profiles")
-            .select("*")
-            .eq(
-                "id",
-                userId
-            )
-            .maybeSingle();
-
-    if (error) {
-        throw error;
-    }
-
-    if (!data) {
-        /*
-         * The database trigger normally creates this row.
-         * Give it a short chance to appear before failing.
-         */
-        await sleep(500);
-
-        const retry =
-            await supabaseClient
-                .from("profiles")
-                .select("*")
-                .eq(
-                    "id",
-                    userId
-                )
-                .maybeSingle();
-
-        if (retry.error) {
-            throw retry.error;
-        }
-
-        CLOUD.profile =
-            retry.data ||
-            null;
-
-    } else {
-        CLOUD.profile =
-            data;
-    }
-
-    return CLOUD.profile;
-}
-
-/* ============================================================
-   ACCOUNT UI
-============================================================ */
-
-function updateAccountUI() {
-    const profile =
-        CLOUD.profile;
-
-    const user =
-        CLOUD.session?.user;
-
-    if (!profile) {
-        return;
-    }
-
-    const email =
-        profile.email ||
-        user?.email ||
-        "";
-
-    const name =
-        profile.full_name ||
-        email.split(
-            "@"
-        )[0] ||
-        "User";
-
-    const role =
-        profile.role ||
-        "customer";
-
-    const nameElements =
-        [
-            $("userName"),
-            $("accountName"),
-            $("profileName")
-        ];
-
-    nameElements.forEach(
-        element => {
-            if (element) {
-                element.textContent =
-                    name;
-            }
-        }
-    );
-
-    const roleElements =
-        [
-            $("userRole"),
-            $("accountRole"),
-            $("profileRole")
-        ];
-
-    roleElements.forEach(
-        element => {
-            if (element) {
-                element.textContent =
-                    roleLabel(
-                        role
-                    );
-            }
-        }
-    );
-
-    const emailElements =
-        [
-            $("userEmail"),
-            $("accountEmail"),
-            $("profileEmail")
-        ];
-
-    emailElements.forEach(
-        element => {
-            if (element) {
-                /*
-                 * Admin email is intentionally never displayed
-                 * to ordinary users. Their own email is fine.
-                 */
-                element.textContent =
-                    email;
-            }
-        }
-    );
-
-    updateAvatar(
-        profile.avatar_url
-    );
-}
-
-function updateAvatar(
-    avatarURL
-) {
-    const image =
-        $("profileAvatar");
-
-    const fallback =
-        $("profileAvatarFallback");
-
-    if (
-        image &&
-        avatarURL
-    ) {
-        image.src =
-            avatarURL;
-
-        image.style.display =
-            "block";
-
-        if (fallback) {
-            fallback.style.display =
-                "none";
-        }
-
-        return;
-    }
-
-    if (image) {
-        image.removeAttribute(
-            "src"
-        );
-
-        image.style.display =
-            "none";
-    }
-
-    if (fallback) {
-        fallback.style.display =
-            "flex";
-
-        fallback.textContent =
-            getUserInitial();
-    }
-}
-
-function getUserInitial() {
-    const name =
-        CLOUD.profile?.full_name ||
-        CLOUD.session?.user?.email ||
-        "U";
-
-    return (
-        name
-            .trim()
-            .charAt(0)
-            .toUpperCase() ||
-        "U"
-    );
-}
-
-/* ============================================================
-   ROLE HELPERS
-============================================================ */
-
-function roleLabel(
-    role
-) {
-    const labels = {
-        customer:
-            "Customer",
-
-        staff:
-            "Staff",
-
-        reviewer:
-            "Reviewer",
-
-        coworker_2d_box:
-            "2D Box",
-
-        coworker_polygon:
-            "Polygon",
-
-        coworker_segmentation:
-            "Segmentation",
-
-        admin:
-            "Admin"
-    };
-
-    return (
-        labels[role] ||
-        role ||
-        "User"
-    );
-}
-
-function isAdmin() {
-    return (
-        CLOUD.profile?.role ===
-        "admin"
-    );
-}
-
-function isReviewer() {
-    return (
-        CLOUD.profile?.role ===
-        "reviewer"
-    );
-}
-
-function isStaffOrAdmin() {
-    return [
-        "staff",
-        "admin"
-    ].includes(
-        CLOUD.profile?.role
-    );
-}
-
-function hasAllAccess() {
-    return [
-        "staff",
-        "admin",
-        "reviewer"
-    ].includes(
-        CLOUD.profile?.role
-    );
-}
-
-function isCoworker() {
-    return [
-        "coworker_2d_box",
-        "coworker_polygon",
-        "coworker_segmentation"
-    ].includes(
-        CLOUD.profile?.role
-    );
-}
-
-/* ============================================================
-   ROLE-BASED WORKSPACE
-============================================================ */
-
-function enforceRoleUI() {
-    const role =
-        CLOUD.profile?.role;
-
-    const customerUpload =
-        $("uploadPanel");
-
-    const manualType =
-        $("annotationTypePanel");
-
-    const adminButton =
-        $("adminControlBtn");
-
-    const customerExport =
-        $("exportPanel");
-
-    /*
-     * Coworkers cannot access customer upload tools.
-     */
-    if (
-        customerUpload
-    ) {
-        customerUpload.style.display =
-            isCoworker()
-                ? "none"
-                : "";
-    }
-
-    /*
-     * Coworkers cannot manually select annotation type.
-     * Their assigned work role determines the shape.
-     */
-    if (
-        manualType
-    ) {
-        manualType.style.display =
-            isCoworker()
-                ? "none"
-                : "";
-    }
-
-    /*
-     * Only admins see the Admin Center button.
-     */
-    if (
-        adminButton
-    ) {
-        adminButton.style.display =
-            isAdmin()
-                ? ""
-                : "none";
-    }
-
-    /*
-     * All authenticated users can export their own
-     * permitted task results, subject to task ownership.
-     */
-    if (
-        customerExport
-    ) {
-        customerExport.style.display =
-            "";
-    }
-
-    /*
-     * Staff/admin get all workspace access.
-     */
-    if (
-        role ===
-            "staff" ||
-        role ===
-            "admin"
-    ) {
-        document.body.classList.add(
-            "all-access-user"
-        );
-    } else {
-        document.body.classList.remove(
-            "all-access-user"
-        );
-    }
-
-    updateWorkRoleUI();
-}
-
-/* ============================================================
-   WORK ROLE UI
-============================================================ */
-
-function updateWorkRoleUI() {
-    const role =
-        CLOUD.profile?.role;
-
-    const roleText =
-        $("workRoleText");
-
-    if (roleText) {
-        roleText.textContent =
-            roleLabel(
-                role
-            );
-    }
-
-    const shape =
-        role ===
-        "coworker_2d_box"
-            ? "box"
-            : role ===
-              "coworker_polygon"
-                ? "polygon"
-                : role ===
-                  "coworker_segmentation"
-                    ? "segmentation"
-                    : null;
-
-    if (
-        shape &&
-        state.annotationType !==
-            shape
-    ) {
-        state.annotationType =
-            shape;
-    }
-}
-
-/* ============================================================
-   GREETING / TIME
-============================================================ */
-
-function updateWorkspaceGreeting() {
-    const greeting =
-        $("workspaceGreeting");
-
-    const profile =
-        CLOUD.profile;
-
-    if (!greeting) {
-        return;
-    }
-
-    const hour =
-        new Date().getHours();
-
-    let text;
-
-    if (
-        hour >= 5 &&
-        hour < 12
-    ) {
-        text =
-            "Good morning ☀️";
-    } else if (
-        hour >= 12 &&
-        hour < 17
-    ) {
-        text =
-            "Good afternoon 🌤️";
-    } else if (
-        hour >= 17 &&
-        hour < 21
-    ) {
-        text =
-            "Good evening 🌆";
-    } else {
-        text =
-            "Good night 🌙";
-    }
-
-    const name =
-        profile?.full_name ||
-        profile?.email?.split(
-            "@"
-        )[0] ||
-        "there";
-
-    greeting.textContent =
-        `${text}, ${name}`;
-}
-
-/* ============================================================
-   PROFILE AVATAR UPLOAD
-============================================================ */
-
-$("avatarInput")?.addEventListener(
-    "change",
-    uploadAvatar
-);
-
-async function uploadAvatar(
-    event
-) {
-    const file =
-        event.target.files?.[0];
-
-    if (!file) {
-        return;
-    }
-
-    if (
-        !CLOUD.session?.user
-    ) {
-        return;
-    }
-
-    const allowed =
-        [
-            "image/jpeg",
-            "image/png",
-            "image/webp"
-        ];
-
-    if (
-        !allowed.includes(
-            file.type
-        )
-    ) {
-        showToast(
-            "Use a JPG, PNG, or WebP image."
-        );
-
-        return;
-    }
-
-    if (
-        file.size >
-        5 * 1024 * 1024
-    ) {
-        showToast(
-            "Profile image must be smaller than 5 MB."
-        );
-
-        return;
-    }
-
-    try {
-        const userId =
-            CLOUD.session.user.id;
-
-        const extension =
-            file.name
-                .split(".")
-                .pop()
-                .toLowerCase();
-
-        const path =
-            `${userId}/avatar.${extension}`;
-
-        const {
-            error:
-                uploadError
-        } =
-            await supabaseClient.storage
-                .from("avatars")
-                .upload(
-                    path,
-                    file,
-                    {
-                        upsert:
-                            true,
-
-                        cacheControl:
-                            "3600"
-                    }
-                );
-
-        if (
-            uploadError
-        ) {
-            throw uploadError;
-        }
-
-        const {
-            data:
-                publicData
-        } =
-            supabaseClient.storage
-                .from("avatars")
-                .getPublicUrl(
-                    path
-                );
-
-        const avatarURL =
-            publicData?.publicUrl;
-
-        if (!avatarURL) {
-            throw new Error(
-                "Avatar URL could not be created."
-            );
-        }
-
-        const {
-            error
-        } =
-            await supabaseClient
-                .from("profiles")
-                .update(
-                    {
-                        avatar_url:
-                            avatarURL
-                    }
-                )
-                .eq(
-                    "id",
-                    userId
-                );
-
-        if (error) {
-            throw error;
-        }
-
-        CLOUD.profile.avatar_url =
-            avatarURL;
-
-        updateAvatar(
-            avatarURL
-        );
-
-        showToast(
-            "Profile picture updated."
-        );
-
-    } catch (error) {
-        console.error(
-            "Avatar upload failed:",
-            error
-        );
-
-        showToast(
-            "Could not update profile picture."
-        );
-
-    } finally {
-        event.target.value =
-            "";
-    }
-}
-
-/* ============================================================
-   PASSWORD RESET MODAL
-============================================================ */
-
-function openPasswordResetModal() {
-    const modal =
-        $("passwordResetModal");
-
-    if (!modal) {
-        return;
-    }
-
-    modal.style.display =
-        "flex";
-
-    const input =
-        $("newPassword");
-
-    if (input) {
-        input.value =
-            "";
-
-        setTimeout(
-            () => input.focus(),
-            100
-        );
-    }
-}
-
-function closePasswordResetModal() {
-    const modal =
-        $("passwordResetModal");
-
-    if (modal) {
-        modal.style.display =
-            "none";
-    }
-}
-
-$("closePasswordReset")?.addEventListener(
-    "click",
-    closePasswordResetModal
-);
-
-$("saveNewPassword")?.addEventListener(
-    "click",
-    saveNewPassword
-);
-
-async function saveNewPassword() {
-    const input =
-        $("newPassword");
-
-    const confirm =
-        $("confirmPassword");
-
-    const password =
-        input?.value ||
-        "";
-
-    const confirmation =
-        confirm?.value ||
-        "";
-
-    if (
-        password.length < 8
-    ) {
-        showToast(
-            "Password must be at least 8 characters."
-        );
-
-        return;
-    }
-
-    if (
-        password !==
-        confirmation
-    ) {
-        showToast(
-            "Passwords do not match."
-        );
-
-        return;
-    }
-
-    try {
-        const {
-            error:
-                authError
-        } =
-            await supabaseClient.auth.updateUser(
-                {
-                    password
-                }
-            );
-
-        if (
-            authError
-        ) {
-            throw authError;
-        }
-
-        const {
-            error
-        } =
-            await supabaseClient
-                .from("profiles")
-                .update(
-                    {
-                        must_change_password:
-                            false
-                    }
-                )
-                .eq(
-                    "id",
-                    CLOUD.session.user.id
-                );
-
-        if (error) {
-            throw error;
-        }
-
-        CLOUD.profile.must_change_password =
-            false;
-
-        closePasswordResetModal();
-
-        showToast(
-            "Password updated successfully."
-        );
-
-    } catch (error) {
-        console.error(
-            "Password update failed:",
-            error
-        );
-
-        showToast(
-            friendlyAuthError(
-                error
-            )
-        );
-    }
-}
-
-/* ============================================================
-   CLOUD TASK LOADING
-============================================================ */
-
-async function loadCloudTasks() {
-    if (
-        !CLOUD.profile
-    ) {
-        return [];
-    }
-
-    try {
-        const {
-            data,
-            error
-        } =
-            await supabaseClient
-                .from("tasks")
-                .select(
-                    "*"
-                )
-                .order(
-                    "created_at",
-                    {
-                        ascending:
-                            false
-                    }
-                );
-
-        if (error) {
-            throw error;
-        }
-
-        const tasks =
-            data || [];
-
-        renderTaskQueue(
-            tasks
-        );
-
-        return tasks;
-
-    } catch (error) {
-        console.error(
-            "Could not load tasks:",
-            error
-        );
-
-        renderTaskQueue(
+    return JSON.parse(
+        JSON.stringify(
+            annotations ||
             []
-        );
-
-        return [];
-    }
-}
-
-async function refreshMyTasks() {
-    return loadCloudTasks();
-}
-
-/* ============================================================
-   TASK QUEUE
-============================================================ */
-
-function renderTaskQueue(
-    tasks
-) {
-    const queue =
-        $("taskQueue");
-
-    if (!queue) {
-        return;
-    }
-
-    const role =
-        CLOUD.profile?.role;
-
-    const available =
-        tasks.filter(
-            task =>
-                taskIsAvailableForUser(
-                    task,
-                    role
-                )
-        );
-
-    /*
-     * Paid tasks disappear from the active queue.
-     * Historical records remain in work history.
-     */
-    const active =
-        available.filter(
-            task =>
-                ![
-                    "paid",
-                    "approved"
-                ].includes(
-                    task.status
-                )
-        );
-
-    if (
-        !active.length
-    ) {
-        queue.innerHTML = `
-            <div class="task-empty">
-                <strong>
-                    Oops, looking for more work for you.
-                </strong>
-
-                <span>
-                    New tasks will appear here when they are available.
-                </span>
-            </div>
-        `;
-
-        return;
-    }
-
-    queue.innerHTML =
-        active.map(
-            task =>
-                renderTaskCard(
-                    task
-                )
-        ).join("");
-
-    queue
-        .querySelectorAll(
-            "[data-task-id]"
         )
-        .forEach(
-            element => {
-                element.addEventListener(
-                    "click",
-                    () => {
-                        const task =
-                            tasks.find(
-                                item =>
-                                    String(
-                                        item.id
-                                    ) ===
-                                    String(
-                                        element.dataset.taskId
-                                    )
-                            );
+    );
 
-                        if (task) {
-                            claimAndOpenTask(
-                                task
-                            );
-                        }
-                    }
-                );
-            }
-        );
 }
 
-function taskIsAvailableForUser(
-    task,
-    role
-) {
-    if (!task) {
-        return false;
-    }
 
-    if (
+function resetHistory(
+    annotations
+) {
+
+    state.history =
         [
-            "paid",
-            "approved"
-        ].includes(
-            task.status
-        )
-    ) {
-        return false;
-    }
-
-    if (
-        task.claimed_by &&
-        String(
-            task.claimed_by
-        ) !==
-            String(
-                CLOUD.session?.user?.id
+            cloneAnnotations(
+                annotations
             )
-    ) {
-        return false;
-    }
+        ];
 
-    /*
-     * Admin and staff have all access.
-     */
-    if (
-        role === "admin" ||
-        role === "staff"
-    ) {
-        return true;
-    }
+    state.historyIndex =
+        0;
 
-    /*
-     * Explicitly assigned tasks.
-     */
-    if (
-        task.assigned_to
-    ) {
-        return (
-            String(
-                task.assigned_to
-            ) ===
-            String(
-                CLOUD.session?.user?.id
-            )
-        );
-    }
+    updateUndoRedoButtons();
 
-    /*
-     * Role-based routing.
-     */
-    if (
-        task.required_role &&
-        task.required_role !==
-            role
-    ) {
-        return false;
-    }
-
-    if (
-        task.role &&
-        task.role !==
-            role
-    ) {
-        return false;
-    }
-
-    return true;
 }
 
-/* ============================================================
-   TASK CARD
-============================================================ */
 
-function renderTaskCard(
-    task
-) {
-    const shape =
-        task.shape ||
-        task.annotation_shape ||
-        task.type ||
-        "2d_box";
+function pushHistory() {
 
-    const role =
-        task.required_role ||
-        task.role ||
-        roleForShape(
-            shape
+    const snapshot =
+        cloneAnnotations(
+            state.annotations
         );
 
-    const duration =
-        task.expected_duration_minutes ||
-        task.duration_minutes ||
-        task.expected_duration ||
-        30;
-
-    const annotationCount =
-        Number(
-            task.annotation_count ??
-            task.annotations_count ??
-            0
-        );
-
-    return `
-        <button
-            type="button"
-            class="task-card"
-            data-task-id="${escapeHTML(
-                task.id
-            )}"
-        >
-            <div class="task-card-top">
-                <strong>
-                    ${escapeHTML(
-                        task.title ||
-                        task.name ||
-                        "Annotation task"
-                    )}
-                </strong>
-
-                <span class="task-count">
-                    ${annotationCount} annotations
-                </span>
-            </div>
-
-            <div class="task-card-info">
-                <span>
-                    Type:
-                    ${escapeHTML(
-                        shapeLabel(
-                            shape
-                        )
-                    )}
-                </span>
-
-                <span>
-                    Role:
-                    ${escapeHTML(
-                        roleLabel(
-                            role
-                        )
-                    )}
-                </span>
-
-                <span>
-                    Expected:
-                    ${escapeHTML(
-                        String(
-                            duration
-                        )
-                    )} min
-                </span>
-            </div>
-
-            ${
-                task.pay != null
-                    ? `
-                        <div class="task-card-pay">
-                            Pay:
-                            ${escapeHTML(
-                                formatMoney(
-                                    task.pay
-                                )
-                            )}
-                        </div>
-                    `
-                    : ""
-            }
-        </button>
-    `;
-}
-
-function roleForShape(
-    shape
-) {
-    if (
-        shape ===
-            "box" ||
-        shape ===
-            "2d_box"
-    ) {
-        return "coworker_2d_box";
-    }
 
     if (
-        shape ===
-        "polygon"
+        state.historyIndex <
+        state.history.length -
+            1
     ) {
-        return "coworker_polygon";
+
+        state.history =
+            state.history.slice(
+                0,
+                state.historyIndex +
+                    1
+            );
+
     }
 
-    if (
-        shape ===
-        "segmentation"
-    ) {
-        return "coworker_segmentation";
-    }
 
-    return null;
-}
-
-function shapeLabel(
-    shape
-) {
-    const labels = {
-        box:
-            "2D Box",
-
-        "2d_box":
-            "2D Box",
-
-        polygon:
-            "Polygon",
-
-        segmentation:
-            "Segmentation"
-    };
-
-    return (
-        labels[shape] ||
-        shape ||
-        "Annotation"
+    state.history.push(
+        snapshot
     );
-}
 
-function formatMoney(
-    amount
-) {
-    const number =
-        Number(
-            amount
-        );
 
     if (
-        !Number.isFinite(
-            number
-        )
+        state.history.length >
+        100
     ) {
-        return "";
+
+        state.history.shift();
+
+    } else {
+
+        state.historyIndex++;
+
     }
 
-    return new Intl.NumberFormat(
-        undefined,
-        {
-            style:
-                "currency",
 
-            currency:
-                "USD"
-        }
-    ).format(
-        number
-    );
+    if (
+        state.historyIndex <
+        0
+    ) {
+
+        state.historyIndex =
+            0;
+
+    }
+
+
+    updateUndoRedoButtons();
+
 }
 
-/* ============================================================
-   CLAIM TASK
-============================================================ */
 
-async function claimAndOpenTask(
-    task
-) {
-    if (!task) {
+function undo() {
+
+    if (
+        state.historyIndex <=
+        0
+    ) {
+
         return;
+
     }
 
-    if (
-        !CLOUD.session?.user
-    ) {
-        return;
-    }
 
-    try {
-        /*
-         * Use the database claim function so that two users
-         * cannot successfully claim the same task.
-         */
-        const {
-            data,
-            error
-        } =
-            await supabaseClient.rpc(
-                "claim_task",
-                {
-                    p_task_id:
-                        task.id
-                }
-            );
+    state.historyIndex--;
 
-        if (error) {
-            throw error;
-        }
-
-        const claimedTask =
-            Array.isArray(
-                data
-            )
-                ? data[0]
-                : data;
-
-        if (
-            claimedTask &&
-            claimedTask.id
-        ) {
-            task =
-                claimedTask;
-        } else {
-            const result =
-                await supabaseClient
-                    .from("tasks")
-                    .select("*")
-                    .eq(
-                        "id",
-                        task.id
-                    )
-                    .single();
-
-            if (
-                result.error
-            ) {
-                throw result.error;
-            }
-
-            task =
-                result.data;
-        }
-
-        if (
-            task.claimed_by &&
-            String(
-                task.claimed_by
-            ) !==
-                String(
-                    CLOUD.session.user.id
-                )
-        ) {
-            showToast(
-                "This task has already been claimed."
-            );
-
-            await loadCloudTasks();
-
-            return;
-        }
-
-        await openCloudTask(
-            task
-        );
-
-    } catch (error) {
-        console.error(
-            "Task claim failed:",
-            error
-        );
-
-        showToast(
-            error.message ||
-            "Could not claim this task."
-        );
-
-        await loadCloudTasks();
-    }
-}
-
-/* ============================================================
-   OPEN CLOUD TASK
-============================================================ */
-
-async function openCloudTask(
-    task
-) {
-    CLOUD.currentTask =
-        task;
-
-    CLOUD.currentTaskId =
-        task.id;
-
-    state.currentTaskId =
-        task.id;
-
-    state.taskId =
-        task.id;
-
-    const taskType =
-        task.shape ||
-        task.annotation_shape ||
-        task.type ||
-        "box";
-
-    if (
-        [
-            "box",
-            "2d_box"
-        ].includes(
-            taskType
-        )
-    ) {
-        state.annotationType =
-            "box";
-    } else if (
-        taskType ===
-        "polygon"
-    ) {
-        state.annotationType =
-            "polygon";
-    } else if (
-        taskType ===
-        "segmentation"
-    ) {
-        state.annotationType =
-            "segmentation";
-    }
-
-    updateWorkRoleUI();
-
-    updateCurrentTaskUI();
-
-    updateTaskBar();
-
-    await loadTaskAnnotations(
-        task.id
-    );
-
-    await loadTaskSource(
-        task
-    );
-
-    await loadCloudTasks();
-
-    logActivity(
-        "task_opened",
-        {
-            task_id:
-                task.id
-        }
-    );
-}
-
-/* ============================================================
-   CURRENT TASK UI
-============================================================ */
-
-function updateCurrentTaskUI() {
-    const task =
-        CLOUD.currentTask;
-
-    const title =
-        $("currentTaskTitle");
-
-    const id =
-        $("currentTaskId");
-
-    const role =
-        $("currentTaskRole");
-
-    const type =
-        $("currentTaskType");
-
-    const duration =
-        $("currentTaskDuration");
-
-    const count =
-        $("currentTaskAnnotationCount");
-
-    if (!task) {
-        return;
-    }
-
-    if (title) {
-        title.textContent =
-            task.title ||
-            task.name ||
-            "Current task";
-    }
-
-    if (id) {
-        id.textContent =
-            task.id;
-    }
-
-    if (role) {
-        role.textContent =
-            roleLabel(
-                task.required_role ||
-                task.role ||
-                roleForShape(
-                    task.shape ||
-                    task.annotation_shape ||
-                    task.type
-                )
-            );
-    }
-
-    if (type) {
-        type.textContent =
-            shapeLabel(
-                task.shape ||
-                task.annotation_shape ||
-                task.type
-            );
-    }
-
-    if (duration) {
-        duration.textContent =
-            `${task.expected_duration_minutes || task.duration_minutes || 30} min`;
-    }
-
-    if (count) {
-        count.textContent =
-            `${state.annotations.length} annotations`;
-    }
-}
-
-/* ============================================================
-   SLEEP HELPER
-============================================================ */
-
-function sleep(
-    milliseconds
-) {
-    return new Promise(
-        resolve =>
-            setTimeout(
-                resolve,
-                milliseconds
-            )
-    );
-}
-
-function friendlyAuthError(
-    error
-) {
-    const message =
-        String(
-            error?.message ||
-            error ||
-            ""
-        );
-
-    if (
-        /invalid login credentials/i.test(
-            message
-        )
-    ) {
-        return "Incorrect email or password.";
-    }
-
-    if (
-        /email not confirmed/i.test(
-            message
-        )
-    ) {
-        return "Please confirm your email before signing in.";
-    }
-
-    if (
-        /user already registered/i.test(
-            message
-        )
-    ) {
-        return "An account with this email already exists.";
-    }
-
-    if (
-        /password should be at least/i.test(
-            message
-        )
-    ) {
-        return "Password does not meet the minimum requirements.";
-    }
-
-    return (
-        message ||
-        "Authentication failed."
-    );
-}
-
-/* ============================================================
-   CLEAR WORKSPACE ON LOGOUT
-============================================================ */
-
-function clearCloudWorkspace() {
-    CLOUD.currentTaskId =
-        null;
-
-    CLOUD.currentTask =
-        null;
-
-    state.currentTaskId =
-        null;
-
-    state.taskId =
-        null;
 
     state.annotations =
-        [];
+        cloneAnnotations(
+            state.history[
+                state.historyIndex
+            ]
+        );
 
-    state.frameAnnotations =
-        new Map();
 
     state.selectedId =
         null;
 
-    state.image =
-        null;
-
-    state.mediaType =
-        "image";
-
-    updateCounts();
-    updateAnnotationsList();
-    hidePopup();
-
-    render();
-
-    const queue =
-        $("taskQueue");
-
-    if (queue) {
-        queue.innerHTML =
-            "";
-    }
-}
-/* ============================================================
-   CLOUD SAVE ANNOTATION
-============================================================ */
-
-async function cloudSaveAnnotation(
-    annotation
-) {
-    if (
-        !CLOUD.currentTaskId ||
-        !CLOUD.session?.user?.id
-    ) {
-        return;
-    }
-
-    const frame =
-        state.mediaType === "video"
-            ? state.currentFrame
-            : 0;
-
-    const row = {
-        task_id: CLOUD.currentTaskId,
-
-        annotation_key:
-            String(annotation.id),
-
-        frame_number: frame,
-
-        annotation_type:
-            annotation.type,
-
-        class_name:
-            annotation.label || "unknown",
-
-        score:
-            annotation.score,
-
-        occlusion:
-            Number(annotation.occlusion ?? 0),
-
-        truncation:
-            annotation.truncation || "NONE",
-
-        ai_generated:
-            !!annotation.aiGenerated,
-
-        corrected:
-            !!annotation.corrected,
-
-        export_enabled:
-            annotation.export !== false,
-
-        x: annotation.x,
-        y: annotation.y,
-        width: annotation.width,
-        height: annotation.height,
-
-        points:
-            annotation.points || [],
-
-        user_id:
-            CLOUD.session.user.id
-    };
-
-    const { error } =
-        await supabase
-            .from("annotations")
-            .upsert(
-                row,
-                {
-                    onConflict:
-                        "task_id,annotation_key,frame_number"
-                }
-            );
-
-    if (error) {
-        console.warn(
-            "Cloud annotation save failed:",
-            error
-        );
-    }
-}
-
-async function cloudSaveAllAnnotations() {
-    for (
-        const annotation of state.annotations
-    ) {
-        await cloudSaveAnnotation(
-            annotation
-        );
-    }
-}
-
-async function cloudDeleteAnnotation(
-    annotationId
-) {
-    if (!CLOUD.currentTaskId) {
-        return;
-    }
-
-    const frame =
-        state.mediaType === "video"
-            ? state.currentFrame
-            : 0;
-
-    await supabase
-        .from("annotations")
-        .delete()
-        .eq(
-            "task_id",
-            CLOUD.currentTaskId
-        )
-        .eq(
-            "annotation_key",
-            String(annotationId)
-        )
-        .eq(
-            "frame_number",
-            frame
-        );
-}
-
-async function cloudSaveCurrentFrame() {
-    if (state.mediaType !== "video") {
-        return;
-    }
-
-    await cloudSaveAllAnnotations();
-}
-
-/* ============================================================
-   TASK BAR
-============================================================ */
-
-function updateTaskBar() {
-    const task = CLOUD.currentTask;
-    const bar = $("taskActionBar");
-
-    if (!task) {
-        if (bar) {
-            bar.style.display = "none";
-        }
-        return;
-    }
-
-    if (bar) {
-        bar.style.display = "flex";
-    }
-
-    const title =
-        $("taskActionTitle");
-
-    if (title) {
-        title.textContent =
-            task.title ||
-            task.source_name ||
-            `Task ${String(task.id).slice(0, 8)}`;
-    }
-
-    const meta =
-        $("taskActionMeta");
-
-    if (meta) {
-        meta.textContent = [
-            task.work_type || "",
-            formatRole(task.work_role),
-            `${Number(task.expected_minutes || 0)} min`,
-            formatMoney(task.pay_amount),
-            `${Number(task.annotation_count || 0)} annotations`,
-            task.status || ""
-        ]
-            .filter(Boolean)
-            .join(" • ");
-    }
-
-    const submit =
-        $("submitTaskBtn");
-
-    const skip =
-        $("skipTaskBtn");
-
-    const approve =
-        $("approveTaskBtn");
-
-    const reviewerCanApprove =
-        isReviewer() &&
-        ["review", "in_review"].includes(
-            task.status
-        ) &&
-        task.claimed_by ===
-            CLOUD.session?.user?.id;
-
-    if (approve) {
-        approve.style.display =
-            reviewerCanApprove
-                ? ""
-                : "none";
-    }
-
-    if (submit) {
-        submit.style.display =
-            reviewerCanApprove
-                ? "none"
-                : "";
-    }
-
-    if (skip) {
-        skip.style.display =
-            reviewerCanApprove
-                ? "none"
-                : "";
-    }
-}
-
-/* ============================================================
-   SUBMIT / SKIP
-============================================================ */
-
-$("submitTaskBtn")?.addEventListener(
-    "click",
-    submitCurrentTask
-);
-
-$("skipTaskBtn")?.addEventListener(
-    "click",
-    openSkipTaskModal
-);
-
-async function submitCurrentTask() {
-    if (!CLOUD.currentTaskId) {
-        return;
-    }
 
     saveFrame();
 
-    const { error } =
-        await supabase.rpc(
-            "submit_task",
-            {
-                p_task_id:
-                    CLOUD.currentTaskId
-            }
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+function redo() {
+
+    if (
+        state.historyIndex >=
+        state.history.length -
+            1
+    ) {
+
+        return;
+
+    }
+
+
+    state.historyIndex++;
+
+
+    state.annotations =
+        cloneAnnotations(
+            state.history[
+                state.historyIndex
+            ]
         );
 
-    if (error) {
-        showToast(error.message);
-        return;
-    }
 
-    showToast(
-        "Task submitted ✓"
-    );
+    state.selectedId =
+        null;
 
-    CLOUD.currentTaskId = null;
-    CLOUD.currentTask = null;
 
-    await refreshMyTasks();
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
 }
 
-function openSkipTaskModal() {
-    const modal =
-        $("skipTaskModal");
 
-    if (modal) {
-        modal.style.display = "grid";
+function updateUndoRedoButtons() {
+
+    const undoButton =
+        $("undoButton");
+
+    const redoButton =
+        $("redoButton");
+
+
+    if (
+        undoButton
+    ) {
+
+        undoButton.disabled =
+            state.historyIndex <=
+            0;
+
     }
+
+
+    if (
+        redoButton
+    ) {
+
+        redoButton.disabled =
+            state.historyIndex >=
+            state.history.length -
+                1;
+
+    }
+
 }
 
-$("cancelSkipTask")?.addEventListener(
+
+$("undoButton")?.addEventListener(
     "click",
-    () => {
-        const modal =
-            $("skipTaskModal");
-
-        if (modal) {
-            modal.style.display = "none";
-        }
-    }
+    undo
 );
 
-$("confirmSkipTask")?.addEventListener(
+
+$("redoButton")?.addEventListener(
     "click",
-    skipCurrentTask
+    redo
 );
 
-async function skipCurrentTask() {
-    if (!CLOUD.currentTaskId) {
-        return;
-    }
-
-    const reason =
-        $("skipReason")
-            ?.value
-            .trim();
-
-    if (!reason) {
-        showToast(
-            "A skip reason is required."
-        );
-        return;
-    }
-
-    const { error } =
-        await supabase.rpc(
-            "skip_task",
-            {
-                p_task_id:
-                    CLOUD.currentTaskId,
-
-                p_reason:
-                    reason
-            }
-        );
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    const modal =
-        $("skipTaskModal");
-
-    if (modal) {
-        modal.style.display = "none";
-    }
-
-    if ($("skipReason")) {
-        $("skipReason").value = "";
-    }
-
-    CLOUD.currentTaskId = null;
-    CLOUD.currentTask = null;
-
-    showToast(
-        "Task skipped."
-    );
-
-    await refreshMyTasks();
-}
 
 /* ============================================================
-   REVIEWER APPROVAL
+   UTILITY
 ============================================================ */
 
-$("approveTaskBtn")?.addEventListener(
-    "click",
-    approveCurrentTask
-);
+function showToast(
+    message,
+    duration = 3000
+) {
 
-async function approveCurrentTask() {
-    if (!CLOUD.currentTaskId) {
-        return;
-    }
+    if (
+        !toastContainer
+    ) {
 
-    const { error } =
-        await supabase.rpc(
-            "approve_task",
-            {
-                p_task_id:
-                    CLOUD.currentTaskId
-            }
+        console.log(
+            message
         );
 
-    if (error) {
-        showToast(error.message);
         return;
+
     }
 
-    showToast(
-        "Task approved ✓"
+
+    const toast =
+        document.createElement(
+            "div"
+        );
+
+
+    toast.className =
+        "toast";
+
+
+    toast.textContent =
+        message;
+
+
+    toastContainer.appendChild(
+        toast
     );
 
-    CLOUD.currentTaskId = null;
-    CLOUD.currentTask = null;
 
-    await refreshMyTasks();
-}
+    requestAnimationFrame(
+        () => {
 
-/* ============================================================
-   REALTIME
-============================================================ */
-
-function subscribeRealtime() {
-    if (CLOUD.channel) {
-        try {
-            supabase.removeChannel(
-                CLOUD.channel
+            toast.classList.add(
+                "show"
             );
-        } catch {}
+
+        }
+    );
+
+
+    setTimeout(
+        () => {
+
+            toast.classList.remove(
+                "show"
+            );
+
+            setTimeout(
+                () =>
+                    toast.remove(),
+                250
+            );
+
+        },
+        duration
+    );
+
+}
+    updateFilmstripCurrent();
+}
+
+function formatTime(
+    seconds
+) {
+    const minutes =
+        Math.floor(
+            seconds / 60
+        );
+
+    const secs =
+        Math.floor(
+            seconds % 60
+        );
+
+    const millis =
+        Math.floor(
+            (seconds % 1) *
+            1000
+        );
+
+    return (
+        String(
+            minutes
+        ).padStart(
+            2,
+            "0"
+        ) +
+        ":" +
+        String(
+            secs
+        ).padStart(
+            2,
+            "0"
+        ) +
+        "." +
+        String(
+            millis
+        ).padStart(
+            3,
+            "0"
+        )
+    );
+}
+
+/* ============================================================
+   ZOOM UI
+============================================================ */
+
+function updateZoomUI() {
+    const percent =
+        Math.round(
+            state.scale * 100
+        );
+
+    const zoomValue =
+        $("zoomValue");
+
+    const footerZoom =
+        $("footerZoom");
+
+    if (zoomValue) {
+        zoomValue.textContent =
+            percent + "%";
     }
 
-    CLOUD.channel =
-        supabase
-            .channel(
-                "annotation-workspace"
-            )
+    if (footerZoom) {
+        footerZoom.textContent =
+            percent + "%";
+    }
+}
 
-            .on(
-                "postgres_changes",
-                {
-                    event: "*",
-                    schema: "public",
-                    table: "tasks"
-                },
-                async () => {
-                    await refreshMyTasks();
-                }
-            )
+/* ============================================================
+   AI STATUS
+============================================================ */
 
-            .on(
-                "postgres_changes",
-                {
-                    event: "*",
-                    schema: "public",
-                    table: "annotations"
-                },
-                async payload => {
+function setAIStatus(
+    message
+) {
+    const status =
+        $("aiStatus");
+
+    if (status) {
+        status.textContent =
+            message;
+    }
+}
+/* ============================================================
+   AI ANNOTATION ENGINE
+============================================================ */
+
+const AI_CONFIG = {
+    confidenceThreshold: 0.35,
+    maxObjects: 100,
+    defaultLabel: "object",
+    enabled: true
+};
+
+const AI_LABELS = [
+    "person",
+    "car",
+    "truck",
+    "bus",
+    "motorcycle",
+    "bicycle",
+    "animal",
+    "dog",
+    "cat",
+    "bird",
+    "traffic light",
+    "traffic sign",
+    "building",
+    "tree",
+    "road",
+    "vehicle",
+    "object"
+];
+
+let aiModel = null;
+let aiModelLoading = false;
+let aiModelReady = false;
+
+/* ============================================================
+   AI STATUS HELPERS
+============================================================ */
+
+function setAIProgress(
+    percent
+) {
+    const progress =
+        $("aiProgress");
+
+    const bar =
+        $("aiProgressBar");
+
+    if (progress) {
+        progress.value =
+            percent;
+    }
+
+    if (bar) {
+        bar.style.width =
+            `${percent}%`;
+    }
+}
+
+function setAILoading(
+    loading
+) {
+    aiModelLoading =
+        loading;
+
+    const button =
+        $("runAI");
+
+    if (button) {
+        button.disabled =
+            loading;
+
+        button.textContent =
+            loading
+                ? "RUNNING AI..."
+                : "AUTO ANNOTATE";
+    }
+}
+
+/* ============================================================
+   AI MODEL LOADER
+============================================================ */
+
+async function loadAIModel() {
+    if (
+        aiModelReady &&
+        aiModel
+    ) {
+        return aiModel;
+    }
+
+    if (aiModelLoading) {
+        return null;
+    }
+
+    setAILoading(true);
+    setAIStatus(
+        "Preparing AI annotation engine..."
+    );
+    setAIProgress(10);
+
+    try {
+        /*
+         * The application supports the browser-side AI workflow.
+         * If an external model is available in the page, use it.
+         * Otherwise the fallback detector below remains available.
+         */
+
+        if (
+            window.annotationAI &&
+            typeof
+                window.annotationAI.detect ===
+                "function"
+        ) {
+            aiModel =
+                window.annotationAI;
+
+            aiModelReady =
+                true;
+
+            setAIProgress(100);
+            setAIStatus(
+                "AI model ready."
+            );
+
+            return aiModel;
+        }
+
+        /*
+         * Optional TensorFlow/COCO-SSD integration.
+         * This does not break the application when the library
+         * has not been loaded.
+         */
+        if (
+            window.cocoSsd &&
+            typeof
+                window.cocoSsd.load ===
+                "function"
+        ) {
+            setAIProgress(25);
+
+            aiModel =
+                await window.cocoSsd.load();
+
+            aiModelReady =
+                true;
+
+            setAIProgress(100);
+            setAIStatus(
+                "AI model ready."
+            );
+
+            return aiModel;
+        }
+
+        /*
+         * If no model library exists, keep the workflow usable.
+         * The fallback uses image processing and creates a
+         * reviewable annotation rather than crashing.
+         */
+        aiModel =
+            {
+                fallback: true
+            };
+
+        aiModelReady =
+            true;
+
+        setAIProgress(100);
+
+        setAIStatus(
+            "AI fallback mode ready. Add a browser AI model for object detection."
+        );
+
+        return aiModel;
+
+    } catch (error) {
+        console.error(
+            "AI model loading failed:",
+            error
+        );
+
+        aiModel =
+            {
+                fallback: true
+            };
+
+        aiModelReady =
+            true;
+
+        setAIStatus(
+            "AI model unavailable. Using fallback annotation mode."
+        );
+
+        return aiModel;
+
+    } finally {
+        setAILoading(false);
+    }
+}
+
+/* ============================================================
+   RUN AUTO ANNOTATE
+============================================================ */
+
+$("runAI")?.addEventListener(
+    "click",
+    runAutoAnnotate
+);
+
+async function runAutoAnnotate() {
+    if (
+        !canUseAIAnnotations()
+    ) {
+        showToast(
+            "AI annotation is not available for this account."
+        );
+
+        return;
+    }
+
+    if (
+        !state.image &&
+        state.mediaType !==
+            "video"
+    ) {
+        showToast(
+            "Load an image or video first."
+        );
+
+        return;
+    }
+
+    if (
+        state.mediaType ===
+        "video" &&
+        !state.image
+    ) {
+        captureCurrentVideoFrame();
+    }
+
+    setAILoading(true);
+    setAIProgress(5);
+    setAIStatus(
+        "Starting AI annotation..."
+    );
+
+    try {
+        const model =
+            await loadAIModel();
+
+        if (!model) {
+            throw new Error(
+                "AI model is not available."
+            );
+        }
+
+        setAIProgress(35);
+
+        let predictions = [];
+
+        if (
+            !model.fallback &&
+            typeof model.detect ===
+                "function"
+        ) {
+            predictions =
+                await model.detect(
+                    state.image
+                );
+        } else {
+            predictions =
+                await fallbackDetect();
+        }
+
+        setAIProgress(70);
+
+        const normalized =
+            normalizeAIPredictions(
+                predictions
+            );
+
+        if (
+            !normalized.length
+        ) {
+            setAIStatus(
+                "AI found no objects to annotate."
+            );
+
+            showToast(
+                "No objects detected."
+            );
+
+            setAIProgress(100);
+
+            return;
+        }
+
+        let added = 0;
+
+        normalized
+            .slice(
+                0,
+                AI_CONFIG.maxObjects
+            )
+            .forEach(
+                prediction => {
                     if (
-                        payload.eventType ===
-                        "DELETE"
+                        prediction.score <
+                        AI_CONFIG.confidenceThreshold
                     ) {
                         return;
                     }
 
-                    if (
-                        payload.new?.task_id ===
-                        CLOUD.currentTaskId
-                    ) {
-                        await loadCloudAnnotations(
-                            CLOUD.currentTaskId
-                        );
-                    }
-                }
-            )
-
-            .on(
-                "postgres_changes",
-                {
-                    event: "*",
-                    schema: "public",
-                    table: "profiles"
-                },
-                async payload => {
-                    if (
-                        payload.new?.id ===
-                        CLOUD.session?.user?.id
-                    ) {
-                        await loadCloudProfile();
-                    }
-                }
-            )
-
-            .subscribe();
-}
-
-/* ============================================================
-   ADMIN CONTROL CENTER
-============================================================ */
-
-$("adminControlBtn")?.addEventListener(
-    "click",
-    openAdminCenter
-);
-
-$("closeAdminCenter")?.addEventListener(
-    "click",
-    closeAdminCenter
-);
-
-function openAdminCenter() {
-    if (!isAdmin()) {
-        return;
-    }
-
-    const modal =
-        $("adminCenter");
-
-    if (modal) {
-        modal.style.display = "grid";
-    }
-
-    loadAdminTasks();
-}
-
-function closeAdminCenter() {
-    const modal =
-        $("adminCenter");
-
-    if (modal) {
-        modal.style.display = "none";
-    }
-}
-
-document
-    .querySelectorAll(
-        "[data-admin-tab]"
-    )
-    .forEach(button => {
-        button.addEventListener(
-            "click",
-            () => {
-                document
-                    .querySelectorAll(
-                        "[data-admin-tab]"
-                    )
-                    .forEach(b =>
-                        b.classList.remove(
-                            "active"
-                        )
+                    createAIAnnotation(
+                        prediction
                     );
 
-                button.classList.add(
-                    "active"
-                );
-
-                showAdminTab(
-                    button.dataset.adminTab
-                );
-            }
-        );
-    });
-
-$("refreshAdminTasks")
-    ?.addEventListener(
-        "click",
-        loadAdminTasks
-    );
-
-$("refreshUsers")
-    ?.addEventListener(
-        "click",
-        loadAdminUsers
-    );
-
-$("refreshCoworkers")
-    ?.addEventListener(
-        "click",
-        loadAdminCoworkers
-    );
-
-$("refreshPayments")
-    ?.addEventListener(
-        "click",
-        loadAdminPayments
-    );
-
-$("refreshActivity")
-    ?.addEventListener(
-        "click",
-        loadAdminActivity
-    );
-
-function showAdminTab(tab) {
-    const panelIds = {
-        tasks: "adminTasksTab",
-        users: "adminUsersTab",
-        coworkers: "adminCoworkersTab",
-        payments: "adminPaymentsTab",
-        activity: "adminActivityTab"
-    };
-
-    Object.entries(panelIds)
-        .forEach(
-            ([name, id]) => {
-                const panel =
-                    document.getElementById(
-                        id
-                    );
-
-                if (panel) {
-                    panel.style.display =
-                        name === tab
-                            ? "block"
-                            : "none";
-                }
-            }
-        );
-
-    if (tab === "tasks") {
-        loadAdminTasks();
-    }
-
-    if (tab === "users") {
-        loadAdminUsers();
-    }
-
-    if (tab === "coworkers") {
-        loadAdminCoworkers();
-    }
-
-    if (tab === "payments") {
-        loadAdminPayments();
-    }
-
-    if (tab === "activity") {
-        loadAdminActivity();
-    }
-}
-
-/* ============================================================
-   ADMIN TASKS
-============================================================ */
-
-async function loadAdminTasks() {
-    if (!hasAllAccess()) {
-        return;
-    }
-
-    const { data, error } =
-        await supabase
-            .from("tasks")
-            .select("*")
-            .order(
-                "created_at",
-                {
-                    ascending: false
+                    added++;
                 }
             );
 
-    if (error) {
-        showToast(error.message);
-        return;
-    }
+        setAIProgress(100);
 
-    const table =
-        $("adminTasksTable");
-
-    if (!table) {
-        return;
-    }
-
-    table.innerHTML = `
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Task</th>
-                    <th>Type</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th>Annotations</th>
-                    <th>Assigned / Claimed</th>
-                    <th>Pay</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-
-            <tbody>
-                ${(data || [])
-                    .map(
-                        task => `
-                            <tr>
-                                <td>
-                                    ${escapeHTML(
-                                        task.id.slice(
-                                            0,
-                                            8
-                                        )
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        task.title ||
-                                        task.source_name ||
-                                        ""
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        task.work_type ||
-                                        ""
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        formatRole(
-                                            task.work_role
-                                        )
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        task.status
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${Number(
-                                        task.annotation_count ||
-                                        0
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        task.claimed_by ||
-                                        task.assigned_to ||
-                                        "Unassigned"
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${formatMoney(
-                                        task.pay_amount
-                                    )}
-                                </td>
-
-                                <td>
-                                    <button
-                                        type="button"
-                                        data-admin-assign="${escapeHTML(
-                                            task.id
-                                        )}"
-                                    >
-                                        Assign
-                                    </button>
-                                </td>
-                            </tr>
-                        `
-                    )
-                    .join("")}
-            </tbody>
-        </table>
-    `;
-
-    table
-        .querySelectorAll(
-            "[data-admin-assign]"
-        )
-        .forEach(button => {
-            button.addEventListener(
-                "click",
-                () =>
-                    adminAssignPrompt(
-                        button.dataset.adminAssign
-                    )
-            );
-        });
-}
-
-/* ============================================================
-   ADMIN USERS
-============================================================ */
-
-async function loadAdminUsers() {
-    if (!hasAllAccess()) {
-        return;
-    }
-
-    const { data, error } =
-        await supabase
-            .from("profiles")
-            .select("*")
-            .order(
-                "created_at",
-                {
-                    ascending: false
-                }
-            );
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    const table =
-        $("adminUsersTable");
-
-    if (!table) {
-        return;
-    }
-
-    table.innerHTML = `
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Joined</th>
-                    <th>Last login</th>
-                    <th>Last logout</th>
-                    <th>Active</th>
-                    <th>Controls</th>
-                </tr>
-            </thead>
-
-            <tbody>
-                ${(data || [])
-                    .map(
-                        profile => `
-                            <tr>
-                                <td>
-                                    ${escapeHTML(
-                                        profile.full_name ||
-                                        "—"
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        profile.email ||
-                                        "—"
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        profile.role
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        profile.created_at ||
-                                        ""
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        profile.last_login_at ||
-                                        "—"
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        profile.last_logout_at ||
-                                        "—"
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${
-                                        profile.active
-                                            ? "Active"
-                                            : "Inactive"
-                                    }
-                                </td>
-
-                                <td>
-                                    <select
-                                        data-role-user="${escapeHTML(
-                                            profile.id
-                                        )}"
-                                    >
-                                        ${ALL_ROLES
-                                            .map(
-                                                role =>
-                                                    `<option value="${role}" ${
-                                                        role ===
-                                                        profile.role
-                                                            ? "selected"
-                                                            : ""
-                                                    }>${formatRole(
-                                                        role
-                                                    )}</option>`
-                                            )
-                                            .join("")}
-                                    </select>
-
-                                    <button
-                                        type="button"
-                                        data-save-role="${escapeHTML(
-                                            profile.id
-                                        )}"
-                                    >
-                                        Save
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        class="danger-mini"
-                                        data-kick-user="${escapeHTML(
-                                            profile.id
-                                        )}"
-                                    >
-                                        Deactivate
-                                    </button>
-                                </td>
-                            </tr>
-                        `
-                    )
-                    .join("")}
-            </tbody>
-        </table>
-    `;
-
-    table
-        .querySelectorAll(
-            "[data-save-role]"
-        )
-        .forEach(button => {
-            button.addEventListener(
-                "click",
-                () =>
-                    adminSaveRole(
-                        button.dataset.saveRole
-                    )
-            );
-        });
-
-    table
-        .querySelectorAll(
-            "[data-kick-user]"
-        )
-        .forEach(button => {
-            button.addEventListener(
-                "click",
-                () =>
-                    adminKickUser(
-                        button.dataset.kickUser
-                    )
-            );
-        });
-}
-
-/* ============================================================
-   ADMIN ROLE
-============================================================ */
-
-async function adminSaveRole(userId) {
-    const select =
-        document.querySelector(
-            `[data-role-user="${CSS.escape(
-                userId
-            )}"]`
+        setAIStatus(
+            `AI added ${added} annotation${
+                added === 1
+                    ? ""
+                    : "s"
+            }.`
         );
 
-    if (!select) {
-        return;
-    }
-
-    const role = select.value;
-
-    const { error } =
-        await supabase.rpc(
-            "admin_set_role",
-            {
-                p_user_id: userId,
-                p_role: role
-            }
-        );
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    showToast(
-        "Role updated ✓"
-    );
-
-    await loadAdminUsers();
-}
-
-async function adminKickUser(userId) {
-    if (
-        !confirm(
-            "Deactivate this account and release its active work?"
-        )
-    ) {
-        return;
-    }
-
-    const { error } =
-        await supabase.rpc(
-            "admin_kick_user",
-            {
-                p_user_id: userId
-            }
-        );
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    showToast(
-        "User deactivated."
-    );
-
-    await loadAdminUsers();
-    await loadAdminTasks();
-}
-
-/* ============================================================
-   ADMIN COWORKERS
-============================================================ */
-
-async function loadAdminCoworkers() {
-    const { data, error } =
-        await supabase
-            .from("profiles")
-            .select("*")
-            .in(
-                "role",
-                [
-                    "coworker_2d_box",
-                    "coworker_polygon",
-                    "coworker_segmentation"
-                ]
-            )
-            .order("role");
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    const table =
-        $("adminCoworkersTable");
-
-    if (!table) {
-        return;
-    }
-
-    table.innerHTML = `
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Role</th>
-                    <th>Joined</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-
-            <tbody>
-                ${(data || [])
-                    .map(
-                        user => `
-                            <tr>
-                                <td>
-                                    ${escapeHTML(
-                                        user.full_name ||
-                                        "—"
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        formatRole(
-                                            user.role
-                                        )
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${escapeHTML(
-                                        user.created_at ||
-                                        ""
-                                    )}
-                                </td>
-
-                                <td>
-                                    ${
-                                        user.active
-                                            ? "Active"
-                                            : "Inactive"
-                                    }
-                                </td>
-                            </tr>
-                        `
-                    )
-                    .join("")}
-            </tbody>
-        </table>
-    `;
-}
-
-/* ============================================================
-   ADMIN ACCOUNT CREATION
-============================================================ */
-
-$("createStaffCoworkerBtn")
-    ?.addEventListener(
-        "click",
-        createStaffCoworkerAccount
-    );
-
-async function createStaffCoworkerAccount() {
-    if (!isAdmin()) {
-        return;
-    }
-
-    const email =
-        $("newWorkerEmail")
-            ?.value
-            .trim();
-
-    const fullName =
-        $("newWorkerName")
-            ?.value
-            .trim();
-
-    const role =
-        $("newWorkerRole")
-            ?.value;
-
-    const password =
-        $("newWorkerPassword")
-            ?.value;
-
-    if (
-        !email ||
-        !password ||
-        password.length < 6
-    ) {
         showToast(
-            "Enter an email and a temporary password of at least 6 characters."
+            `${added} AI annotation${
+                added === 1
+                    ? ""
+                    : "s"
+            } created`
         );
 
-        return;
-    }
+        updateCounts();
+        updateAnnotationsList();
+        render();
 
-    if (
-        ![
-            "staff",
-            "reviewer",
-            "coworker_2d_box",
-            "coworker_polygon",
-            "coworker_segmentation"
-        ].includes(role)
-    ) {
-        showToast(
-            "Choose a valid staff/reviewer/coworker role."
-        );
+        saveFrame();
+        saveSession();
 
-        return;
-    }
+        await cloudSaveAllAnnotations();
 
-    const tokenResult =
-        await supabase.auth.getSession();
-
-    const token =
-        tokenResult.data.session
-            ?.access_token;
-
-    if (!token) {
-        showToast(
-            "Admin session expired. Sign in again."
-        );
-
-        return;
-    }
-
-    const response =
-        await fetch(
-            `${SUPABASE_URL}/functions/v1/admin-create-user`,
-            {
-                method: "POST",
-
-                headers: {
-                    "Content-Type":
-                        "application/json",
-
-                    Authorization:
-                        `Bearer ${token}`
-                },
-
-                body: JSON.stringify({
-                    email,
-                    full_name:
-                        fullName,
-                    role,
-                    password
-                })
-            }
-        );
-
-    const result =
-        await response
-            .json()
-            .catch(
-                () => ({})
-            );
-
-    if (!response.ok) {
-        showToast(
-            result.error ||
-            "Unable to create account."
-        );
-
-        return;
-    }
-
-    $("newWorkerEmail").value = "";
-    $("newWorkerName").value = "";
-    $("newWorkerPassword").value = "";
-
-    showToast(
-        "Account created ✓"
-    );
-
-    await loadAdminUsers();
-    await loadAdminCoworkers();
-}
-
-/* ============================================================
-   ADMIN PAYMENTS
-============================================================ */
-
-async function loadAdminPayments() {
-    if (!isAdmin()) {
-        return;
-    }
-
-    const { data, error } =
-        await supabase
-            .from("task_payments")
-            .select(
-                `
-                *,
-                tasks (
-                    id,
-                    title,
-                    work_type
-                )
-                `
-            )
-            .order(
-                "created_at",
-                {
-                    ascending: false
-                }
-            );
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    const table =
-        $("adminPaymentsTable");
-
-    if (!table) {
-        return;
-    }
-
-    table.innerHTML =
-        (data || [])
-            .map(
-                payment => `
-                    <tr>
-                        <td>
-                            ${escapeHTML(
-                                payment.tasks?.title ||
-                                payment.task_id ||
-                                ""
-                            )}
-                        </td>
-
-                        <td>
-                            ${escapeHTML(
-                                payment.user_id ||
-                                "Unclaimed"
-                            )}
-                        </td>
-
-                        <td>
-                            ${formatMoney(
-                                payment.amount
-                            )}
-                        </td>
-
-                        <td>
-                            ${escapeHTML(
-                                payment.status
-                            )}
-                        </td>
-
-                        <td>
-                            ${
-                                payment.status !==
-                                "paid"
-                                    ? `
-                                        <button
-                                            type="button"
-                                            class="success-mini"
-                                            data-mark-paid="${escapeHTML(
-                                                payment.id
-                                            )}"
-                                        >
-                                            Mark paid
-                                        </button>
-                                    `
-                                    : `
-                                        <button
-                                            type="button"
-                                            class="export-button"
-                                            data-mark-not-paid="${escapeHTML(
-                                                payment.id
-                                            )}"
-                                        >
-                                            Not yet
-                                        </button>
-                                    `
-                            }
-                        </td>
-                    </tr>
-                `
-            )
-            .join("");
-
-    table
-        .querySelectorAll(
-            "[data-mark-paid]"
-        )
-        .forEach(button => {
-            button.addEventListener(
-                "click",
-                () =>
-                    markPaymentPaid(
-                        button.dataset.markPaid
-                    )
-            );
-        });
-
-    table
-        .querySelectorAll(
-            "[data-mark-not-paid]"
-        )
-        .forEach(button => {
-            button.addEventListener(
-                "click",
-                () =>
-                    markPaymentNotPaid(
-                        button.dataset.markNotPaid
-                    )
-            );
-        });
-}
-
-async function markPaymentPaid(paymentId) {
-    if (!isAdmin()) {
-        return;
-    }
-
-    const { error } =
-        await supabase
-            .from("task_payments")
-            .update({
-                status: "paid",
-                paid_at:
-                    new Date().toISOString()
-            })
-            .eq(
-                "id",
-                paymentId
-            );
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    showToast(
-        "Payment marked paid ✓"
-    );
-
-    await loadAdminPayments();
-}
-
-async function markPaymentNotPaid(paymentId) {
-    if (!isAdmin()) {
-        return;
-    }
-
-    const { error } =
-        await supabase
-            .from("task_payments")
-            .update({
-                status: "not_paid",
-                paid_at: null
-            })
-            .eq(
-                "id",
-                paymentId
-            );
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    showToast(
-        "Payment marked not yet paid."
-    );
-
-    await loadAdminPayments();
-}
-
-/* ============================================================
-   ADMIN ACTIVITY
-============================================================ */
-
-async function loadAdminActivity() {
-    if (!hasAllAccess()) {
-        return;
-    }
-
-    const { data, error } =
-        await supabase
-            .from("activity_logs")
-            .select("*")
-            .order(
-                "created_at",
-                {
-                    ascending: false
-                }
-            )
-            .limit(500);
-
-    if (error) {
-        showToast(error.message);
-        return;
-    }
-
-    const table =
-        $("adminActivityTable");
-
-    if (!table) {
-        return;
-    }
-
-    table.innerHTML =
-        (data || [])
-            .map(
-                row => `
-                    <tr>
-                        <td>
-                            ${escapeHTML(
-                                row.created_at ||
-                                ""
-                            )}
-                        </td>
-
-                        <td>
-                            ${escapeHTML(
-                                row.event_type ||
-                                ""
-                            )}
-                        </td>
-
-                        <td>
-                            ${escapeHTML(
-                                row.user_id ||
-                                ""
-                            )}
-                        </td>
-
-                        <td>
-                            <pre>${escapeHTML(
-                                JSON.stringify(
-                                    row.metadata ||
-                                    {},
-                                    null,
-                                    2
-                                )
-                            )}</pre>
-                        </td>
-                    </tr>
-                `
-            )
-            .join("");
-}
-
-/* ============================================================
-   ADMIN ASSIGN
-============================================================ */
-
-async function adminAssignPrompt(taskId) {
-    const email =
-        prompt(
-            "Enter the coworker's email address:"
-        );
-
-    if (!email) {
-        return;
-    }
-
-    const { data, error } =
-        await supabase
-            .from("profiles")
-            .select("id")
-            .eq(
-                "email",
-                email.trim()
-            )
-            .single();
-
-    if (error) {
-        showToast(
-            "User not found."
-        );
-
-        return;
-    }
-
-    const result =
-        await supabase.rpc(
-            "admin_assign_task",
-            {
-                p_task_id: taskId,
-                p_user_id: data.id
-            }
-        );
-
-    if (result.error) {
-        showToast(
-            result.error.message
-        );
-
-        return;
-    }
-
-    showToast(
-        "Task assigned ✓"
-    );
-
-    await loadAdminTasks();
-}
-
-/* ============================================================
-   ADMIN EXPORT
-============================================================ */
-
-$("adminExportCSV")
-    ?.addEventListener(
-        "click",
-        adminExportCSV
-    );
-
-$("adminExportHTML")
-    ?.addEventListener(
-        "click",
-        adminExportHTML
-    );
-
-async function getAdminExportData() {
-    const [
-        users,
-        tasks,
-        payments,
-        activity
-    ] =
-        await Promise.all([
-            supabase
-                .from("profiles")
-                .select("*"),
-
-            supabase
-                .from("tasks")
-                .select("*"),
-
-            supabase
-                .from("task_payments")
-                .select("*"),
-
-            supabase
-                .from("activity_logs")
-                .select("*")
-        ]);
-
-    return {
-        users:
-            users.data || [],
-
-        tasks:
-            tasks.data || [],
-
-        payments:
-            payments.data || [],
-
-        activity:
-            activity.data || []
-    };
-}
-
-async function adminExportCSV() {
-    const data =
-        await getAdminExportData();
-
-    const sections = [];
-
-    Object.entries(data)
-        .forEach(
-            ([name, rows]) => {
-                sections.push(name);
-
-                if (!rows.length) {
-                    sections.push("");
-                    return;
-                }
-
-                const headers =
-                    Object.keys(
-                        rows[0]
-                    );
-
-                sections.push(
-                    headers.join(",")
-                );
-
-                rows.forEach(row => {
-                    sections.push(
-                        headers
-                            .map(
-                                h =>
-                                    `"${String(
-                                        row[h] ??
-                                        ""
-                                    ).replaceAll(
-                                        '"',
-                                        '""'
-                                    )}"`
-                            )
-                            .join(",")
-                    );
-                });
-
-                sections.push("");
-            }
-        );
-
-    downloadBlob(
-        new Blob(
-            [
-                sections.join(
-                    "\n"
-                )
-            ],
-            {
-                type:
-                    "text/csv;charset=utf-8"
-            }
-        ),
-        "admin-data.csv"
-    );
-
-    showToast(
-        "Admin CSV exported ✓"
-    );
-}
-
-async function adminExportHTML() {
-    const data =
-        await getAdminExportData();
-
-    const tables =
-        Object.entries(data)
-            .map(
-                ([name, rows]) => {
-                    const headers =
-                        rows.length
-                            ? Object.keys(
-                                rows[0]
-                            )
-                            : [];
-
-                    return `
-                        <h2>${escapeHTML(
-                            name
-                        )}</h2>
-
-                        <table>
-                            <thead>
-                                <tr>
-                                    ${headers
-                                        .map(
-                                            h =>
-                                                `<th>${escapeHTML(
-                                                    h
-                                                )}</th>`
-                                        )
-                                        .join("")}
-                                </tr>
-                            </thead>
-
-                            <tbody>
-                                ${rows
-                                    .map(
-                                        row =>
-                                            `<tr>${headers
-                                                .map(
-                                                    h =>
-                                                        `<td>${escapeHTML(
-                                                            row[h]
-                                                        )}</td>`
-                                                )
-                                                .join(
-                                                    ""
-                                                )}</tr>`
-                                    )
-                                    .join("")}
-                            </tbody>
-                        </table>
-                    `;
-                }
-            )
-            .join("");
-
-    const html = `
-        <!doctype html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Admin Data Export</title>
-
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    padding: 24px;
-                    color: #222;
-                }
-
-                table {
-                    border-collapse: collapse;
-                    width: 100%;
-                    margin-bottom: 30px;
-                    font-size: 11px;
-                }
-
-                th,
-                td {
-                    border: 1px solid #ccc;
-                    padding: 6px;
-                    text-align: left;
-                    vertical-align: top;
-                }
-
-                th {
-                    background: #eee;
-                }
-
-                td {
-                    word-break: break-word;
-                }
-            </style>
-        </head>
-
-        <body>
-            <h1>Admin Data Export</h1>
-
-            <p>
-                Exported:
-                ${escapeHTML(
-                    new Date().toLocaleString()
-                )}
-            </p>
-
-            ${tables}
-        </body>
-        </html>
-    `;
-
-    downloadBlob(
-        new Blob(
-            [html],
-            {
-                type:
-                    "text/html;charset=utf-8"
-            }
-        ),
-        "admin-data.html"
-    );
-
-    showToast(
-        "Admin HTML exported ✓"
-    );
-}
-/* ============================================================
-   CUSTOMER EXPORT
-============================================================ */
-
-function getExportRows() {
-    return state.annotations.map(
-        annotation => ({
-            task_id:
-                CLOUD.currentTaskId ||
-                "",
-
-            annotation_id:
-                annotation.id ||
-                "",
-
-            frame:
-                state.mediaType === "video"
-                    ? state.currentFrame
-                    : 0,
-
-            type:
-                annotation.type ||
-                "",
-
-            class:
-                annotation.label ||
-                "",
-
-            x:
-                annotation.x ?? "",
-
-            y:
-                annotation.y ?? "",
-
-            width:
-                annotation.width ?? "",
-
-            height:
-                annotation.height ?? "",
-
-            occlusion:
-                annotation.occlusion ??
-                0,
-
-            truncation:
-                annotation.truncation ||
-                "NONE",
-
-            score:
-                annotation.score ??
-                "",
-
-            ai_generated:
-                annotation.aiGenerated
-                    ? "true"
-                    : "false",
-
-            corrected:
-                annotation.corrected
-                    ? "true"
-                    : "false"
-        })
-    );
-}
-
-function csvEscape(value) {
-    return `"${String(
-        value ?? ""
-    ).replaceAll(
-        '"',
-        '""'
-    )}"`;
-}
-
-function downloadBlob(blob, filename) {
-    const url =
-        URL.createObjectURL(
-            blob
-        );
-
-    const link =
-        document.createElement(
-            "a"
-        );
-
-    link.href = url;
-    link.download = filename;
-
-    document.body.appendChild(
-        link
-    );
-
-    link.click();
-    link.remove();
-
-    setTimeout(
-        () =>
-            URL.revokeObjectURL(
-                url
-            ),
-        1000
-    );
-}
-
-/* ============================================================
-   WORK HISTORY
-============================================================ */
-
-$("workHistoryBtn")
-    ?.addEventListener(
-        "click",
-        openWorkHistory
-    );
-
-async function openWorkHistory() {
-    const modal =
-        $("workHistory");
-
-    if (modal) {
-        modal.style.display = "grid";
-    }
-
-    await loadWorkHistory();
-}
-
-async function loadWorkHistory() {
-    if (!CLOUD.session?.user?.id) {
-        return;
-    }
-
-    const {
-        data,
-        error
-    } =
-        await supabase
-            .from("workflow_events")
-            .select("*")
-            .eq(
-                "user_id",
-                CLOUD.session.user.id
-            )
-            .order(
-                "created_at",
-                {
-                    ascending:
-                        false
-                }
-            )
-            .limit(200);
-
-    if (error) {
-        console.warn(
-            "Work history:",
+    } catch (error) {
+        console.error(
+            "Auto annotation failed:",
             error
         );
-        return;
-    }
 
-    const list =
-        $("workHistory");
-
-    if (!list) {
-        return;
-    }
-
-    list.innerHTML =
-        (data || [])
-            .map(
-                event => `
-                    <div class="history-item">
-
-                        <div class="history-main">
-                            <strong>
-                                ${escapeHTML(
-                                    event.event_type ||
-                                    "Work event"
-                                )}
-                            </strong>
-
-                            <span>
-                                ${escapeHTML(
-                                    event.task_id ||
-                                    ""
-                                )}
-                            </span>
-                        </div>
-
-                        <div class="history-time">
-                            ${escapeHTML(
-                                formatDateTime(
-                                    event.created_at
-                                )
-                            )}
-                        </div>
-
-                    </div>
-                `
-            )
-            .join("") ||
-        `
-            <div class="empty-state">
-                No work history yet.
-            </div>
-        `;
-}
-
-/* ============================================================
-   THEME
-============================================================ */
-
-$("themeToggle")
-    ?.addEventListener(
-        "click",
-        toggleTheme
-    );
-
-function toggleTheme() {
-    const root =
-        document.documentElement;
-
-    const current =
-        root.dataset.theme ||
-        "dark";
-
-    const next =
-        current === "dark"
-            ? "light"
-            : "dark";
-
-    root.dataset.theme =
-        next;
-
-    localStorage.setItem(
-        "annotation-theme",
-        next
-    );
-
-    updateThemeButton(
-        next
-    );
-}
-
-function restoreTheme() {
-    const saved =
-        localStorage.getItem(
-            "annotation-theme"
+        setAIStatus(
+            "AI annotation failed. Please try again."
         );
 
-    const theme =
-        saved === "light"
-            ? "light"
-            : "dark";
+        showToast(
+            "AI annotation failed."
+        );
 
-    document.documentElement
-        .dataset
-        .theme = theme;
-
-    updateThemeButton(
-        theme
-    );
-}
-
-function updateThemeButton(theme) {
-    const button =
-        $("themeToggle");
-
-    if (!button) {
-        return;
-    }
-
-    button.title =
-        theme === "dark"
-            ? "Switch to light theme"
-            : "Switch to dark theme";
-
-    button.setAttribute(
-        "aria-label",
-        button.title
-    );
-}
-
-/* ============================================================
-   TIME-BASED GREETING
-============================================================ */
-
-function updateGreeting() {
-    const hour =
-        new Date().getHours();
-
-    let greeting;
-
-    let emoji;
-
-    if (hour < 12) {
-        greeting = "Good morning";
-        emoji = "☀️";
-    } else if (hour < 18) {
-        greeting = "Good afternoon";
-        emoji = "🌤️";
-    } else {
-        greeting = "Good evening";
-        emoji = "🌙";
-    }
-
-    const name =
-        CLOUD.profile?.full_name ||
-        CLOUD.session?.user
-            ?.email
-            ?.split("@")[0] ||
-        "there";
-
-    const greetingElement =
-        $("workspaceGreeting");
-
-    if (greetingElement) {
-        greetingElement.textContent =
-            `${emoji} ${greeting}, ${name}`;
-    }
-
-    const accountElement =
-        $("workspaceAccount");
-
-    if (accountElement) {
-        accountElement.textContent =
-            CLOUD.session?.user?.email ||
-            "";
+    } finally {
+        setAILoading(false);
+        setAIProgress(100);
     }
 }
 
 /* ============================================================
-   ROLE-BASED UI
+   CHECK AI PERMISSION
 ============================================================ */
 
-function getRequiredWorkRole() {
-    const shape =
-        state.annotationMode ||
-        state.selectedTool ||
-        state.taskType ||
-        CLOUD.currentTask
-            ?.work_type;
-
-    return (
-        WORK_ROLE[shape] ||
-        CLOUD.currentTask
-            ?.work_role ||
-        null
-    );
-}
-
-function canUseCustomerUpload() {
-    return (
-        hasAllAccess() ||
-        CLOUD.profile?.role ===
-            "customer"
-    );
-}
-
-function canUseManualAnnotation() {
-    return (
-        hasAllAccess() ||
-        CLOUD.profile?.role ===
-            "customer"
-    );
-}
-
-function canUseAIAnnotation() {
-    return !!CLOUD.session;
-}
-
-function applyRolePermissions() {
+function canUseAIAnnotations() {
     const role =
         CLOUD.profile?.role;
 
-    const adminOnly =
-        document.querySelectorAll(
-            ".admin-only,[data-admin-only]"
-        );
-
-    adminOnly.forEach(
-        element => {
-            element.style.display =
-                role === "admin"
-                    ? ""
-                    : "none";
-        }
-    );
-
-    const customerOnly =
-        document.querySelectorAll(
-            ".customer-only,[data-customer-only]"
-        );
-
-    customerOnly.forEach(
-        element => {
-            element.style.display =
-                canUseCustomerUpload()
-                    ? ""
-                    : "none";
-        }
-    );
-
-    const manualTools =
-        document.querySelectorAll(
-            "[data-manual-annotation]"
-        );
-
-    manualTools.forEach(
-        element => {
-            element.style.display =
-                canUseManualAnnotation()
-                    ? ""
-                    : "none";
-        }
-    );
-
-    const aiTools =
-        document.querySelectorAll(
-            "[data-ai-annotation]"
-        );
-
-    aiTools.forEach(
-        element => {
-            element.style.display =
-                canUseAIAnnotation()
-                    ? ""
-                    : "none";
-        }
-    );
-
-    const roleLabelEl =
-        $("currentUserRole");
-
-    if (roleLabelEl) {
-        roleLabelEl.textContent =
-            formatRole(role);
+    if (!role) {
+        return false;
     }
+
+    /*
+     * Coworkers are deliberately allowed to use
+     * autogenerated / AI annotations.
+     *
+     * They are not given customer-upload or
+     * manual annotation-type controls.
+     */
+    return [
+        "admin",
+        "staff",
+        "reviewer",
+        "customer",
+        "coworker_2d_box",
+        "coworker_polygon",
+        "coworker_segmentation"
+    ].includes(
+        role
+    );
 }
 
 /* ============================================================
-   FORCE PASSWORD RESET
+   NORMALIZE AI PREDICTIONS
 ============================================================ */
 
-async function enforcePasswordReset() {
-    if (
-        !CLOUD.profile?.must_change_password
-    ) {
-        return;
-    }
-
-    const password =
-        prompt(
-            "For security, please choose a new password before continuing:"
-        );
-
-    if (!password) {
-        return false;
-    }
-
-    if (password.length < 8) {
-        showToast(
-            "Password must contain at least 8 characters."
-        );
-
-        return false;
-    }
-
-    const {
-        error
-    } =
-        await supabase.auth
-            .updateUser({
-                password
-            });
-
-    if (error) {
-        showToast(
-            error.message
-        );
-
-        return false;
-    }
-
-    await supabase
-        .from("profiles")
-        .update({
-            must_change_password:
-                false
-        })
-        .eq(
-            "id",
-            CLOUD.session.user.id
-        );
-
-    CLOUD.profile
-        .must_change_password =
-        false;
-
-    showToast(
-        "Password updated ✓"
-    );
-
-    return true;
-}
-
-/* ============================================================
-   LOGIN / LOGOUT ACTIVITY
-============================================================ */
-
-async function recordLogin() {
-    if (
-        !CLOUD.session?.user?.id
-    ) {
-        return;
-    }
-
-    await supabase
-        .from("login_logs")
-        .insert({
-            user_id:
-                CLOUD.session.user.id,
-
-            login_at:
-                new Date().toISOString()
-        });
-
-    await supabase
-        .from("profiles")
-        .update({
-            last_login_at:
-                new Date().toISOString()
-        })
-        .eq(
-            "id",
-            CLOUD.session.user.id
-        );
-}
-
-async function recordLogout() {
-    if (
-        !CLOUD.session?.user?.id
-    ) {
-        return;
-    }
-
-    await supabase
-        .from("profiles")
-        .update({
-            last_logout_at:
-                new Date().toISOString()
-        })
-        .eq(
-            "id",
-            CLOUD.session.user.id
-        );
-}
-
-async function logActivity(
-    eventType,
-    metadata
+function normalizeAIPredictions(
+    predictions
 ) {
     if (
-        !CLOUD.session?.user?.id
-    ) {
-        return;
-    }
-
-    try {
-        await supabase
-            .from("activity_logs")
-            .insert({
-                user_id:
-                    CLOUD.session.user.id,
-
-                event_type:
-                    eventType,
-
-                metadata:
-                    metadata || {}
-            });
-    } catch (error) {
-        console.warn(
-            "Activity log failed:",
-            error
-        );
-    }
-}
-
-/* ============================================================
-   UTILITY FUNCTIONS
-============================================================ */
-
-function formatRole(role) {
-    const labels = {
-        admin: "Admin",
-        staff: "Staff",
-        reviewer: "Reviewer",
-        coworker_2d_box:
-            "2D Box Coworker",
-        coworker_polygon:
-            "Polygon Coworker",
-        coworker_segmentation:
-            "Segmentation Coworker",
-        customer: "Customer"
-    };
-
-    return (
-        labels[role] ||
-        String(role || "")
-            .replaceAll(
-                "_",
-                " "
-            )
-            .replace(
-                /\b\w/g,
-                c =>
-                    c.toUpperCase()
-            )
-    );
-}
-
-function formatDateTime(value) {
-    if (!value) {
-        return "—";
-    }
-
-    const date =
-        new Date(value);
-
-    if (
-        Number.isNaN(
-            date.getTime()
+        !Array.isArray(
+            predictions
         )
     ) {
-        return String(value);
+        return [];
     }
 
-    return date.toLocaleString();
-}
-/* ============================================================
-   START SUPABASE CLOUD CONNECTION
-============================================================ */
+    return predictions
+        .map(
+            prediction => {
 
-initCloud().catch(error => {
-    console.error("Supabase startup error:", error);
+                const score =
+                    Number(
+                        prediction.score ??
+                        prediction.confidence ??
+                        0
+                    );
 
-    if (typeof setAuthStatus === "function") {
-        setAuthStatus(
-            error?.message || "Unable to connect to Supabase.",
-            true
+                let label =
+                    prediction.class ??
+                    prediction.label ??
+                    prediction.name ??
+                    AI_CONFIG.defaultLabel;
+
+                label =
+                    normalizeLabel(
+                        label
+                    );
+
+
+                let bbox =
+                    prediction.bbox ??
+                    prediction.box ??
+                    prediction.boundingBox;
+
+
+                if (
+                    !Array.isArray(
+                        bbox
+                    )
+                ) {
+
+                    if (
+                        bbox &&
+                        typeof bbox ===
+                            "object"
+                    ) {
+
+                        bbox = [
+                            bbox.x ??
+                                bbox.left ??
+                                0,
+
+                            bbox.y ??
+                                bbox.top ??
+                                0,
+
+                            bbox.width ??
+                                0,
+
+                            bbox.height ??
+                                0
+                        ];
+
+                    }
+
+                }
+
+
+                if (
+                    !Array.isArray(
+                        bbox
+                    ) ||
+                    bbox.length <
+                        4
+                ) {
+
+                    return null;
+
+                }
+
+
+                let [
+                    x,
+                    y,
+                    width,
+                    height
+                ] =
+                    bbox.map(
+                        Number
+                    );
+
+
+                if (
+                    !Number.isFinite(
+                        x
+                    ) ||
+                    !Number.isFinite(
+                        y
+                    ) ||
+                    !Number.isFinite(
+                        width
+                    ) ||
+                    !Number.isFinite(
+                        height
+                    )
+                ) {
+
+                    return null;
+
+                }
+
+
+                /*
+                 * Some detection libraries return
+                 * [x1, y1, x2, y2].
+                 *
+                 * Detect that format when the second
+                 * pair is clearly greater than the
+                 * first pair.
+                 */
+                if (
+                    width >
+                        x &&
+                    height >
+                        y &&
+                    (
+                        width >
+                            (
+                                state.image?.naturalWidth ||
+                                state.image?.width ||
+                                0
+                            ) *
+                            0.25 ||
+                        height >
+                            (
+                                state.image?.naturalHeight ||
+                                state.image?.height ||
+                                0
+                            ) *
+                            0.25
+                    )
+                ) {
+
+                    const x2 =
+                        width;
+
+                    const y2 =
+                        height;
+
+                    width =
+                        x2 -
+                        x;
+
+                    height =
+                        y2 -
+                        y;
+
+                }
+
+
+                const imageWidth =
+                    state.image?.naturalWidth ||
+                    state.image?.width ||
+                    1;
+
+                const imageHeight =
+                    state.image?.naturalHeight ||
+                    state.image?.height ||
+                    1;
+
+
+                /*
+                 * Handle normalized 0–1 coordinates.
+                 */
+                if (
+                    Math.abs(x) <=
+                        1 &&
+                    Math.abs(y) <=
+                        1 &&
+                    Math.abs(width) <=
+                        1 &&
+                    Math.abs(height) <=
+                        1
+                ) {
+
+                    x *=
+                        imageWidth;
+
+                    y *=
+                        imageHeight;
+
+                    width *=
+                        imageWidth;
+
+                    height *=
+                        imageHeight;
+
+                }
+
+
+                x =
+                    clamp(
+                        x,
+                        0,
+                        imageWidth
+                    );
+
+                y =
+                    clamp(
+                        y,
+                        0,
+                        imageHeight
+                    );
+
+                width =
+                    clamp(
+                        width,
+                        1,
+                        imageWidth -
+                            x
+                    );
+
+                height =
+                    clamp(
+                        height,
+                        1,
+                        imageHeight -
+                            y
+                    );
+
+
+                return {
+
+                    label,
+
+                    score:
+                        clamp(
+                            score,
+                            0,
+                            1
+                        ),
+
+                    bbox: {
+                        x,
+                        y,
+                        width,
+                        height
+                    }
+
+                };
+
+            }
+        )
+        .filter(
+            Boolean
         );
-    }
-});
+
+}
+
+
+function normalizeLabel(
+    label
+) {
+
+    const clean =
+        String(
+            label ??
+            "object"
+        )
+            .trim()
+            .toLowerCase();
+
+
+    return (
+        LABEL_ALIASES[
+            clean
+        ] ||
+        clean ||
+        "object"
+    );
+
+}
+
+
 /* ============================================================
-   INITIAL UI SETUP
+   CREATE AI ANNOTATION
 ============================================================ */
 
-restoreTheme();
-updateTaskBar();
+function createAIAnnotation(
+    prediction
+) {
 
-window.addEventListener(
-    "beforeunload",
-    () => {
-        try {
-            recordLogout();
-        } catch {}
+    if (
+        !prediction ||
+        !prediction.bbox
+    ) {
+
+        return null;
+
     }
+
+
+    const annotation = {
+
+        id:
+            `ann-${Date.now()}-${state.nextId++}`,
+
+        type:
+            "box",
+
+        label:
+            prediction.label,
+
+        class_name:
+            prediction.label,
+
+        score:
+            prediction.score,
+
+        x:
+            prediction.bbox.x,
+
+        y:
+            prediction.bbox.y,
+
+        width:
+            prediction.bbox.width,
+
+        height:
+            prediction.bbox.height,
+
+        occlusion:
+            0,
+
+        truncation:
+            "NONE",
+
+        ai_generated:
+            true,
+
+        corrected:
+            false,
+
+        export:
+            true,
+
+        frame_number:
+            state.currentFrame
+
+    };
+
+
+    state.annotations.push(
+        annotation
+    );
+
+
+    return annotation;
+
+}
+
+
+/* ============================================================
+   FALLBACK DETECTION
+============================================================ */
+
+async function fallbackDetect() {
+
+    if (
+        !state.image
+    ) {
+
+        return [];
+
+    }
+
+
+    /*
+     * The fallback deliberately produces no
+     * false "AI" detections from arbitrary pixels.
+     *
+     * It gives the user a safe reviewable region
+     * covering the visible media when no model
+     * library is available.
+     */
+
+    const width =
+        state.image.naturalWidth ||
+        state.image.width;
+
+
+    const height =
+        state.image.naturalHeight ||
+        state.image.height;
+
+
+    if (
+        !width ||
+        !height
+    ) {
+
+        return [];
+
+    }
+
+
+    return [
+        {
+
+            label:
+                "object",
+
+            score:
+                0.36,
+
+            bbox: {
+
+                x:
+                    width *
+                    0.1,
+
+                y:
+                    height *
+                    0.1,
+
+                width:
+                    width *
+                    0.8,
+
+                height:
+                    height *
+                    0.8
+
+            }
+
+        }
+    ];
+
+}
+
+
+/* ============================================================
+   ANNOTATION HISTORY
+============================================================ */
+
+function cloneAnnotations(
+    annotations
+) {
+
+    return JSON.parse(
+        JSON.stringify(
+            annotations ||
+            []
+        )
+    );
+
+}
+
+
+function resetHistory(
+    annotations
+) {
+
+    state.history =
+        [
+            cloneAnnotations(
+                annotations
+            )
+        ];
+
+    state.historyIndex =
+        0;
+
+    updateUndoRedoButtons();
+
+}
+
+
+function pushHistory() {
+
+    const snapshot =
+        cloneAnnotations(
+            state.annotations
+        );
+
+
+    if (
+        state.historyIndex <
+        state.history.length -
+            1
+    ) {
+
+        state.history =
+            state.history.slice(
+                0,
+                state.historyIndex +
+                    1
+            );
+
+    }
+
+
+    state.history.push(
+        snapshot
+    );
+
+
+    if (
+        state.history.length >
+        100
+    ) {
+
+        state.history.shift();
+
+    } else {
+
+        state.historyIndex++;
+
+    }
+
+
+    if (
+        state.historyIndex <
+        0
+    ) {
+
+        state.historyIndex =
+            0;
+
+    }
+
+
+    updateUndoRedoButtons();
+
+}
+
+
+function undo() {
+
+    if (
+        state.historyIndex <=
+        0
+    ) {
+
+        return;
+
+    }
+
+
+    state.historyIndex--;
+
+
+    state.annotations =
+        cloneAnnotations(
+            state.history[
+                state.historyIndex
+            ]
+        );
+
+
+    state.selectedId =
+        null;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+function redo() {
+
+    if (
+        state.historyIndex >=
+        state.history.length -
+            1
+    ) {
+
+        return;
+
+    }
+
+
+    state.historyIndex++;
+
+
+    state.annotations =
+        cloneAnnotations(
+            state.history[
+                state.historyIndex
+            ]
+        );
+
+
+    state.selectedId =
+        null;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+function updateUndoRedoButtons() {
+
+    const undoButton =
+        $("undoButton");
+
+    const redoButton =
+        $("redoButton");
+
+
+    if (
+        undoButton
+    ) {
+
+        undoButton.disabled =
+            state.historyIndex <=
+            0;
+
+    }
+
+
+    if (
+        redoButton
+    ) {
+
+        redoButton.disabled =
+            state.historyIndex >=
+            state.history.length -
+                1;
+
+    }
+
+}
+
+
+$("undoButton")?.addEventListener(
+    "click",
+    undo
 );
 
+
+$("redoButton")?.addEventListener(
+    "click",
+    redo
+);
+
+
 /* ============================================================
-   END OF FILE (deduplicated / fixed)
+   UTILITY
 ============================================================ */
+
+function showToast(
+    message,
+    duration = 3000
+) {
+
+    if (
+        !toastContainer
+    ) {
+
+        console.log(
+            message
+        );
+
+        return;
+
+    }
+
+
+    const toast =
+        document.createElement(
+            "div"
+        );
+
+
+    toast.className =
+        "toast";
+
+
+    toast.textContent =
+        message;
+
+
+    toastContainer.appendChild(
+        toast
+    );
+
+
+    requestAnimationFrame(
+        () => {
+
+            toast.classList.add(
+                "show"
+            );
+
+        }
+    );
+
+
+    setTimeout(
+        () => {
+
+            toast.classList.remove(
+                "show"
+            );
+
+            setTimeout(
+                () =>
+                    toast.remove(),
+                250
+            );
+
+        },
+        duration
+    );
+
+}
