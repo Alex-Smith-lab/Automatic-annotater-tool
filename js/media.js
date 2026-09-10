@@ -4,18 +4,52 @@
 // MEDIA / IMAGE / VIDEO / FRAME HANDLING
 // ============================================================
 
-import {
-    state,
-    canvas,
-    ctx,
-    emit,
-    saveFrame,
-    loadFrame,
-    clearFrameAnnotations,
-    render,
-    updateCounts,
-    updateAnnotationsList
-} from "./annotation.js";
+import * as Annotation from "./annotation.js";
+
+const state = Annotation.state;
+
+const emit =
+    typeof Annotation.emit === "function"
+        ? Annotation.emit
+        : () => {};
+
+const saveFrame =
+    typeof Annotation.saveFrame === "function"
+        ? Annotation.saveFrame
+        : () => {};
+
+const loadFrame =
+    typeof Annotation.loadFrame === "function"
+        ? Annotation.loadFrame
+        : () => {};
+
+const clearFrameAnnotations =
+    typeof Annotation.clearFrameAnnotations === "function"
+        ? Annotation.clearFrameAnnotations
+        : () => {};
+
+const render =
+    typeof Annotation.render === "function"
+        ? Annotation.render
+        : () => {};
+
+const updateCounts =
+    typeof Annotation.updateCounts === "function"
+        ? Annotation.updateCounts
+        : () => {};
+
+const updateAnnotationsList =
+    typeof Annotation.updateAnnotationsList === "function"
+        ? Annotation.updateAnnotationsList
+        : () => {};
+
+const $ = (id) => document.getElementById(id);
+
+const canvas = $("annotationCanvas");
+
+const ctx = canvas
+    ? canvas.getContext("2d")
+    : null;
 
 
 // ============================================================
