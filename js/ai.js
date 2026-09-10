@@ -4,17 +4,12 @@
 // AI / HUGGING FACE / AUTO ANNOTATION
 // ============================================================
 
-import { pipeline, env } from
-    "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
-
 import {
-    state,
-    emit,
-    render,
-    updateCounts,
-    updateAnnotationsList,
-    pushHistory
-} from "./annotation.js";
+    pipeline,
+    env
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
+
+import * as Annotation from "./annotation.js";
 
 import {
     APP_CONFIG
@@ -30,7 +25,61 @@ env.allowRemoteModels = true;
 
 
 // ============================================================
-// AI MODEL CONFIGURATION
+// SHARED ANNOTATION API
+// ============================================================
+
+const state = Annotation.state;
+
+const render =
+    typeof Annotation.render === "function"
+        ? Annotation.render
+        : () => {};
+
+const updateCounts =
+    typeof Annotation.updateCounts === "function"
+        ? Annotation.updateCounts
+        : () => {};
+
+const updateAnnotationsList =
+    typeof Annotation.updateAnnotationsList === "function"
+        ? Annotation.updateAnnotationsList
+        : () => {};
+
+const pushHistory =
+    typeof Annotation.pushHistory === "function"
+        ? Annotation.pushHistory
+        : () => {};
+
+
+// ============================================================
+// LOCAL APPLICATION EVENT HELPER
+// ============================================================
+
+function emit(
+    name,
+    detail = {}
+) {
+    try {
+        window.dispatchEvent(
+            new CustomEvent(
+                String(name),
+                {
+                    detail
+                }
+            )
+        );
+    } catch (error) {
+        console.warn(
+            "Unable to emit application event:",
+            name,
+            error
+        );
+    }
+}
+
+
+// ============================================================
+// HUGGING FACE MODEL CONFIGURATION
 // ============================================================
 
 const AI_MODELS = {
@@ -49,7 +98,7 @@ const AI_MODELS = {
 
 
 // ============================================================
-// AI MODEL CACHE
+// MODEL CACHE
 // ============================================================
 
 const modelCache = {
@@ -67,7 +116,7 @@ const modelPromises = {
 
 
 // ============================================================
-// AI STATE
+// AI RUNTIME STATE
 // ============================================================
 
 let aiRunning = false;
@@ -82,7 +131,7 @@ let aiRunId = 0;
 
 
 // ============================================================
-// AI LABEL ALIASES
+// LABEL ALIASES
 // ============================================================
 
 const LABEL_ALIASES = {
@@ -98,6 +147,9 @@ const LABEL_ALIASES = {
     human: "person",
     humans: "person",
 
+    pedestrian: "person",
+    pedestrians: "person",
+
     cyclist: "bicycle",
     cyclists: "bicycle",
 
@@ -107,15 +159,12 @@ const LABEL_ALIASES = {
     motorcycle: "motorcycle",
     motorcycles: "motorcycle",
 
-    pedestrian: "person",
-    pedestrians: "person",
-
     auto: "car"
 };
 
 
 // ============================================================
-// DEFAULT AI LABELS
+// DEFAULT LABELS
 // ============================================================
 
 const DEFAULT_LABELS = [
@@ -134,7 +183,7 @@ const DEFAULT_LABELS = [
 
 
 // ============================================================
-// DOM HELPERS
+// DOM HELPER
 // ============================================================
 
 function $(id) {
@@ -142,13 +191,18 @@ function $(id) {
 }
 
 
-function setText(id, text) {
+function setText(
+    id,
+    text
+) {
     const element =
         typeof id === "string"
             ? $(id)
             : id;
 
-    if (!element) return;
+    if (!element) {
+        return;
+    }
 
     element.textContent =
         String(text ?? "");
@@ -164,7 +218,9 @@ function setDisplay(
             ? $(id)
             : id;
 
-    if (!element) return;
+    if (!element) {
+        return;
+    }
 
     element.style.display =
         visible ? "" : "none";
@@ -172,7 +228,7 @@ function setDisplay(
 
 
 // ============================================================
-// AI STATUS ELEMENTS
+// AI STATUS ELEMENT
 // ============================================================
 
 function getAIStatusElement() {
@@ -205,7 +261,9 @@ export function setAIStatus(
     const element =
         getAIStatusElement();
 
-    if (!element) return;
+    if (!element) {
+        return;
+    }
 
     element.textContent =
         String(message || "");
@@ -221,7 +279,9 @@ export function setAIStatus(
         "info"
     );
 
-    element.classList.add(type);
+    element.classList.add(
+        type
+    );
 }
 
 
@@ -236,13 +296,19 @@ export function updateAIStatus(
 }
 
 
+// ============================================================
+// AI PROGRESS
+// ============================================================
+
 function setAIProgress(
     value
 ) {
     const progress =
         getAIProgressElement();
 
-    if (!progress) return;
+    if (!progress) {
+        return;
+    }
 
     const numeric =
         Math.max(
@@ -254,7 +320,8 @@ function setAIProgress(
         );
 
     if (
-        progress.tagName === "PROGRESS"
+        progress.tagName ===
+        "PROGRESS"
     ) {
         progress.value =
             numeric;
@@ -274,7 +341,7 @@ function setAIProgress(
 
 
 // ============================================================
-// AI STATUS HELPERS
+// AI BUTTON STATE
 // ============================================================
 
 function setAIButtonState(
@@ -287,7 +354,12 @@ function setAIButtonState(
         $("aiAnnotateButton")
     ].filter(Boolean);
 
-    for (const button of buttons) {
+    const uniqueButtons =
+        [...new Set(buttons)];
+
+    for (
+        const button of uniqueButtons
+    ) {
         button.disabled =
             Boolean(running);
 
@@ -318,19 +390,10 @@ function setAIButtonState(
 
 
 // ============================================================
-// CHECK AI PERMISSION
+// AI PERMISSION
 // ============================================================
 
 export async function checkAIPermission() {
-    /*
-     * The original application called a permission check
-     * before running AI.
-     *
-     * We deliberately do not invent a database permission
-     * table or schema here. If another module exposes an
-     * application-level permission function, use it.
-     */
-
     if (
         typeof window.canUseAI ===
         "function"
@@ -339,8 +402,11 @@ export async function checkAIPermission() {
             return Boolean(
                 await window.canUseAI()
             );
-        } catch (_) {
-            return false;
+        } catch (error) {
+            console.warn(
+                "canUseAI failed:",
+                error
+            );
         }
     }
 
@@ -354,16 +420,13 @@ export async function checkAIPermission() {
             return Boolean(
                 await window.checkAIPermission()
             );
-        } catch (_) {
-            return false;
+        } catch (error) {
+            console.warn(
+                "External AI permission check failed:",
+                error
+            );
         }
     }
-
-    /*
-     * AI is available locally through
-     * Transformers.js unless the application
-     * explicitly disables it.
-     */
 
     if (
         window.APP_CONFIG &&
@@ -384,7 +447,7 @@ export async function checkAIPermission() {
 
 
 // ============================================================
-// GET CURRENT MEDIA
+// CURRENT MEDIA
 // ============================================================
 
 function getCurrentMedia() {
@@ -399,9 +462,8 @@ function getCurrentMedia() {
         state.mediaType === "video"
     ) {
         return (
-            document.getElementById(
-                "sourceVideo"
-            ) || null
+            $("sourceVideo") ||
+            null
         );
     }
 
@@ -410,7 +472,7 @@ function getCurrentMedia() {
 
 
 // ============================================================
-// CHECK MEDIA
+// MEDIA CHECK
 // ============================================================
 
 function hasUsableMedia() {
@@ -451,7 +513,9 @@ function normalizeModelName(
     model
 ) {
     const value =
-        String(model || "detr")
+        String(
+            model || "detr"
+        )
             .trim()
             .toLowerCase();
 
@@ -473,6 +537,23 @@ function normalizeModelName(
 
 
 // ============================================================
+// MODEL TASK
+// ============================================================
+
+function getModelTask(
+    modelName
+) {
+    if (
+        modelName === "panoptic"
+    ) {
+        return "image-segmentation";
+    }
+
+    return "object-detection";
+}
+
+
+// ============================================================
 // LOAD AI MODEL
 // ============================================================
 
@@ -480,11 +561,16 @@ export async function loadAIModel(
     model = "detr"
 ) {
     const modelName =
-        normalizeModelName(model);
+        normalizeModelName(
+            model
+        );
 
     if (
         modelCache[modelName]
     ) {
+        currentAIModel =
+            modelName;
+
         return modelCache[
             modelName
         ];
@@ -499,30 +585,32 @@ export async function loadAIModel(
     }
 
     const modelId =
-        AI_MODELS[modelName];
+        AI_MODELS[
+            modelName
+        ];
+
+    if (!modelId) {
+        throw new Error(
+            `Unknown AI model: ${modelName}`
+        );
+    }
 
     setAIStatus(
         `Loading AI model: ${modelId}`,
         "loading"
     );
 
-    setAIProgress(5);
+    setAIProgress(
+        5
+    );
 
     modelPromises[modelName] =
         (async () => {
             try {
-                let task;
-
-                if (
-                    modelName ===
-                    "panoptic"
-                ) {
-                    task =
-                        "image-segmentation";
-                } else {
-                    task =
-                        "object-detection";
-                }
+                const task =
+                    getModelTask(
+                        modelName
+                    );
 
                 const loaded =
                     await pipeline(
@@ -537,7 +625,9 @@ export async function loadAIModel(
                 currentAIModel =
                     modelName;
 
-                setAIProgress(20);
+                setAIProgress(
+                    20
+                );
 
                 setAIStatus(
                     `AI model ready: ${modelName}`,
@@ -573,7 +663,7 @@ export async function loadAIModel(
 
 
 // ============================================================
-// PRELOAD AI MODELS
+// PRELOAD MODEL
 // ============================================================
 
 export async function preloadAIModel(
@@ -583,7 +673,12 @@ export async function preloadAIModel(
         return await loadAIModel(
             model
         );
-    } catch (_) {
+    } catch (error) {
+        console.warn(
+            "AI preload failed:",
+            error
+        );
+
         return null;
     }
 }
@@ -629,7 +724,9 @@ function normalizeScore(
         return 0;
     }
 
-    if (value > 1) {
+    if (
+        value > 1
+    ) {
         return Math.max(
             0,
             Math.min(
@@ -656,7 +753,9 @@ function normalizeScore(
 function normalizeBox(
     box
 ) {
-    if (!box) return null;
+    if (!box) {
+        return null;
+    }
 
     let xmin;
     let ymin;
@@ -676,12 +775,14 @@ function normalizeBox(
         xmin =
             box.xmin ??
             box.x0 ??
-            box.left;
+            box.left ??
+            box.x;
 
         ymin =
             box.ymin ??
             box.y0 ??
-            box.top;
+            box.top ??
+            box.y;
 
         xmax =
             box.xmax ??
@@ -694,10 +795,17 @@ function normalizeBox(
             box.bottom;
     }
 
-    xmin = Number(xmin);
-    ymin = Number(ymin);
-    xmax = Number(xmax);
-    ymax = Number(ymax);
+    xmin =
+        Number(xmin);
+
+    ymin =
+        Number(ymin);
+
+    xmax =
+        Number(xmax);
+
+    ymax =
+        Number(ymax);
 
     if (
         !Number.isFinite(xmin) ||
@@ -709,25 +817,29 @@ function normalizeBox(
     }
 
     return {
-        xmin: Math.min(
-            xmin,
-            xmax
-        ),
+        xmin:
+            Math.min(
+                xmin,
+                xmax
+            ),
 
-        ymin: Math.min(
-            ymin,
-            ymax
-        ),
+        ymin:
+            Math.min(
+                ymin,
+                ymax
+            ),
 
-        xmax: Math.max(
-            xmin,
-            xmax
-        ),
+        xmax:
+            Math.max(
+                xmin,
+                xmax
+            ),
 
-        ymax: Math.max(
-            ymin,
-            ymax
-        )
+        ymax:
+            Math.max(
+                ymin,
+                ymax
+            )
     };
 }
 
@@ -745,20 +857,31 @@ export function normalizeAIPredictions(
         return [];
     }
 
-    const results =
+    let results;
+
+    if (
         Array.isArray(
             predictions
         )
-            ? predictions
-            : (
-                predictions
-                    .detections ||
-                predictions
-                    .predictions ||
-                predictions
-                    .objects ||
-                []
-            );
+    ) {
+        results =
+            predictions;
+    } else {
+        results =
+            predictions.detections ||
+            predictions.predictions ||
+            predictions.objects ||
+            predictions.results ||
+            [];
+    }
+
+    if (
+        !Array.isArray(
+            results
+        )
+    ) {
+        return [];
+    }
 
     const width =
         Number(imageWidth) || 1;
@@ -780,21 +903,24 @@ export function normalizeAIPredictions(
                 prediction.label ??
                 prediction.class ??
                 prediction.name ??
-                prediction.category
+                prediction.category ??
+                prediction.class_name
             );
 
         const score =
             normalizeScore(
                 prediction.score ??
                 prediction.confidence ??
-                prediction.probability
+                prediction.probability ??
+                prediction.confidence_score
             );
 
         const box =
             normalizeBox(
                 prediction.box ??
                 prediction.bbox ??
-                prediction.boundingBox
+                prediction.boundingBox ??
+                prediction.bounding_box
             );
 
         if (!box) {
@@ -809,15 +935,16 @@ export function normalizeAIPredictions(
         } = box;
 
         /*
-         * Some models return normalized
-         * coordinates from 0 to 1.
+         * Coordinates between 0 and 1
+         * are interpreted as normalized
+         * coordinates.
          */
 
         if (
-            xmax <= 1 &&
-            ymax <= 1 &&
             xmin >= 0 &&
-            ymin >= 0
+            ymin >= 0 &&
+            xmax <= 1 &&
+            ymax <= 1
         ) {
             xmin *= width;
             xmax *= width;
@@ -863,10 +990,12 @@ export function normalizeAIPredictions(
             );
 
         const boxWidth =
-            xmax - xmin;
+            xmax -
+            xmin;
 
         const boxHeight =
-            ymax - ymin;
+            ymax -
+            ymin;
 
         if (
             boxWidth <= 1 ||
@@ -878,6 +1007,7 @@ export function normalizeAIPredictions(
         normalized.push({
             label,
             score,
+
             box: {
                 xmin,
                 ymin,
@@ -885,8 +1015,14 @@ export function normalizeAIPredictions(
                 ymax
             },
 
-            width: boxWidth,
-            height: boxHeight
+            width:
+                boxWidth,
+
+            height:
+                boxHeight,
+
+            raw:
+                prediction
         });
     }
 
@@ -895,7 +1031,7 @@ export function normalizeAIPredictions(
 
 
 // ============================================================
-// DETERMINE IMAGE DIMENSIONS
+// MEDIA DIMENSIONS
 // ============================================================
 
 function getMediaDimensions() {
@@ -938,6 +1074,91 @@ function getMediaDimensions() {
 
 
 // ============================================================
+// GET AI INPUT MEDIA
+// ============================================================
+
+function getAIInputMedia() {
+    const media =
+        getCurrentMedia();
+
+    if (!media) {
+        return null;
+    }
+
+    /*
+     * Images can be passed directly.
+     */
+
+    if (
+        state.mediaType === "image"
+    ) {
+        return media;
+    }
+
+    /*
+     * For videos, use an offscreen canvas
+     * containing the current video frame.
+     */
+
+    if (
+        state.mediaType === "video"
+    ) {
+        if (
+            !media.videoWidth ||
+            !media.videoHeight
+        ) {
+            return null;
+        }
+
+        const offscreen =
+            document.createElement(
+                "canvas"
+            );
+
+        offscreen.width =
+            media.videoWidth;
+
+        offscreen.height =
+            media.videoHeight;
+
+        const context =
+            offscreen.getContext(
+                "2d",
+                {
+                    willReadFrequently:
+                        false
+                }
+            );
+
+        if (!context) {
+            return null;
+        }
+
+        try {
+            context.drawImage(
+                media,
+                0,
+                0,
+                media.videoWidth,
+                media.videoHeight
+            );
+
+            return offscreen;
+        } catch (error) {
+            console.error(
+                "Unable to capture video frame for AI:",
+                error
+            );
+
+            return null;
+        }
+    }
+
+    return null;
+}
+
+
+// ============================================================
 // CREATE AI ANNOTATION
 // ============================================================
 
@@ -949,33 +1170,51 @@ export function createAIAnnotation(
         return null;
     }
 
-    const {
-        label =
-            prediction.label ||
-            "object",
+    const label =
+        prediction.label ||
+        "object";
 
-        score =
-            prediction.score ||
-            0,
+    const score =
+        prediction.score ??
+        prediction.confidence ??
+        0;
 
-        box =
-            prediction.box
-    } = prediction;
+    const box =
+        prediction.box;
 
     if (!box) {
         return null;
     }
 
     const normalizedBox =
-        normalizeBox(box);
+        normalizeBox(
+            box
+        );
 
     if (!normalizedBox) {
         return null;
     }
 
+    if (
+        !state ||
+        !Array.isArray(
+            state.annotations
+        )
+    ) {
+        return null;
+    }
+
+    const nextId =
+        Number(
+            state.nextId
+        ) || 1;
+
+    state.nextId =
+        nextId + 1;
+
     const annotation = {
         id:
-            state.nextId++,
+            nextId,
 
         type:
             options.type ||
@@ -1005,7 +1244,8 @@ export function createAIAnnotation(
             normalizedBox.ymax -
             normalizedBox.ymin,
 
-        selected: false,
+        selected:
+            false,
 
         occluded:
             false,
@@ -1022,7 +1262,9 @@ export function createAIAnnotation(
         frame:
             state.mediaType ===
             "video"
-                ? state.currentFrame
+                ? Number(
+                    state.currentFrame
+                ) || 0
                 : 0,
 
         createdAt:
@@ -1036,6 +1278,7 @@ export function createAIAnnotation(
     ) {
         annotation.points =
             options.polygon;
+
         annotation.type =
             "polygon";
     }
@@ -1045,142 +1288,20 @@ export function createAIAnnotation(
 
 
 // ============================================================
-// FALLBACK DETECTION
-// ============================================================
-
-export async function fallbackDetection(
-    options = {}
-) {
-    /*
-     * Keep fallback detection intentionally
-     * conservative. It first attempts DETR.
-     */
-
-    const {
-        threshold = 0.5
-    } = options;
-
-    try {
-        const model =
-            await loadAIModel(
-                "detr"
-            );
-
-        const media =
-            getCurrentMedia();
-
-        if (!media) {
-            return [];
-        }
-
-        const predictions =
-            await model(
-                media
-            );
-
-        const {
-            width,
-            height
-        } =
-            getMediaDimensions();
-
-        return normalizeAIPredictions(
-            predictions,
-            width,
-            height
-        ).filter(
-            item =>
-                item.score >=
-                threshold
-        );
-    } catch (error) {
-        lastAIError =
-            error;
-
-        return [];
-    }
-}
-
-
-// ============================================================
-// RUN DETECTION
-// ============================================================
-
-export async function runDetection(
-    options = {}
-) {
-    const {
-        model = "detr",
-        threshold = 0.5
-    } = options;
-
-    const modelName =
-        normalizeModelName(
-            model
-        );
-
-    const media =
-        getCurrentMedia();
-
-    if (!media) {
-        throw new Error(
-            "No media is loaded."
-        );
-    }
-
-    const aiModel =
-        await loadAIModel(
-            modelName
-        );
-
-    setAIStatus(
-        "Running AI detection…",
-        "loading"
-    );
-
-    setAIProgress(30);
-
-    const predictions =
-        await aiModel(
-            media
-        );
-
-    setAIProgress(75);
-
-    const {
-        width,
-        height
-    } =
-        getMediaDimensions();
-
-    const normalized =
-        normalizeAIPredictions(
-            predictions,
-            width,
-            height
-        );
-
-    const filtered =
-        normalized.filter(
-            prediction =>
-                prediction.score >=
-                threshold
-        );
-
-    setAIProgress(90);
-
-    return filtered;
-}
-
-
-// ============================================================
-// REMOVE OVERLAPPING DUPLICATES
+// IOU
 // ============================================================
 
 function intersectionOverUnion(
     a,
     b
 ) {
+    if (
+        !a?.box ||
+        !b?.box
+    ) {
+        return 0;
+    }
+
     const ax1 =
         a.box.xmin;
 
@@ -1270,24 +1391,45 @@ function intersectionOverUnion(
         areaB -
         intersection;
 
-    if (!union) {
+    if (
+        union <= 0
+    ) {
         return 0;
     }
 
-    return intersection / union;
+    return (
+        intersection /
+        union
+    );
 }
 
+
+// ============================================================
+// REMOVE DUPLICATES
+// ============================================================
 
 function removeDuplicatePredictions(
     predictions,
     iouThreshold = 0.85
 ) {
+    if (
+        !Array.isArray(
+            predictions
+        )
+    ) {
+        return [];
+    }
+
     const sorted =
         [...predictions]
             .sort(
                 (a, b) =>
-                    b.score -
-                    a.score
+                    normalizeScore(
+                        b.score
+                    ) -
+                    normalizeScore(
+                        a.score
+                    )
             );
 
     const output = [];
@@ -1319,7 +1461,7 @@ function removeDuplicatePredictions(
 
 
 // ============================================================
-// ADD PREDICTIONS TO ANNOTATIONS
+// ADD AI PREDICTIONS
 // ============================================================
 
 export function addAIPredictions(
@@ -1334,6 +1476,15 @@ export function addAIPredictions(
         return [];
     }
 
+    if (
+        !state ||
+        !Array.isArray(
+            state.annotations
+        )
+    ) {
+        return [];
+    }
+
     const {
         replace = false,
         deduplicate = true
@@ -1342,13 +1493,16 @@ export function addAIPredictions(
     let items =
         deduplicate
             ? removeDuplicatePredictions(
-                  predictions
-              )
+                predictions
+            )
             : predictions;
 
     if (replace) {
-        state.annotations = [];
-        state.selectedId = null;
+        state.annotations =
+            [];
+
+        state.selectedId =
+            null;
     }
 
     const created = [];
@@ -1375,23 +1529,39 @@ export function addAIPredictions(
         );
     }
 
-    if (created.length) {
-        pushHistory(
-            "AI annotations"
-        );
+    if (
+        created.length
+    ) {
+        try {
+            pushHistory(
+                "AI annotations"
+            );
+        } catch (error) {
+            console.warn(
+                "Unable to save AI annotation history:",
+                error
+            );
+        }
     }
 
-    updateCounts();
+    try {
+        updateCounts();
+    } catch (_) {}
 
-    updateAnnotationsList();
+    try {
+        updateAnnotationsList();
+    } catch (_) {}
 
-    render();
+    try {
+        render();
+    } catch (_) {}
 
     emit(
         "aiAnnotationsCreated",
         {
             count:
                 created.length,
+
             annotations:
                 created
         }
@@ -1402,7 +1572,142 @@ export function addAIPredictions(
 
 
 // ============================================================
-// AI ANNOTATION ENGINE
+// FALLBACK DETECTION
+// ============================================================
+
+export async function fallbackDetection(
+    options = {}
+) {
+    const {
+        threshold = 0.5
+    } = options;
+
+    try {
+        const model =
+            await loadAIModel(
+                "detr"
+            );
+
+        const media =
+            getAIInputMedia();
+
+        if (!media) {
+            return [];
+        }
+
+        const predictions =
+            await model(
+                media
+            );
+
+        const {
+            width,
+            height
+        } =
+            getMediaDimensions();
+
+        return normalizeAIPredictions(
+            predictions,
+            width,
+            height
+        ).filter(
+            item =>
+                item.score >=
+                threshold
+        );
+    } catch (error) {
+        lastAIError =
+            error;
+
+        console.error(
+            "Fallback detection failed:",
+            error
+        );
+
+        return [];
+    }
+}
+
+
+// ============================================================
+// RUN DETECTION
+// ============================================================
+
+export async function runDetection(
+    options = {}
+) {
+    const {
+        model = "detr",
+        threshold = 0.5
+    } = options;
+
+    const modelName =
+        normalizeModelName(
+            model
+        );
+
+    const media =
+        getAIInputMedia();
+
+    if (!media) {
+        throw new Error(
+            "No usable image or video frame is available."
+        );
+    }
+
+    const aiModel =
+        await loadAIModel(
+            modelName
+        );
+
+    setAIStatus(
+        "Running AI detection…",
+        "loading"
+    );
+
+    setAIProgress(
+        30
+    );
+
+    const predictions =
+        await aiModel(
+            media
+        );
+
+    setAIProgress(
+        75
+    );
+
+    const {
+        width,
+        height
+    } =
+        getMediaDimensions();
+
+    const normalized =
+        normalizeAIPredictions(
+            predictions,
+            width,
+            height
+        );
+
+    const filtered =
+        normalized.filter(
+            prediction =>
+                prediction.score >=
+                threshold
+        );
+
+    setAIProgress(
+        90
+    );
+
+    return filtered;
+}
+
+
+// ============================================================
+// RUN AUTO ANNOTATE
 // ============================================================
 
 export async function runAutoAnnotate(
@@ -1433,9 +1738,11 @@ export async function runAutoAnnotate(
         return [];
     }
 
-    aiRunning = true;
+    aiRunning =
+        true;
 
-    aiCancelled = false;
+    aiCancelled =
+        false;
 
     const runId =
         ++aiRunId;
@@ -1444,7 +1751,9 @@ export async function runAutoAnnotate(
         true
     );
 
-    setAIProgress(0);
+    setAIProgress(
+        0
+    );
 
     setAIStatus(
         "Preparing AI annotation…",
@@ -1493,15 +1802,17 @@ export async function runAutoAnnotate(
                 }
             );
 
-        setAIProgress(100);
+        setAIProgress(
+            100
+        );
 
         setAIStatus(
             created.length
                 ? `${created.length} AI annotation${
-                      created.length === 1
-                          ? ""
-                          : "s"
-                  } created.`
+                    created.length === 1
+                        ? ""
+                        : "s"
+                } created.`
                 : "No objects detected.",
             created.length
                 ? "success"
@@ -1512,8 +1823,10 @@ export async function runAutoAnnotate(
             "aiCompleted",
             {
                 runId,
+
                 count:
                     created.length,
+
                 annotations:
                     created
             }
@@ -1529,7 +1842,9 @@ export async function runAutoAnnotate(
             error
         );
 
-        setAIProgress(0);
+        setAIProgress(
+            0
+        );
 
         setAIStatus(
             `AI annotation failed: ${
@@ -1549,13 +1864,14 @@ export async function runAutoAnnotate(
         );
 
         /*
-         * Try the fallback detector only when
-         * the primary model fails.
+         * Fallback to DETR if the
+         * selected model fails.
          */
 
         try {
             if (
-                !aiCancelled
+                !aiCancelled &&
+                runId === aiRunId
             ) {
                 setAIStatus(
                     "Trying fallback AI detection…",
@@ -1563,13 +1879,11 @@ export async function runAutoAnnotate(
                 );
 
                 const fallback =
-                    await fallbackDetection(
-                        {
-                            threshold:
-                                options.threshold ??
-                                0.5
-                        }
-                    );
+                    await fallbackDetection({
+                        threshold:
+                            options.threshold ??
+                            0.5
+                    });
 
                 if (
                     fallback.length
@@ -1579,12 +1893,17 @@ export async function runAutoAnnotate(
                             fallback,
                             {
                                 replace:
-                                    options.replace ||
-                                    false
+                                    Boolean(
+                                        options.replace
+                                    ),
+                                deduplicate:
+                                    true
                             }
                         );
 
-                    setAIProgress(100);
+                    setAIProgress(
+                        100
+                    );
 
                     setAIStatus(
                         `${created.length} AI annotation${
@@ -1609,16 +1928,20 @@ export async function runAutoAnnotate(
 
         return [];
     } finally {
-        aiRunning = false;
+        aiRunning =
+            false;
 
         setAIButtonState(
             false
         );
 
         if (
+            state &&
             state.mediaType
         ) {
-            render();
+            try {
+                render();
+            } catch (_) {}
         }
 
         emit(
@@ -1636,11 +1959,14 @@ export async function runAutoAnnotate(
 // ============================================================
 
 export function cancelAI() {
-    aiCancelled = true;
+    aiCancelled =
+        true;
 
-    aiRunId += 1;
+    aiRunId +=
+        1;
 
-    aiRunning = false;
+    aiRunning =
+        false;
 
     setAIButtonState(
         false
@@ -1667,7 +1993,7 @@ export function isAIRunning() {
 
 
 // ============================================================
-// CURRENT AI MODEL
+// CURRENT MODEL
 // ============================================================
 
 export function getCurrentAIModel() {
@@ -1676,7 +2002,7 @@ export function getCurrentAIModel() {
 
 
 // ============================================================
-// LAST AI ERROR
+// LAST ERROR
 // ============================================================
 
 export function getLastAIError() {
@@ -1685,68 +2011,35 @@ export function getLastAIError() {
 
 
 // ============================================================
-// CLEAR AI MODEL CACHE
+// CLEAR MODEL CACHE
 // ============================================================
 
 export function clearAIModelCache() {
-    modelCache.detr = null;
-    modelCache.yolo = null;
-    modelCache.panoptic = null;
+    modelCache.detr =
+        null;
 
-    modelPromises.detr = null;
-    modelPromises.yolo = null;
-    modelPromises.panoptic = null;
+    modelCache.yolo =
+        null;
 
-    currentAIModel = null;
+    modelCache.panoptic =
+        null;
+
+    modelPromises.detr =
+        null;
+
+    modelPromises.yolo =
+        null;
+
+    modelPromises.panoptic =
+        null;
+
+    currentAIModel =
+        null;
 }
 
 
 // ============================================================
-// AUTO ANNOTATE BUTTON
-// ============================================================
-
-function bindAutoAnnotateButton() {
-    const buttons = [
-        $("autoAnnotate"),
-        $("runAI"),
-        $("runAi"),
-        $("aiAnnotateButton")
-    ].filter(Boolean);
-
-    /*
-     * Avoid binding the same element more
-     * than once if multiple compatibility
-     * IDs happen to point to the same node.
-     */
-
-    const uniqueButtons =
-        [...new Set(buttons)];
-
-    for (
-        const button of uniqueButtons
-    ) {
-        if (
-            button.dataset.aiBound ===
-            "true"
-        ) {
-            continue;
-        }
-
-        button.dataset.aiBound =
-            "true";
-
-        button.addEventListener(
-            "click",
-            async () => {
-                await runAutoAnnotate();
-            }
-        );
-    }
-}
-
-
-// ============================================================
-// AI MODEL SELECTOR
+// MODEL SELECTOR
 // ============================================================
 
 function bindAIModelSelector() {
@@ -1758,6 +2051,16 @@ function bindAIModelSelector() {
     if (!selector) {
         return;
     }
+
+    if (
+        selector.dataset.aiModelBound ===
+        "true"
+    ) {
+        return;
+    }
+
+    selector.dataset.aiModelBound =
+        "true";
 
     selector.addEventListener(
         "change",
@@ -1772,7 +2075,7 @@ function bindAIModelSelector() {
 
 
 // ============================================================
-// AI THRESHOLD SELECTOR
+// THRESHOLD
 // ============================================================
 
 function getAIThreshold() {
@@ -1796,8 +2099,11 @@ function getAIThreshold() {
         return 0.5;
     }
 
-    if (value > 1) {
-        value /= 100;
+    if (
+        value > 1
+    ) {
+        value /=
+            100;
     }
 
     return Math.max(
@@ -1811,63 +2117,67 @@ function getAIThreshold() {
 
 
 // ============================================================
-// ENHANCED AUTO ANNOTATE BINDING
+// AUTO ANNOTATE BUTTON
 // ============================================================
 
-function bindEnhancedAIButton() {
-    const button =
-        $("autoAnnotate");
+function bindAutoAnnotateButton() {
+    const buttons = [
+        $("autoAnnotate"),
+        $("runAI"),
+        $("runAi"),
+        $("aiAnnotateButton")
+    ].filter(Boolean);
 
-    if (!button) {
-        return;
-    }
+    const uniqueButtons =
+        [...new Set(buttons)];
 
-    if (
-        button.dataset.aiEnhanced ===
-        "true"
+    for (
+        const button of uniqueButtons
     ) {
-        return;
-    }
+        if (
+            button.dataset.aiBound ===
+            "true"
+        ) {
+            continue;
+        }
 
-    button.dataset.aiEnhanced =
-        "true";
+        button.dataset.aiBound =
+            "true";
 
-    /*
-     * The generic binding above is intentionally
-     * not used for this button after this point.
-     */
+        button.addEventListener(
+            "click",
+            async event => {
+                event.preventDefault();
 
-    button.onclick =
-        async (event) => {
-            event.preventDefault();
+                if (aiRunning) {
+                    cancelAI();
+                    return;
+                }
 
-            if (aiRunning) {
-                cancelAI();
-                return;
+                const selector =
+                    $("aiModel") ||
+                    $("aiModelSelect") ||
+                    $("modelSelect");
+
+                const model =
+                    selector?.value ||
+                    "detr";
+
+                await runAutoAnnotate({
+                    model:
+                        normalizeModelName(
+                            model
+                        ),
+
+                    threshold:
+                        getAIThreshold(),
+
+                    replace:
+                        false
+                });
             }
-
-            const selector =
-                $("aiModel") ||
-                $("aiModelSelect") ||
-                $("modelSelect");
-
-            const model =
-                selector?.value ||
-                "detr";
-
-            await runAutoAnnotate({
-                model:
-                    normalizeModelName(
-                        model
-                    ),
-
-                threshold:
-                    getAIThreshold(),
-
-                replace:
-                    false
-            });
-        };
+        );
+    }
 }
 
 
@@ -1876,9 +2186,18 @@ function bindEnhancedAIButton() {
 // ============================================================
 
 function bindAIKeyboardShortcut() {
+    if (
+        window.__annotationAIKeyboardBound
+    ) {
+        return;
+    }
+
+    window.__annotationAIKeyboardBound =
+        true;
+
     document.addEventListener(
         "keydown",
-        (event) => {
+        event => {
             if (
                 event.ctrlKey &&
                 event.shiftKey &&
@@ -1917,14 +2236,25 @@ function bindAIKeyboardShortcut() {
 
 
 // ============================================================
-// MEDIA LOADED EVENT
+// MEDIA LOADED
 // ============================================================
 
 function bindMediaLoaded() {
+    if (
+        window.__annotationAIMediaLoadedBound
+    ) {
+        return;
+    }
+
+    window.__annotationAIMediaLoadedBound =
+        true;
+
     window.addEventListener(
         "annotation:mediaLoaded",
         () => {
-            setAIProgress(0);
+            setAIProgress(
+                0
+            );
 
             setAIStatus(
                 "Ready for AI annotation.",
@@ -1936,15 +2266,26 @@ function bindMediaLoaded() {
 
 
 // ============================================================
-// CUSTOM APPLICATION EVENT
+// APPLICATION AI EVENT
 // ============================================================
 
-window.addEventListener(
-    "annotation:runAI",
-    () => {
-        runAutoAnnotate();
+function bindAIEvent() {
+    if (
+        window.__annotationAIRunEventBound
+    ) {
+        return;
     }
-);
+
+    window.__annotationAIRunEventBound =
+        true;
+
+    window.addEventListener(
+        "annotation:runAI",
+        () => {
+            runAutoAnnotate();
+        }
+    );
+}
 
 
 // ============================================================
@@ -1978,8 +2319,14 @@ window.normalizeAIPredictions =
 window.createAIAnnotation =
     createAIAnnotation;
 
+window.addAIPredictions =
+    addAIPredictions;
+
 window.fallbackDetection =
     fallbackDetection;
+
+window.runDetection =
+    runDetection;
 
 window.isAIRunning =
     isAIRunning;
@@ -1987,8 +2334,17 @@ window.isAIRunning =
 window.getCurrentAIModel =
     getCurrentAIModel;
 
+window.getLastAIError =
+    getLastAIError;
+
 window.setAIStatus =
     setAIStatus;
+
+window.updateAIStatus =
+    updateAIStatus;
+
+window.clearAIModelCache =
+    clearAIModelCache;
 
 
 // ============================================================
@@ -1998,15 +2354,17 @@ window.setAIStatus =
 export function initializeAI() {
     bindAutoAnnotateButton();
 
-    bindEnhancedAIButton();
-
     bindAIModelSelector();
 
     bindAIKeyboardShortcut();
 
     bindMediaLoaded();
 
-    setAIProgress(0);
+    bindAIEvent();
+
+    setAIProgress(
+        0
+    );
 
     if (
         hasUsableMedia()
@@ -2020,7 +2378,7 @@ export function initializeAI() {
 
 
 // ============================================================
-// INITIALIZE AFTER DOM
+// DOM INITIALIZATION
 // ============================================================
 
 if (
@@ -2040,5 +2398,5 @@ if (
 
 
 // ============================================================
-// END PART 4
+// END js/ai.js
 // ============================================================
