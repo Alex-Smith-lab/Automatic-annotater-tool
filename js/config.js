@@ -1,34 +1,112 @@
-/* ============================================================
-   CONFIGURATION
-   js/config.js
-============================================================ */
+```js
+// ============================================================
+// ANNOTATION AI
+// CONFIGURATION
+// File: js/config.js
+// ============================================================
 
 export const APP_CONFIG = {
+
+    // --------------------------------------------------------
+    // Application
+    // --------------------------------------------------------
+
     appName: "ANNOTATION AI",
 
-    /*
-     * IMPORTANT:
-     * Put the SAME Supabase project URL and anon/public key
-     * that your original working application uses here.
-     *
-     * Do NOT put the Supabase service_role key in browser code.
-     */
+    version: "1.0.0",
+
+    environment: "production",
+
+
+    // --------------------------------------------------------
+    // Supabase
+    // --------------------------------------------------------
 
     supabaseUrl:
-        window.SUPABASE_URL ||
-        "YOUR_SUPABASE_PROJECT_URL",
+        "https://ozcwfcfcwzjjanxfvico.supabase.co",
 
+    // Supabase publishable key.
+    //
+    // This is safe to use in browser-side Supabase code
+    // when Row Level Security (RLS) is correctly configured.
     supabaseAnonKey:
-        window.SUPABASE_ANON_KEY ||
-        "YOUR_SUPABASE_ANON_KEY",
+        "sb_publishable_KwVoNQtwp23fiZnrqCao_g_ROVmU3KZ",
+
+    // Legacy anon key.
+    //
+    // Kept as a fallback because some Supabase client
+    // configurations use the JWT anon key instead of the
+    // newer sb_publishable_ key.
+    supabaseLegacyAnonKey:
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96Y3dmY2Zjd3pqamFueGZ2aWNvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NTQzODQsImV4cCI6MjEwNDUzMDM4NH0.GcVi9w-OKTOnIj2vio5v81eJaD5RzpOk1oG9hkazCSY",
+
+
+    // --------------------------------------------------------
+    // Authentication
+    // --------------------------------------------------------
+
+    auth: {
+
+        persistSession: true,
+
+        autoRefreshToken: true,
+
+        detectSessionInUrl: true,
+
+        storageKey:
+            "annotation-ai-auth",
+
+        flowType: "pkce"
+    },
+
+
+    // --------------------------------------------------------
+    // Local application session
+    // --------------------------------------------------------
 
     sessionKey:
         "annotationAI_session_v1",
 
+
+    // --------------------------------------------------------
+    // Default user role
+    // --------------------------------------------------------
+
     defaultRole:
         "customer",
 
+
+    // --------------------------------------------------------
+    // Admin
+    // --------------------------------------------------------
+
+    adminEmail:
+        "antonymbali96@gmail.com",
+
+
+    // --------------------------------------------------------
+    // Storage
+    // --------------------------------------------------------
+
+    storage: {
+
+        avatarBucket:
+            "avatars",
+
+        mediaBucket:
+            "media",
+
+        taskBucket:
+            "tasks"
+    },
+
+
+    // --------------------------------------------------------
+    // AI models
+    // --------------------------------------------------------
+
     aiModels: {
+
         detr:
             "Xenova/detr-resnet-50",
 
@@ -39,114 +117,157 @@ export const APP_CONFIG = {
             "Xenova/detr-resnet-50-panoptic"
     },
 
-    aiLabelAliases: {
-        automobile:
-            "car",
 
-        vehicle:
-            "car",
+    // --------------------------------------------------------
+    // Annotation defaults
+    // --------------------------------------------------------
 
-        "motor vehicle":
-            "car",
+    annotation: {
 
-        human:
-            "person",
+        defaultType:
+            "box",
 
-        cyclist:
-            "bicycle",
+        defaultColor:
+            "#22c55e",
 
-        bike:
-            "bicycle"
+        minBoxSize:
+            3,
+
+        maxHistory:
+            100,
+
+        maxAnnotations:
+            5000
+    },
+
+
+    // --------------------------------------------------------
+    // Upload defaults
+    // --------------------------------------------------------
+
+    upload: {
+
+        maxImageSizeMB:
+            50,
+
+        maxVideoSizeMB:
+            500,
+
+        acceptedImages: [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif"
+        ],
+
+        acceptedVideos: [
+            "video/mp4",
+            "video/webm",
+            "video/quicktime",
+            "video/ogg"
+        ]
+    },
+
+
+    // --------------------------------------------------------
+    // Feature switches
+    // --------------------------------------------------------
+
+    features: {
+
+        authentication:
+            true,
+
+        annotations:
+            true,
+
+        video:
+            true,
+
+        image:
+            true,
+
+        ai:
+            true,
+
+        history:
+            true,
+
+        tasks:
+            true,
+
+        admin:
+            true,
+
+        profile:
+            true,
+
+        coworker:
+            true
     }
 };
 
 
-/* ============================================================
-   ROLE HELPERS
-============================================================ */
+// ============================================================
+// VALIDATION
+// ============================================================
 
-export const ROLES = {
-    CUSTOMER: "customer",
-    COWORKER: "coworker",
-    STAFF: "staff",
-    REVIEWER: "reviewer",
-    ADMIN: "admin"
-};
+export function validateConfig() {
 
+    const errors = [];
 
-export function normalizeRole(role) {
-
-    if (!role) {
-        return ROLES.CUSTOMER;
+    if (
+        !APP_CONFIG.supabaseUrl ||
+        APP_CONFIG.supabaseUrl.includes(
+            "YOUR_SUPABASE"
+        )
+    ) {
+        errors.push(
+            "Supabase project URL is missing."
+        );
     }
 
-    return String(role)
-        .trim()
-        .toLowerCase();
+    if (
+        !APP_CONFIG.supabaseAnonKey ||
+        APP_CONFIG.supabaseAnonKey.includes(
+            "YOUR_SUPABASE"
+        )
+    ) {
+        errors.push(
+            "Supabase publishable key is missing."
+        );
+    }
+
+    if (errors.length) {
+
+        console.error(
+            "ANNOTATION AI configuration errors:",
+            errors
+        );
+
+        return false;
+    }
+
+    return true;
 }
 
 
-export function isAdminRole(role) {
+// ============================================================
+// COMPATIBILITY GLOBAL
+// ============================================================
 
-    return normalizeRole(role) ===
-        ROLES.ADMIN;
-}
+window.APP_CONFIG = APP_CONFIG;
 
 
-export function isReviewerRole(role) {
+// ============================================================
+// STARTUP LOG
+// ============================================================
 
-    const normalized =
-        normalizeRole(role);
+if (validateConfig()) {
 
-    return (
-        normalized === ROLES.REVIEWER ||
-        normalized === ROLES.ADMIN
+    console.log(
+        `${APP_CONFIG.appName} configuration loaded.`
     );
+
 }
-
-
-export function isStaffRole(role) {
-
-    const normalized =
-        normalizeRole(role);
-
-    return (
-        normalized === ROLES.STAFF ||
-        normalized === ROLES.REVIEWER ||
-        normalized === ROLES.ADMIN
-    );
-}
-
-
-export function canAnnotateRole(role) {
-
-    const normalized =
-        normalizeRole(role);
-
-    return [
-        ROLES.COWORKER,
-        ROLES.STAFF,
-        ROLES.REVIEWER,
-        ROLES.ADMIN
-    ].includes(normalized);
-}
-
-
-export function canUseUploadRole(role) {
-
-    const normalized =
-        normalizeRole(role);
-
-    /*
-     * Keep customer upload available.
-     * Higher roles also retain access.
-     */
-
-    return [
-        ROLES.CUSTOMER,
-        ROLES.COWORKER,
-        ROLES.STAFF,
-        ROLES.REVIEWER,
-        ROLES.ADMIN
-    ].includes(normalized);
-}
+```
