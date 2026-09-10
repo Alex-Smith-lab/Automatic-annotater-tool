@@ -1,125 +1,134 @@
 // ============================================================
 // ANNOTATION AI
-// CONFIGURATION
+// APPLICATION CONFIGURATION
 // File: js/config.js
 // ============================================================
 
 export const APP_CONFIG = {
 
-    appName: "ANNOTATION AI",
-
-    version: "1.0.0",
-
-    environment: "production",
-
     // --------------------------------------------------------
-    // Supabase
+    // SUPABASE
     // --------------------------------------------------------
 
     supabaseUrl:
         "https://ozcwfcfcwzjjanxfvico.supabase.co",
 
+    supabasePublishableKey:
+        "sb_publishable_KwVoNQtwp23fiZnrqCao_g_ROVmU3KZ",
+
+    /*
+     * Legacy anon key is retained for compatibility.
+     * Do not place a service_role key in browser code.
+     */
+
     supabaseAnonKey:
         "sb_publishable_KwVoNQtwp23fiZnrqCao_g_ROVmU3KZ",
 
-    supabaseLegacyAnonKey:
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96Y3dmY2Zjd3pqamFueGZ2aWNvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NTQzODQsImV4cCI6MjEwNDUzMDM4NH0.GcVi9w-OKTOnIj2vio5v81eJaD5RzpOk1oG9hkazCSY",
 
     // --------------------------------------------------------
-    // Authentication
-    // --------------------------------------------------------
-
-    auth: {
-
-        persistSession: true,
-
-        autoRefreshToken: true,
-
-        detectSessionInUrl: true,
-
-        storageKey:
-            "annotation-ai-auth",
-
-        flowType: "pkce"
-    },
-
-    // --------------------------------------------------------
-    // Local session
-    // --------------------------------------------------------
-
-    sessionKey:
-        "annotationAI_session_v1",
-
-    // --------------------------------------------------------
-    // Default role
+    // AUTH
     // --------------------------------------------------------
 
     defaultRole:
         "customer",
 
-    // --------------------------------------------------------
-    // Admin
-    // --------------------------------------------------------
-
     adminEmail:
         "antonymbali96@gmail.com",
 
+    sessionStorageKey:
+        "annotation_ai_session",
+
+    themeStorageKey:
+        "annotation_theme",
+
+
     // --------------------------------------------------------
-    // Storage
+    // ROLES
     // --------------------------------------------------------
 
-    storage: {
+    roles: [
 
-        avatarBucket:
+        "customer",
+
+        "staff",
+
+        "reviewer",
+
+        "coworker_2d_box",
+
+        "coworker_polygon",
+
+        "coworker_segmentation",
+
+        "admin"
+    ],
+
+
+    // --------------------------------------------------------
+    // WORK ROLE MAPPING
+    // --------------------------------------------------------
+
+    workRoles: {
+
+        "2d_box":
+            "coworker_2d_box",
+
+        polygon:
+            "coworker_polygon",
+
+        segmentation:
+            "coworker_segmentation"
+    },
+
+
+    // --------------------------------------------------------
+    // STORAGE
+    // --------------------------------------------------------
+
+    buckets: {
+
+        avatars:
             "avatars",
 
-        mediaBucket:
-            "media",
-
-        taskBucket:
-            "tasks"
+        taskMedia:
+            "task-media"
     },
+
 
     // --------------------------------------------------------
     // AI
     // --------------------------------------------------------
 
-    aiModels: {
+    ai: {
 
-        detr:
-            "Xenova/detr-resnet-50",
+        models: {
 
-        yolo:
-            "Xenova/yolov9-c",
+            detr:
+                "Xenova/detr-resnet-50",
 
-        panoptic:
-            "Xenova/detr-resnet-50-panoptic"
+            yolo:
+                "Xenova/yolov9-c",
+
+            panoptic:
+                "Xenova/detr-resnet-50-panoptic"
+        },
+
+        defaultModel:
+            "detr",
+
+        confidence:
+            0.35,
+
+        iou:
+            0.45,
+
+        maxDetections:
+            100
     },
 
-    // --------------------------------------------------------
-    // Annotation
-    // --------------------------------------------------------
-
-    annotation: {
-
-        defaultType:
-            "box",
-
-        defaultColor:
-            "#22c55e",
-
-        minBoxSize:
-            3,
-
-        maxHistory:
-            100,
-
-        maxAnnotations:
-            5000
-    },
 
     // --------------------------------------------------------
-    // Upload
+    // UPLOAD
     // --------------------------------------------------------
 
     upload: {
@@ -130,112 +139,113 @@ export const APP_CONFIG = {
         maxVideoSizeMB:
             500,
 
-        acceptedImages: [
+        allowedImageTypes: [
+
             "image/jpeg",
+
             "image/png",
+
             "image/webp",
+
             "image/gif"
         ],
 
-        acceptedVideos: [
+        allowedVideoTypes: [
+
             "video/mp4",
+
             "video/webm",
+
             "video/quicktime",
-            "video/ogg"
+
+            "video/x-matroska"
         ]
     },
 
+
     // --------------------------------------------------------
-    // Features
+    // FEATURES
     // --------------------------------------------------------
 
     features: {
 
-        authentication: true,
+        aiAnnotations:
+            true,
 
-        annotations: true,
+        videoAnnotation:
+            true,
 
-        video: true,
+        polygonAnnotation:
+            true,
 
-        image: true,
+        segmentationAnnotation:
+            true,
 
-        ai: true,
+        classification:
+            true,
 
-        history: true,
+        occlusion:
+            true,
 
-        tasks: true,
+        truncation:
+            true,
 
-        admin: true,
+        tracking:
+            true,
 
-        profile: true,
+        taskHistory:
+            true,
 
-        coworker: true
+        payments:
+            true,
+
+        admin:
+            true,
+
+        coworkerRouting:
+            true
     }
 };
 
 
 // ============================================================
-// ROLE NORMALIZATION
+// ROLE HELPERS
 // ============================================================
 
-export function normalizeRole(role) {
+export function normalizeRole(
+    role
+) {
 
     const value =
-        String(role || "")
+        String(
+            role ||
+            ""
+        )
             .trim()
             .toLowerCase();
 
-    const aliases = {
 
-        user:
-            "customer",
+    if (
+        APP_CONFIG.roles.includes(
+            value
+        )
+    ) {
 
-        customer:
-            "customer",
+        return value;
+    }
 
-        client:
-            "customer",
 
-        annotator:
-            "annotator",
-
-        annotation:
-            "annotator",
-
-        reviewer:
-            "reviewer",
-
-        review:
-            "reviewer",
-
-        staff:
-            "staff",
-
-        coworker:
-            "staff",
-
-        worker:
-            "staff",
-
-        admin:
-            "admin",
-
-        administrator:
-            "admin"
-    };
-
-    return (
-        aliases[value] ||
-        APP_CONFIG.defaultRole
-    );
+    return APP_CONFIG.defaultRole;
 }
 
 
 // ============================================================
-// ROLE CHECKS
+// ADMIN
 // ============================================================
 
-export function isAdminRole(role) {
+export function isAdminRole(
+    role
+) {
 
     return (
         normalizeRole(role) ===
@@ -244,42 +254,82 @@ export function isAdminRole(role) {
 }
 
 
-export function isStaffRole(role) {
+// ============================================================
+// STAFF
+// ============================================================
+
+export function isStaffRole(
+    role
+) {
 
     const normalized =
         normalizeRole(role);
 
+
     return (
-        normalized === "staff" ||
-        normalized === "admin"
+        normalized ===
+            "staff" ||
+
+        normalized ===
+            "admin"
     );
 }
 
 
-export function isReviewerRole(role) {
+// ============================================================
+// REVIEWER
+// ============================================================
+
+export function isReviewerRole(
+    role
+) {
 
     const normalized =
         normalizeRole(role);
 
+
     return (
-        normalized === "reviewer" ||
-        normalized === "staff" ||
-        normalized === "admin"
+
+        normalized ===
+            "reviewer" ||
+
+        normalized ===
+            "staff" ||
+
+        normalized ===
+            "admin"
     );
 }
 
 
-export function canAnnotateRole(role) {
+// ============================================================
+// ANNOTATION PERMISSION
+// ============================================================
+
+export function canAnnotateRole(
+    role
+) {
 
     const normalized =
         normalizeRole(role);
+
 
     return [
+
         "customer",
-        "annotator",
-        "reviewer",
+
         "staff",
+
+        "reviewer",
+
+        "coworker_2d_box",
+
+        "coworker_polygon",
+
+        "coworker_segmentation",
+
         "admin"
+
     ].includes(
         normalized
     );
@@ -287,66 +337,113 @@ export function canAnnotateRole(role) {
 
 
 // ============================================================
-// VALIDATION
+// COWORKER ROLE
 // ============================================================
 
-export function validateConfig() {
+export function isCoworkerRole(
+    role
+) {
 
-    const errors = [];
+    return [
 
-    if (
-        !APP_CONFIG.supabaseUrl ||
-        APP_CONFIG.supabaseUrl.includes(
-            "YOUR_SUPABASE"
-        )
-    ) {
+        "coworker_2d_box",
 
-        errors.push(
-            "Supabase project URL is missing."
-        );
-    }
+        "coworker_polygon",
 
-    if (
-        !APP_CONFIG.supabaseAnonKey ||
-        APP_CONFIG.supabaseAnonKey.includes(
-            "YOUR_SUPABASE"
-        )
-    ) {
+        "coworker_segmentation"
 
-        errors.push(
-            "Supabase publishable key is missing."
-        );
-    }
-
-    if (errors.length) {
-
-        console.error(
-            "ANNOTATION AI configuration errors:",
-            errors
-        );
-
-        return false;
-    }
-
-    return true;
+    ].includes(
+        normalizeRole(role)
+    );
 }
 
 
 // ============================================================
-// GLOBAL COMPATIBILITY
+// ALL ACCESS
 // ============================================================
 
-window.APP_CONFIG =
-    APP_CONFIG;
+export function hasAllAccessRole(
+    role
+) {
+
+    const normalized =
+        normalizeRole(role);
 
 
-// ============================================================
-// STARTUP LOG
-// ============================================================
+    return (
 
-if (validateConfig()) {
+        normalized ===
+            "staff" ||
 
-    console.log(
-        `${APP_CONFIG.appName} configuration loaded.`
+        normalized ===
+            "admin"
     );
+}
+
+
+// ============================================================
+// ROLE → ANNOTATION TYPE
+// ============================================================
+
+export function annotationTypeForRole(
+    role
+) {
+
+    switch (
+        normalizeRole(role)
+    ) {
+
+        case "coworker_2d_box":
+
+            return "box";
+
+
+        case "coworker_polygon":
+
+            return "polygon";
+
+
+        case "coworker_segmentation":
+
+            return "segmentation";
+
+
+        default:
+
+            return null;
+    }
+}
+
+
+// ============================================================
+// ROLE → WORK TYPE
+// ============================================================
+
+export function workTypeForRole(
+    role
+) {
+
+    switch (
+        normalizeRole(role)
+    ) {
+
+        case "coworker_2d_box":
+
+            return "2d_box";
+
+
+        case "coworker_polygon":
+
+            return "polygon";
+
+
+        case "coworker_segmentation":
+
+            return "segmentation";
+
+
+        default:
+
+            return null;
+    }
 }
