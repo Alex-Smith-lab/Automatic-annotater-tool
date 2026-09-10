@@ -6,7 +6,6 @@
 
 import {
     state,
-    $,
     canvas,
     ctx,
     emit,
@@ -20,13 +19,20 @@ import {
 
 
 // ============================================================
-// DOM REFERENCES
+// DOM HELPER
+// IMPORTANT:
+// Keep $ local to this module.
+// Do NOT import $ from annotation.js.
 // ============================================================
 
-const mediaInput =
-    $("mediaInput") ||
-    $("workbenchUpload") ||
-    $("customerUploadPanel");
+function $(id) {
+    return document.getElementById(id);
+}
+
+
+// ============================================================
+// DOM REFERENCES
+// ============================================================
 
 const sourceVideo =
     $("sourceVideo");
@@ -56,10 +62,6 @@ const filmstripCurrentLabel =
 
 let objectURL = null;
 
-let videoSeekRequest = null;
-
-let videoFrameTimer = null;
-
 let filmstripImages = [];
 
 let filmstripGenerating = false;
@@ -68,30 +70,64 @@ let mediaLoadToken = 0;
 
 let resizeObserver = null;
 
+let mediaInitialized = false;
+
+let mediaInputBound = false;
+
+let videoEventsBound = false;
+
+let dragDropBound = false;
+
+let playbackButtonsBound = false;
+
+let keyboardControlsBound = false;
+
+let resizeBound = false;
+
+let filmstripControlsBound = false;
+
+let frameSliderBound = false;
+
 
 // ============================================================
 // SAFE ELEMENT HELPERS
 // ============================================================
 
 function showElement(el, show = true) {
-    if (!el) return;
+    if (!el) {
+        return;
+    }
 
-    el.style.display = show ? "" : "none";
+    el.style.display =
+        show ? "" : "none";
+
+    el.hidden = !show;
 }
 
 
 function setText(el, text) {
-    if (!el) return;
+    if (!el) {
+        return;
+    }
 
-    el.textContent = text;
+    el.textContent =
+        String(text ?? "");
 }
 
 
+// ============================================================
+// OBJECT URL CLEANUP
+// ============================================================
+
 function revokeObjectURL() {
-    if (!objectURL) return;
+    if (!objectURL) {
+        return;
+    }
 
     try {
-        URL.revokeObjectURL(objectURL);
+        URL.revokeObjectURL(
+            objectURL
+        );
     } catch (_) {
         // Ignore cleanup errors.
     }
@@ -104,27 +140,44 @@ function revokeObjectURL() {
 // MEDIA TYPE
 // ============================================================
 
-function detectMediaType(file) {
-    if (!file) return null;
+export function detectMediaType(file) {
+    if (!file) {
+        return null;
+    }
 
-    const type = String(file.type || "").toLowerCase();
+    const type =
+        String(
+            file.type || ""
+        ).toLowerCase();
 
-    if (type.startsWith("video/")) {
+    if (
+        type.startsWith("video/")
+    ) {
         return "video";
     }
 
-    if (type.startsWith("image/")) {
+    if (
+        type.startsWith("image/")
+    ) {
         return "image";
     }
 
     const name =
-        String(file.name || "").toLowerCase();
+        String(
+            file.name || ""
+        ).toLowerCase();
 
-    if (/\.(mp4|webm|mov|m4v|avi|mkv|ogv)$/i.test(name)) {
+    if (
+        /\.(mp4|webm|mov|m4v|avi|mkv|ogv)$/i
+            .test(name)
+    ) {
         return "video";
     }
 
-    if (/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(name)) {
+    if (
+        /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i
+            .test(name)
+    ) {
         return "image";
     }
 
@@ -141,22 +194,8 @@ export function cleanupMedia() {
 
     stopVideoPlayback();
 
-    if (videoSeekRequest) {
-        try {
-            videoSeekRequest();
-        } catch (_) {
-            // Ignore.
-        }
-
-        videoSeekRequest = null;
-    }
-
-    if (videoFrameTimer) {
-        clearTimeout(videoFrameTimer);
-        videoFrameTimer = null;
-    }
-
     filmstripImages = [];
+
     filmstripGenerating = false;
 
     revokeObjectURL();
@@ -169,13 +208,17 @@ export function cleanupMedia() {
         }
 
         try {
-            sourceVideo.removeAttribute("src");
+            sourceVideo.removeAttribute(
+                "src"
+            );
+
             sourceVideo.load();
         } catch (_) {
             // Ignore.
         }
 
-        sourceVideo.style.display = "none";
+        sourceVideo.style.display =
+            "none";
     }
 
     if (state.image) {
@@ -188,18 +231,27 @@ export function cleanupMedia() {
     }
 
     state.image = null;
+
     state.imageURL = null;
+
     state.videoURL = null;
 
     state.videoDuration = 0;
+
     state.fps = 30;
+
     state.currentFrame = 0;
+
     state.totalFrames = 0;
+
     state.currentTime = 0;
 
     state.videoPlaying = false;
+
     state.videoSeeking = false;
+
     state.frameCaptureBusy = false;
+
     state.pendingVideoRestore = null;
 
     clearFrameAnnotations();
@@ -208,12 +260,19 @@ export function cleanupMedia() {
         filmstripTrack.innerHTML = "";
     }
 
-    showElement(filmstripBar, false);
+    showElement(
+        filmstripBar,
+        false
+    );
 
-    showElement(emptyWorkspace, true);
+    showElement(
+        emptyWorkspace,
+        true
+    );
 
     if (annotationCanvas) {
-        annotationCanvas.style.display = "";
+        annotationCanvas.style.display =
+            "";
     }
 
     if (ctx && canvas) {
@@ -230,6 +289,7 @@ export function cleanupMedia() {
     }
 
     updateCounts();
+
     updateAnnotationsList();
 
     render();
@@ -237,21 +297,26 @@ export function cleanupMedia() {
 
 
 // ============================================================
-// RESET ANNOTATION STATE FOR NEW MEDIA
+// RESET ANNOTATIONS FOR NEW MEDIA
 // ============================================================
 
 function resetAnnotationsForNewMedia() {
     state.annotations = [];
+
     state.selectedId = null;
+
     state.hoveredId = null;
 
     state.nextId = 1;
 
     state.history = [];
+
     state.historyIndex = -1;
 
     state.drawing = false;
+
     state.drawStart = null;
+
     state.drawCurrent = null;
 
     state.polygonPoints = [];
@@ -259,6 +324,7 @@ function resetAnnotationsForNewMedia() {
     clearFrameAnnotations();
 
     updateCounts();
+
     updateAnnotationsList();
 }
 
@@ -268,15 +334,21 @@ function resetAnnotationsForNewMedia() {
 // ============================================================
 
 export function loadImageFile(file) {
-    if (!file) return Promise.resolve(false);
-
-    const mediaType = detectMediaType(file);
-
-    if (mediaType !== "image") {
+    if (!file) {
         return Promise.resolve(false);
     }
 
-    const token = ++mediaLoadToken;
+    const mediaType =
+        detectMediaType(file);
+
+    if (
+        mediaType !== "image"
+    ) {
+        return Promise.resolve(false);
+    }
+
+    const token =
+        ++mediaLoadToken;
 
     cleanupMedia();
 
@@ -284,78 +356,114 @@ export function loadImageFile(file) {
 
     state.mediaType = "image";
 
-    const url = URL.createObjectURL(file);
+    const url =
+        URL.createObjectURL(file);
 
     objectURL = url;
 
     state.imageURL = url;
 
-    return new Promise((resolve) => {
-        const image = new Image();
+    return new Promise(
+        resolve => {
+            const image =
+                new Image();
 
-        image.onload = () => {
-            if (token !== mediaLoadToken) {
-                resolve(false);
-                return;
-            }
+            image.onload = () => {
+                if (
+                    token !==
+                    mediaLoadToken
+                ) {
+                    resolve(false);
+                    return;
+                }
 
-            state.image = image;
+                state.image =
+                    image;
 
-            state.imageURL = url;
+                state.imageURL =
+                    url;
 
-            state.videoURL = null;
+                state.videoURL =
+                    null;
 
-            state.videoDuration = 0;
+                state.videoDuration =
+                    0;
 
-            state.currentFrame = 0;
+                state.currentFrame =
+                    0;
 
-            state.totalFrames = 1;
+                state.totalFrames =
+                    1;
 
-            state.currentTime = 0;
+                state.currentTime =
+                    0;
 
-            state.videoPlaying = false;
+                state.videoPlaying =
+                    false;
 
-            showElement(emptyWorkspace, false);
+                showElement(
+                    emptyWorkspace,
+                    false
+                );
 
-            if (sourceVideo) {
-                sourceVideo.style.display = "none";
-            }
+                if (sourceVideo) {
+                    sourceVideo.style.display =
+                        "none";
+                }
 
-            if (annotationCanvas) {
-                annotationCanvas.style.display = "";
-            }
+                if (annotationCanvas) {
+                    annotationCanvas.style.display =
+                        "";
+                }
 
-            resizeCanvasToMedia();
-
-            render();
-
-            emit("mediaLoaded", {
-                type: "image",
-                file,
-                width: image.naturalWidth || image.width,
-                height: image.naturalHeight || image.height
-            });
-
-            resolve(true);
-        };
-
-        image.onerror = () => {
-            if (token === mediaLoadToken) {
-                state.image = null;
-                state.imageURL = null;
-
-                revokeObjectURL();
-
-                showElement(emptyWorkspace, true);
+                resizeCanvasToMedia();
 
                 render();
-            }
 
-            resolve(false);
-        };
+                emit(
+                    "mediaLoaded",
+                    {
+                        type: "image",
+                        file,
+                        width:
+                            image.naturalWidth ||
+                            image.width,
+                        height:
+                            image.naturalHeight ||
+                            image.height
+                    }
+                );
 
-        image.src = url;
-    });
+                resolve(true);
+            };
+
+            image.onerror = () => {
+                if (
+                    token ===
+                    mediaLoadToken
+                ) {
+                    state.image =
+                        null;
+
+                    state.imageURL =
+                        null;
+
+                    revokeObjectURL();
+
+                    showElement(
+                        emptyWorkspace,
+                        true
+                    );
+
+                    render();
+                }
+
+                resolve(false);
+            };
+
+            image.src = url;
+        }
+    );
 }
 
 
@@ -364,135 +472,191 @@ export function loadImageFile(file) {
 // ============================================================
 
 export function loadVideoFile(file) {
-    if (!file) return Promise.resolve(false);
-
-    const mediaType = detectMediaType(file);
-
-    if (mediaType !== "video") {
+    if (!file) {
         return Promise.resolve(false);
     }
 
-    const token = ++mediaLoadToken;
+    const mediaType =
+        detectMediaType(file);
+
+    if (
+        mediaType !== "video"
+    ) {
+        return Promise.resolve(false);
+    }
+
+    const token =
+        ++mediaLoadToken;
 
     cleanupMedia();
 
     resetAnnotationsForNewMedia();
 
-    state.mediaType = "video";
+    state.mediaType =
+        "video";
 
-    const url = URL.createObjectURL(file);
+    const url =
+        URL.createObjectURL(file);
 
     objectURL = url;
 
-    state.videoURL = url;
+    state.videoURL =
+        url;
 
-    state.imageURL = null;
+    state.imageURL =
+        null;
 
-    return new Promise((resolve) => {
-        if (!sourceVideo) {
-            resolve(false);
-            return;
-        }
-
-        sourceVideo.style.display = "";
-
-        sourceVideo.muted = true;
-
-        sourceVideo.playsInline = true;
-
-        sourceVideo.preload = "auto";
-
-        sourceVideo.src = url;
-
-        const loaded = () => {
-            if (token !== mediaLoadToken) {
+    return new Promise(
+        resolve => {
+            if (!sourceVideo) {
                 resolve(false);
                 return;
             }
 
-            const duration =
-                Number(sourceVideo.duration);
+            sourceVideo.style.display =
+                "";
 
-            state.videoDuration =
-                Number.isFinite(duration)
-                    ? duration
-                    : 0;
+            sourceVideo.muted =
+                true;
 
-            state.fps =
-                state.fps > 0
-                    ? state.fps
-                    : 30;
+            sourceVideo.playsInline =
+                true;
 
-            state.totalFrames =
-                Math.max(
-                    1,
-                    Math.round(
-                        state.videoDuration *
-                        state.fps
+            sourceVideo.preload =
+                "auto";
+
+            sourceVideo.src =
+                url;
+
+            const loaded = () => {
+                if (
+                    token !==
+                    mediaLoadToken
+                ) {
+                    resolve(false);
+                    return;
+                }
+
+                const duration =
+                    Number(
+                        sourceVideo.duration
+                    );
+
+                state.videoDuration =
+                    Number.isFinite(
+                        duration
                     )
+                        ? duration
+                        : 0;
+
+                state.fps =
+                    Number(state.fps) > 0
+                        ? Number(state.fps)
+                        : 30;
+
+                state.totalFrames =
+                    Math.max(
+                        1,
+                        Math.round(
+                            state.videoDuration *
+                            state.fps
+                        )
+                    );
+
+                state.currentFrame =
+                    0;
+
+                state.currentTime =
+                    0;
+
+                state.videoPlaying =
+                    false;
+
+                showElement(
+                    emptyWorkspace,
+                    false
                 );
 
-            state.currentFrame = 0;
+                if (annotationCanvas) {
+                    annotationCanvas.style.display =
+                        "";
+                }
 
-            state.currentTime = 0;
+                resizeCanvasToMedia();
 
-            state.videoPlaying = false;
+                render();
 
-            showElement(emptyWorkspace, false);
+                updateFilmstrip();
 
-            if (annotationCanvas) {
-                annotationCanvas.style.display = "";
-            }
+                updateVideoLabels();
 
-            resizeCanvasToMedia();
+                updateFrameSlider();
 
-            render();
+                emit(
+                    "mediaLoaded",
+                    {
+                        type: "video",
+                        file,
+                        duration:
+                            state.videoDuration,
+                        fps:
+                            state.fps
+                    }
+                );
 
-            updateFilmstrip();
+                resolve(true);
+            };
 
-            emit("mediaLoaded", {
-                type: "video",
-                file,
-                duration: state.videoDuration,
-                fps: state.fps
-            });
+            const error = event => {
+                if (
+                    token !==
+                    mediaLoadToken
+                ) {
+                    resolve(false);
+                    return;
+                }
 
-            resolve(true);
-        };
+                console.error(
+                    "Video loading error:",
+                    event
+                );
 
-        const error = () => {
-            if (token !== mediaLoadToken) {
+                state.videoURL =
+                    null;
+
+                showElement(
+                    emptyWorkspace,
+                    true
+                );
+
+                render();
+
                 resolve(false);
-                return;
+            };
+
+            sourceVideo.addEventListener(
+                "loadedmetadata",
+                loaded,
+                {
+                    once: true
+                }
+            );
+
+            sourceVideo.addEventListener(
+                "error",
+                error,
+                {
+                    once: true
+                }
+            );
+
+            try {
+                sourceVideo.load();
+            } catch (_) {
+                resolve(false);
             }
-
-            state.videoURL = null;
-
-            showElement(emptyWorkspace, true);
-
-            render();
-
-            resolve(false);
-        };
-
-        sourceVideo.addEventListener(
-            "loadedmetadata",
-            loaded,
-            { once: true }
-        );
-
-        sourceVideo.addEventListener(
-            "error",
-            error,
-            { once: true }
-        );
-
-        try {
-            sourceVideo.load();
-        } catch (_) {
-            // Ignore.
         }
-    });
+    );
 }
 
 
@@ -501,22 +665,32 @@ export function loadVideoFile(file) {
 // ============================================================
 
 export async function loadMediaFile(file) {
-    if (!file) return false;
+    if (!file) {
+        return false;
+    }
 
-    const type = detectMediaType(file);
+    const type =
+        detectMediaType(file);
 
-    if (type === "image") {
+    if (
+        type === "image"
+    ) {
         return loadImageFile(file);
     }
 
-    if (type === "video") {
+    if (
+        type === "video"
+    ) {
         return loadVideoFile(file);
     }
 
-    emit("mediaError", {
-        message:
-            "Unsupported media type."
-    });
+    emit(
+        "mediaError",
+        {
+            message:
+                "Unsupported media type. Please select an image or video."
+        }
+    );
 
     return false;
 }
@@ -527,28 +701,43 @@ export async function loadMediaFile(file) {
 // ============================================================
 
 function bindMediaInput() {
+    if (mediaInputBound) {
+        return;
+    }
+
     const input =
         $("mediaInput");
 
-    if (!input) return;
+    if (!input) {
+        return;
+    }
+
+    mediaInputBound =
+        true;
 
     input.addEventListener(
         "change",
-        async (event) => {
+        async event => {
             const files =
-                event.target.files;
+                event.target?.files;
 
-            if (!files || !files.length) {
+            if (
+                !files ||
+                !files.length
+            ) {
                 return;
             }
 
-            const file = files[0];
+            const file =
+                files[0];
 
-            await loadMediaFile(file);
+            await loadMediaFile(
+                file
+            );
 
-            // Allow selecting the same file again.
             try {
-                input.value = "";
+                input.value =
+                    "";
             } catch (_) {
                 // Ignore.
             }
@@ -558,10 +747,14 @@ function bindMediaInput() {
 
 
 // ============================================================
-// DRAG & DROP
+// DRAG AND DROP
 // ============================================================
 
 function bindDragAndDrop() {
+    if (dragDropBound) {
+        return;
+    }
+
     const dropTargets = [
         $("canvasWorkspace"),
         $("coworkerWorkbench"),
@@ -569,12 +762,22 @@ function bindDragAndDrop() {
         $("annotationCanvas")
     ].filter(Boolean);
 
-    if (!dropTargets.length) return;
+    if (
+        !dropTargets.length
+    ) {
+        return;
+    }
 
-    for (const target of dropTargets) {
+    dragDropBound =
+        true;
+
+    for (
+        const target
+        of dropTargets
+    ) {
         target.addEventListener(
             "dragover",
-            (event) => {
+            event => {
                 event.preventDefault();
 
                 target.classList.add(
@@ -594,7 +797,7 @@ function bindDragAndDrop() {
 
         target.addEventListener(
             "drop",
-            async (event) => {
+            async event => {
                 event.preventDefault();
 
                 target.classList.remove(
@@ -604,7 +807,10 @@ function bindDragAndDrop() {
                 const files =
                     event.dataTransfer?.files;
 
-                if (!files || !files.length) {
+                if (
+                    !files ||
+                    !files.length
+                ) {
                     return;
                 }
 
@@ -618,17 +824,21 @@ function bindDragAndDrop() {
 
 
 // ============================================================
-// CANVAS MEDIA SIZE
+// RESIZE CANVAS TO MEDIA
 // ============================================================
 
 export function resizeCanvasToMedia() {
-    if (!canvas) return;
+    if (!canvas) {
+        return;
+    }
 
     let width = 1;
+
     let height = 1;
 
     if (
-        state.mediaType === "image" &&
+        state.mediaType ===
+            "image" &&
         state.image
     ) {
         width =
@@ -643,7 +853,8 @@ export function resizeCanvasToMedia() {
     }
 
     else if (
-        state.mediaType === "video" &&
+        state.mediaType ===
+            "video" &&
         sourceVideo
     ) {
         width =
@@ -655,23 +866,32 @@ export function resizeCanvasToMedia() {
             1;
     }
 
-    canvas.width = width;
+    canvas.width =
+        Math.max(
+            1,
+            width
+        );
 
-    canvas.height = height;
+    canvas.height =
+        Math.max(
+            1,
+            height
+        );
 
     render();
 }
 
 
 // ============================================================
-// VIDEO FRAME CAPTURE
+// CAPTURE VIDEO FRAME
 // ============================================================
 
 export function captureVideoFrame(
     time = state.currentTime
 ) {
     if (
-        state.mediaType !== "video" ||
+        state.mediaType !==
+            "video" ||
         !sourceVideo
     ) {
         return Promise.resolve(false);
@@ -693,73 +913,106 @@ export function captureVideoFrame(
             )
         );
 
-    return new Promise((resolve) => {
-        const drawFrame = () => {
-            try {
-                state.currentTime =
-                    Number(sourceVideo.currentTime) ||
-                    targetTime;
+    return new Promise(
+        resolve => {
+            let finished =
+                false;
 
-                state.currentFrame =
-                    Math.max(
-                        0,
-                        Math.round(
-                            state.currentTime *
-                            state.fps
-                        )
+            const finish =
+                success => {
+                    if (finished) {
+                        return;
+                    }
+
+                    finished =
+                        true;
+
+                    resolve(
+                        success
+                    );
+                };
+
+            const drawFrame =
+                () => {
+                    try {
+                        state.currentTime =
+                            Number(
+                                sourceVideo.currentTime
+                            ) ||
+                            targetTime;
+
+                        state.currentFrame =
+                            Math.max(
+                                0,
+                                Math.round(
+                                    state.currentTime *
+                                    state.fps
+                                )
+                            );
+
+                        resizeCanvasToMedia();
+
+                        render();
+
+                        emit(
+                            "videoFrameCaptured",
+                            {
+                                time:
+                                    state.currentTime,
+                                frame:
+                                    state.currentFrame
+                            }
+                        );
+
+                        finish(true);
+                    } catch (_) {
+                        finish(false);
+                    }
+                };
+
+            if (
+                Math.abs(
+                    (
+                        Number(
+                            sourceVideo.currentTime
+                        ) || 0
+                    ) -
+                    targetTime
+                ) < 0.001
+            ) {
+                drawFrame();
+
+                return;
+            }
+
+            const onSeeked =
+                () => {
+                    sourceVideo.removeEventListener(
+                        "seeked",
+                        onSeeked
                     );
 
-                resizeCanvasToMedia();
+                    drawFrame();
+                };
 
-                render();
+            sourceVideo.addEventListener(
+                "seeked",
+                onSeeked
+            );
 
-                emit("videoFrameCaptured", {
-                    time: state.currentTime,
-                    frame: state.currentFrame
-                });
-
-                resolve(true);
+            try {
+                sourceVideo.currentTime =
+                    targetTime;
             } catch (_) {
-                resolve(false);
+                sourceVideo.removeEventListener(
+                    "seeked",
+                    onSeeked
+                );
+
+                finish(false);
             }
-        };
-
-        if (
-            Math.abs(
-                sourceVideo.currentTime -
-                targetTime
-            ) < 0.001
-        ) {
-            drawFrame();
-            return;
         }
-
-        const onSeeked = () => {
-            sourceVideo.removeEventListener(
-                "seeked",
-                onSeeked
-            );
-
-            drawFrame();
-        };
-
-        sourceVideo.addEventListener(
-            "seeked",
-            onSeeked
-        );
-
-        try {
-            sourceVideo.currentTime =
-                targetTime;
-        } catch (_) {
-            sourceVideo.removeEventListener(
-                "seeked",
-                onSeeked
-            );
-
-            resolve(false);
-        }
-    });
+    );
 }
 
 
@@ -772,7 +1025,8 @@ export function seekVideoFrame(
     options = {}
 ) {
     if (
-        state.mediaType !== "video" ||
+        state.mediaType !==
+            "video" ||
         !sourceVideo
     ) {
         return Promise.resolve(false);
@@ -788,11 +1042,15 @@ export function seekVideoFrame(
 
     if (isTime) {
         time =
-            Number(frameOrTime) || 0;
+            Number(
+                frameOrTime
+            ) || 0;
     } else {
         const frame =
             Math.round(
-                Number(frameOrTime) || 0
+                Number(
+                    frameOrTime
+                ) || 0
             );
 
         time =
@@ -801,7 +1059,9 @@ export function seekVideoFrame(
                 : 0;
     }
 
-    if (state.videoDuration > 0) {
+    if (
+        state.videoDuration > 0
+    ) {
         time =
             Math.max(
                 0,
@@ -811,103 +1071,156 @@ export function seekVideoFrame(
                 )
             );
     } else {
-        time = Math.max(0, time);
+        time =
+            Math.max(
+                0,
+                time
+            );
     }
 
     const oldFrame =
         state.currentFrame;
 
     if (
-        savePrevious &&
-        state.mediaType === "video"
+        savePrevious
     ) {
         try {
-            saveFrame(oldFrame);
+            saveFrame(
+                oldFrame
+            );
         } catch (_) {
             // Ignore.
         }
     }
 
-    state.videoSeeking = true;
+    state.videoSeeking =
+        true;
 
-    return captureVideoFrame(time)
-        .then((success) => {
-            if (!success) {
-                state.videoSeeking = false;
-                return false;
-            }
+    return captureVideoFrame(
+        time
+    )
+        .then(
+            success => {
+                if (!success) {
+                    state.videoSeeking =
+                        false;
 
-            state.currentTime =
-                Number(sourceVideo.currentTime) ||
-                time;
+                    return false;
+                }
 
-            state.currentFrame =
-                Math.max(
-                    0,
-                    Math.round(
-                        state.currentTime *
-                        state.fps
-                    )
+                state.currentTime =
+                    Number(
+                        sourceVideo.currentTime
+                    ) ||
+                    time;
+
+                state.currentFrame =
+                    Math.max(
+                        0,
+                        Math.round(
+                            state.currentTime *
+                            state.fps
+                        )
+                    );
+
+                if (
+                    loadAnnotations
+                ) {
+                    try {
+                        loadFrame(
+                            state.currentFrame
+                        );
+                    } catch (_) {
+                        // Ignore.
+                    }
+                }
+
+                state.videoSeeking =
+                    false;
+
+                updateFilmstripPosition();
+
+                updateVideoLabels();
+
+                updateFrameSlider();
+
+                render();
+
+                emit(
+                    "frameChanged",
+                    {
+                        frame:
+                            state.currentFrame,
+                        time:
+                            state.currentTime
+                    }
                 );
 
-            if (loadAnnotations) {
-                try {
-                    loadFrame(
-                        state.currentFrame
-                    );
-                } catch (_) {
-                    // Ignore.
-                }
+                return true;
             }
+        )
+        .catch(
+            error => {
+                console.warn(
+                    "Unable to seek video frame:",
+                    error
+                );
 
-            state.videoSeeking = false;
+                state.videoSeeking =
+                    false;
 
-            updateFilmstripPosition();
-
-            render();
-
-            emit("frameChanged", {
-                frame: state.currentFrame,
-                time: state.currentTime
-            });
-
-            return true;
-        })
-        .catch(() => {
-            state.videoSeeking = false;
-            return false;
-        });
+                return false;
+            }
+        );
 }
 
 
 // ============================================================
-// CURRENT FRAME HELPERS
+// CURRENT FRAME
 // ============================================================
 
 export function getCurrentFrame() {
-    if (state.mediaType !== "video") {
+    if (
+        state.mediaType !==
+            "video"
+    ) {
         return 0;
     }
 
     return Math.max(
         0,
         Math.round(
-            state.currentFrame || 0
+            Number(
+                state.currentFrame
+            ) || 0
         )
     );
 }
 
 
+// ============================================================
+// CURRENT TIME
+// ============================================================
+
 export function getCurrentTime() {
-    if (state.mediaType !== "video") {
+    if (
+        state.mediaType !==
+            "video"
+    ) {
         return 0;
     }
 
     if (sourceVideo) {
         const current =
-            Number(sourceVideo.currentTime);
+            Number(
+                sourceVideo.currentTime
+            );
 
-        if (Number.isFinite(current)) {
+        if (
+            Number.isFinite(
+                current
+            )
+        ) {
             return current;
         }
     }
@@ -924,29 +1237,28 @@ export function getCurrentTime() {
 
 export function nextFrame() {
     if (
-        state.mediaType !== "video"
+        state.mediaType !==
+            "video"
     ) {
         return;
     }
 
     const frame =
-        getCurrentFrame() + 1;
+        getCurrentFrame() +
+        1;
 
-    if (
-        state.totalFrames > 0 &&
-        frame >= state.totalFrames
-    ) {
-        seekVideoFrame(
-            Math.max(
-                0,
-                state.totalFrames - 1
-            )
+    const lastFrame =
+        Math.max(
+            0,
+            state.totalFrames - 1
         );
 
-        return;
-    }
-
-    seekVideoFrame(frame);
+    seekVideoFrame(
+        Math.min(
+            frame,
+            lastFrame
+        )
+    );
 }
 
 
@@ -956,7 +1268,8 @@ export function nextFrame() {
 
 export function previousFrame() {
     if (
-        state.mediaType !== "video"
+        state.mediaType !==
+            "video"
     ) {
         return;
     }
@@ -976,7 +1289,8 @@ export function previousFrame() {
 
 export function firstFrame() {
     if (
-        state.mediaType !== "video"
+        state.mediaType !==
+            "video"
     ) {
         return;
     }
@@ -991,18 +1305,18 @@ export function firstFrame() {
 
 export function lastFrame() {
     if (
-        state.mediaType !== "video"
+        state.mediaType !==
+            "video"
     ) {
         return;
     }
 
-    const last =
+    seekVideoFrame(
         Math.max(
             0,
             state.totalFrames - 1
-        );
-
-    seekVideoFrame(last);
+        )
+    );
 }
 
 
@@ -1012,7 +1326,8 @@ export function lastFrame() {
 
 export async function playVideo() {
     if (
-        state.mediaType !== "video" ||
+        state.mediaType !==
+            "video" ||
         !sourceVideo
     ) {
         return false;
@@ -1021,13 +1336,22 @@ export async function playVideo() {
     try {
         await sourceVideo.play();
 
-        state.videoPlaying = true;
+        state.videoPlaying =
+            true;
 
-        emit("videoPlay");
+        emit(
+            "videoPlay"
+        );
 
         return true;
-    } catch (_) {
-        state.videoPlaying = false;
+    } catch (error) {
+        console.warn(
+            "Unable to play video:",
+            error
+        );
+
+        state.videoPlaying =
+            false;
 
         return false;
     }
@@ -1039,7 +1363,9 @@ export async function playVideo() {
 // ============================================================
 
 export function pauseVideo() {
-    if (!sourceVideo) return;
+    if (!sourceVideo) {
+        return;
+    }
 
     try {
         sourceVideo.pause();
@@ -1047,14 +1373,17 @@ export function pauseVideo() {
         // Ignore.
     }
 
-    state.videoPlaying = false;
+    state.videoPlaying =
+        false;
 
-    emit("videoPause");
+    emit(
+        "videoPause"
+    );
 }
 
 
 // ============================================================
-// TOGGLE PLAYBACK
+// TOGGLE VIDEO
 // ============================================================
 
 export function toggleVideoPlayback() {
@@ -1069,12 +1398,14 @@ export function toggleVideoPlayback() {
 
 
 // ============================================================
-// STOP PLAYBACK
+// STOP VIDEO
 // ============================================================
 
 export function stopVideoPlayback() {
     if (!sourceVideo) {
-        state.videoPlaying = false;
+        state.videoPlaying =
+            false;
+
         return;
     }
 
@@ -1084,7 +1415,8 @@ export function stopVideoPlayback() {
         // Ignore.
     }
 
-    state.videoPlaying = false;
+    state.videoPlaying =
+        false;
 }
 
 
@@ -1093,10 +1425,14 @@ export function stopVideoPlayback() {
 // ============================================================
 
 function handleVideoTimeUpdate() {
-    if (!sourceVideo) return;
+    if (!sourceVideo) {
+        return;
+    }
 
     state.currentTime =
-        Number(sourceVideo.currentTime) || 0;
+        Number(
+            sourceVideo.currentTime
+        ) || 0;
 
     state.currentFrame =
         Math.max(
@@ -1111,27 +1447,33 @@ function handleVideoTimeUpdate() {
 
     updateVideoLabels();
 
+    updateFrameSlider();
+
     render();
 }
 
 
 // ============================================================
-// VIDEO PLAY EVENT
+// VIDEO PLAY
 // ============================================================
 
 function handleVideoPlay() {
-    state.videoPlaying = true;
+    state.videoPlaying =
+        true;
 
-    emit("videoPlay");
+    emit(
+        "videoPlay"
+    );
 }
 
 
 // ============================================================
-// VIDEO PAUSE EVENT
+// VIDEO PAUSE
 // ============================================================
 
 function handleVideoPause() {
-    state.videoPlaying = false;
+    state.videoPlaying =
+        false;
 
     try {
         saveFrame(
@@ -1141,7 +1483,9 @@ function handleVideoPause() {
         // Ignore.
     }
 
-    emit("videoPause");
+    emit(
+        "videoPause"
+    );
 }
 
 
@@ -1150,7 +1494,8 @@ function handleVideoPause() {
 // ============================================================
 
 function handleVideoEnded() {
-    state.videoPlaying = false;
+    state.videoPlaying =
+        false;
 
     if (
         state.videoDuration > 0
@@ -1167,11 +1512,15 @@ function handleVideoEnded() {
 
     updateVideoLabels();
 
+    updateFrameSlider();
+
     updateFilmstripPosition();
 
     render();
 
-    emit("videoEnded");
+    emit(
+        "videoEnded"
+    );
 }
 
 
@@ -1180,14 +1529,20 @@ function handleVideoEnded() {
 // ============================================================
 
 function handleVideoMetadata() {
-    if (!sourceVideo) return;
+    if (!sourceVideo) {
+        return;
+    }
 
     state.videoDuration =
-        Number(sourceVideo.duration) || 0;
+        Number(
+            sourceVideo.duration
+        ) || 0;
 
-    state.currentFrame = 0;
+    state.currentFrame =
+        0;
 
-    state.currentTime = 0;
+    state.currentTime =
+        0;
 
     state.totalFrames =
         Math.max(
@@ -1202,6 +1557,8 @@ function handleVideoMetadata() {
 
     updateVideoLabels();
 
+    updateFrameSlider();
+
     updateFilmstrip();
 
     render();
@@ -1213,7 +1570,8 @@ function handleVideoMetadata() {
 // ============================================================
 
 function handleVideoSeeking() {
-    state.videoSeeking = true;
+    state.videoSeeking =
+        true;
 }
 
 
@@ -1222,10 +1580,13 @@ function handleVideoSeeking() {
 // ============================================================
 
 function handleVideoSeeked() {
-    state.videoSeeking = false;
+    state.videoSeeking =
+        false;
 
     state.currentTime =
-        Number(sourceVideo?.currentTime) || 0;
+        Number(
+            sourceVideo?.currentTime
+        ) || 0;
 
     state.currentFrame =
         Math.max(
@@ -1240,6 +1601,8 @@ function handleVideoSeeked() {
 
     updateVideoLabels();
 
+    updateFrameSlider();
+
     render();
 }
 
@@ -1249,7 +1612,15 @@ function handleVideoSeeked() {
 // ============================================================
 
 function bindVideoEvents() {
-    if (!sourceVideo) return;
+    if (
+        videoEventsBound ||
+        !sourceVideo
+    ) {
+        return;
+    }
+
+    videoEventsBound =
+        true;
 
     sourceVideo.addEventListener(
         "loadedmetadata",
@@ -1289,7 +1660,7 @@ function bindVideoEvents() {
 
 
 // ============================================================
-// VIDEO UI LABELS
+// TIME FORMAT
 // ============================================================
 
 function formatTime(seconds) {
@@ -1300,7 +1671,9 @@ function formatTime(seconds) {
         );
 
     const hours =
-        Math.floor(value / 3600);
+        Math.floor(
+            value / 3600
+        );
 
     const minutes =
         Math.floor(
@@ -1308,22 +1681,35 @@ function formatTime(seconds) {
         );
 
     const secs =
-        Math.floor(value % 60);
+        Math.floor(
+            value % 60
+        );
 
-    if (hours > 0) {
+    if (
+        hours > 0
+    ) {
         return [
-            String(hours).padStart(2, "0"),
-            String(minutes).padStart(2, "0"),
-            String(secs).padStart(2, "0")
+            String(hours)
+                .padStart(2, "0"),
+            String(minutes)
+                .padStart(2, "0"),
+            String(secs)
+                .padStart(2, "0")
         ].join(":");
     }
 
     return [
-        String(minutes).padStart(2, "0"),
-        String(secs).padStart(2, "0")
+        String(minutes)
+            .padStart(2, "0"),
+        String(secs)
+            .padStart(2, "0")
     ].join(":");
 }
 
+
+// ============================================================
+// VIDEO UI LABELS
+// ============================================================
 
 function updateVideoLabels() {
     const time =
@@ -1347,12 +1733,13 @@ function updateVideoLabels() {
 
 
 // ============================================================
-// FILMSTRIP
+// FILMSTRIP COUNT
 // ============================================================
 
 function getFilmstripCount() {
     if (
-        state.mediaType !== "video" ||
+        state.mediaType !==
+            "video" ||
         !state.videoDuration
     ) {
         return 0;
@@ -1366,7 +1753,9 @@ function getFilmstripCount() {
         6,
         Math.min(
             30,
-            Math.round(width / 100)
+            Math.round(
+                width / 100
+            )
         )
     );
 }
@@ -1378,78 +1767,95 @@ function getFilmstripCount() {
 
 export async function generateFilmstrip() {
     if (
-        state.mediaType !== "video" ||
+        state.mediaType !==
+            "video" ||
         !sourceVideo ||
         !state.videoDuration
     ) {
         return [];
     }
 
-    if (filmstripGenerating) {
+    if (
+        filmstripGenerating
+    ) {
         return filmstripImages;
     }
 
-    filmstripGenerating = true;
-
-    const duration =
-        state.videoDuration;
-
-    const count =
-        getFilmstripCount();
-
-    const frames = [];
-
-    const originalTime =
-        Number(sourceVideo.currentTime) || 0;
-
-    const wasPlaying =
-        !sourceVideo.paused;
-
-    if (wasPlaying) {
-        pauseVideo();
-    }
-
-    for (let i = 0; i < count; i += 1) {
-        const ratio =
-            count === 1
-                ? 0
-                : i / (count - 1);
-
-        const time =
-            duration * ratio;
-
-        const image =
-            await captureThumbnail(time);
-
-        if (image) {
-            frames.push({
-                time,
-                image
-            });
-        }
-    }
-
-    filmstripImages = frames;
+    filmstripGenerating =
+        true;
 
     try {
-        await captureVideoFrame(
-            originalTime
-        );
-    } catch (_) {
-        // Ignore.
+        const duration =
+            state.videoDuration;
+
+        const count =
+            getFilmstripCount();
+
+        const frames = [];
+
+        const originalTime =
+            Number(
+                sourceVideo.currentTime
+            ) || 0;
+
+        const wasPlaying =
+            !sourceVideo.paused;
+
+        if (wasPlaying) {
+            pauseVideo();
+        }
+
+        for (
+            let i = 0;
+            i < count;
+            i += 1
+        ) {
+            const ratio =
+                count === 1
+                    ? 0
+                    : i /
+                      (count - 1);
+
+            const time =
+                duration * ratio;
+
+            const image =
+                await captureThumbnail(
+                    time
+                );
+
+            if (image) {
+                frames.push({
+                    time,
+                    image
+                });
+            }
+        }
+
+        filmstripImages =
+            frames;
+
+        try {
+            await captureVideoFrame(
+                originalTime
+            );
+        } catch (_) {
+            // Ignore.
+        }
+
+        renderFilmstrip();
+
+        updateFilmstripPosition();
+
+        if (wasPlaying) {
+            await playVideo();
+        }
+
+        return frames;
+    } finally {
+        filmstripGenerating =
+            false;
     }
-
-    filmstripGenerating = false;
-
-    renderFilmstrip();
-
-    updateFilmstripPosition();
-
-    if (wasPlaying) {
-        playVideo();
-    }
-
-    return frames;
 }
 
 
@@ -1458,106 +1864,134 @@ export async function generateFilmstrip() {
 // ============================================================
 
 function captureThumbnail(time) {
-    return new Promise((resolve) => {
-        if (
-            !sourceVideo ||
-            !sourceVideo.videoWidth ||
-            !sourceVideo.videoHeight
-        ) {
-            resolve(null);
-            return;
-        }
+    return new Promise(
+        resolve => {
+            if (
+                !sourceVideo ||
+                !sourceVideo.videoWidth ||
+                !sourceVideo.videoHeight
+            ) {
+                resolve(null);
+                return;
+            }
 
-        const width =
-            120;
+            const width =
+                120;
 
-        const ratio =
-            sourceVideo.videoHeight /
-            sourceVideo.videoWidth;
+            const ratio =
+                sourceVideo.videoHeight /
+                sourceVideo.videoWidth;
 
-        const height =
-            Math.max(
-                1,
-                Math.round(width * ratio)
-            );
+            const height =
+                Math.max(
+                    1,
+                    Math.round(
+                        width * ratio
+                    )
+                );
 
-        const thumb =
-            document.createElement(
-                "canvas"
-            );
+            const thumb =
+                document.createElement(
+                    "canvas"
+                );
 
-        thumb.width = width;
+            thumb.width =
+                width;
 
-        thumb.height = height;
+            thumb.height =
+                height;
 
-        const thumbnailCtx =
-            thumb.getContext("2d");
+            const thumbnailCtx =
+                thumb.getContext(
+                    "2d"
+                );
 
-        if (!thumbnailCtx) {
-            resolve(null);
-            return;
-        }
+            if (!thumbnailCtx) {
+                resolve(null);
+                return;
+            }
 
-        const oldTime =
-            Number(sourceVideo.currentTime) || 0;
+            const oldTime =
+                Number(
+                    sourceVideo.currentTime
+                ) || 0;
 
-        const onSeeked = () => {
-            sourceVideo.removeEventListener(
+            let finished =
+                false;
+
+            const finish =
+                value => {
+                    if (finished) {
+                        return;
+                    }
+
+                    finished =
+                        true;
+
+                    resolve(value);
+                };
+
+            const onSeeked =
+                () => {
+                    sourceVideo.removeEventListener(
+                        "seeked",
+                        onSeeked
+                    );
+
+                    try {
+                        thumbnailCtx.drawImage(
+                            sourceVideo,
+                            0,
+                            0,
+                            width,
+                            height
+                        );
+
+                        const image =
+                            thumb.toDataURL(
+                                "image/jpeg",
+                                0.75
+                            );
+
+                        try {
+                            sourceVideo.currentTime =
+                                oldTime;
+                        } catch (_) {
+                            // Ignore.
+                        }
+
+                        finish(
+                            image
+                        );
+                    } catch (_) {
+                        finish(null);
+                    }
+                };
+
+            sourceVideo.addEventListener(
                 "seeked",
                 onSeeked
             );
 
             try {
-                thumbnailCtx.drawImage(
-                    sourceVideo,
-                    0,
-                    0,
-                    width,
-                    height
-                );
-
-                const image =
-                    thumb.toDataURL(
-                        "image/jpeg",
-                        0.75
+                sourceVideo.currentTime =
+                    Math.max(
+                        0,
+                        Math.min(
+                            Number(time) || 0,
+                            state.videoDuration
+                        )
                     );
-
-                try {
-                    sourceVideo.currentTime =
-                        oldTime;
-                } catch (_) {
-                    // Ignore.
-                }
-
-                resolve(image);
             } catch (_) {
-                resolve(null);
-            }
-        };
-
-        sourceVideo.addEventListener(
-            "seeked",
-            onSeeked
-        );
-
-        try {
-            sourceVideo.currentTime =
-                Math.max(
-                    0,
-                    Math.min(
-                        time,
-                        state.videoDuration
-                    )
+                sourceVideo.removeEventListener(
+                    "seeked",
+                    onSeeked
                 );
-        } catch (_) {
-            sourceVideo.removeEventListener(
-                "seeked",
-                onSeeked
-            );
 
-            resolve(null);
+                finish(null);
+            }
         }
-    });
+    );
 }
 
 
@@ -1566,11 +2000,16 @@ function captureThumbnail(time) {
 // ============================================================
 
 function renderFilmstrip() {
-    if (!filmstripTrack) return;
+    if (!filmstripTrack) {
+        return;
+    }
 
-    filmstripTrack.innerHTML = "";
+    filmstripTrack.innerHTML =
+        "";
 
-    if (!filmstripImages.length) {
+    if (
+        !filmstripImages.length
+    ) {
         showElement(
             filmstripBar,
             false
@@ -1591,7 +2030,8 @@ function renderFilmstrip() {
                     "button"
                 );
 
-            button.type = "button";
+            button.type =
+                "button";
 
             button.className =
                 "filmstrip-frame";
@@ -1607,14 +2047,18 @@ function renderFilmstrip() {
                     "img"
                 );
 
-            image.src = item.image;
+            image.src =
+                item.image;
 
             image.alt =
                 `Video frame ${index + 1}`;
 
-            image.draggable = false;
+            image.draggable =
+                false;
 
-            button.appendChild(image);
+            button.appendChild(
+                image
+            );
 
             button.addEventListener(
                 "click",
@@ -1641,24 +2085,24 @@ function renderFilmstrip() {
 // ============================================================
 
 function updateFilmstripPosition() {
-    if (!filmstripTrack) return;
+    if (!filmstripTrack) {
+        return;
+    }
 
     const buttons =
         filmstripTrack.querySelectorAll(
             ".filmstrip-frame"
         );
 
-    if (!buttons.length) return;
-
-    const duration =
-        state.videoDuration;
-
-    if (!duration) return;
+    if (!buttons.length) {
+        return;
+    }
 
     const current =
         getCurrentTime();
 
-    let closestIndex = 0;
+    let closestIndex =
+        0;
 
     let closestDistance =
         Infinity;
@@ -1709,7 +2153,8 @@ function updateFilmstripPosition() {
 
 export function updateFilmstrip() {
     if (
-        state.mediaType !== "video"
+        state.mediaType !==
+            "video"
     ) {
         showElement(
             filmstripBar,
@@ -1724,15 +2169,23 @@ export function updateFilmstrip() {
 
 
 // ============================================================
-// FILMSTRIP CLICK/DRAG SUPPORT
+// FILMSTRIP CONTROLS
 // ============================================================
 
 function bindFilmstripControls() {
-    if (!filmstripTrack) return;
+    if (
+        filmstripControlsBound ||
+        !filmstripTrack
+    ) {
+        return;
+    }
+
+    filmstripControlsBound =
+        true;
 
     filmstripTrack.addEventListener(
         "wheel",
-        (event) => {
+        event => {
             if (
                 filmstripTrack.scrollWidth <=
                 filmstripTrack.clientWidth
@@ -1744,7 +2197,8 @@ function bindFilmstripControls() {
 
             filmstripTrack.scrollLeft +=
                 event.deltaY ||
-                event.deltaX;
+                event.deltaX ||
+                0;
         },
         {
             passive: false
@@ -1767,25 +2221,39 @@ function getFrameSlider() {
 
 
 function bindFrameSlider() {
+    if (frameSliderBound) {
+        return;
+    }
+
     const slider =
         getFrameSlider();
 
-    if (!slider) return;
+    if (!slider) {
+        return;
+    }
+
+    frameSliderBound =
+        true;
 
     slider.addEventListener(
         "input",
         () => {
             if (
-                state.mediaType !== "video"
+                state.mediaType !==
+                    "video"
             ) {
                 return;
             }
 
             const value =
-                Number(slider.value);
+                Number(
+                    slider.value
+                );
 
             if (
-                Number.isFinite(value)
+                Number.isFinite(
+                    value
+                )
             ) {
                 seekVideoFrame(
                     value
@@ -1800,18 +2268,25 @@ function updateFrameSlider() {
     const slider =
         getFrameSlider();
 
-    if (!slider) return;
-
-    if (
-        state.mediaType !== "video"
-    ) {
-        slider.disabled = true;
+    if (!slider) {
         return;
     }
 
-    slider.disabled = false;
+    if (
+        state.mediaType !==
+            "video"
+    ) {
+        slider.disabled =
+            true;
 
-    slider.min = "0";
+        return;
+    }
+
+    slider.disabled =
+        false;
+
+    slider.min =
+        "0";
 
     slider.max =
         String(
@@ -1821,7 +2296,8 @@ function updateFrameSlider() {
             )
         );
 
-    slider.step = "1";
+    slider.step =
+        "1";
 
     slider.value =
         String(
@@ -1835,6 +2311,12 @@ function updateFrameSlider() {
 // ============================================================
 
 function bindPlaybackButtons() {
+    if (
+        playbackButtonsBound
+    ) {
+        return;
+    }
+
     const playButton =
         $("playVideo") ||
         $("playButton") ||
@@ -1859,38 +2341,61 @@ function bindPlaybackButtons() {
         $("prevFrame") ||
         $("previousFrameButton");
 
+    if (
+        !playButton &&
+        !pauseButton &&
+        !toggleButton &&
+        !nextButton &&
+        !previousButton
+    ) {
+        return;
+    }
+
+    playbackButtonsBound =
+        true;
+
     if (playButton) {
         playButton.addEventListener(
             "click",
-            playVideo
+            () => {
+                playVideo();
+            }
         );
     }
 
     if (pauseButton) {
         pauseButton.addEventListener(
             "click",
-            pauseVideo
+            () => {
+                pauseVideo();
+            }
         );
     }
 
     if (toggleButton) {
         toggleButton.addEventListener(
             "click",
-            toggleVideoPlayback
+            () => {
+                toggleVideoPlayback();
+            }
         );
     }
 
     if (nextButton) {
         nextButton.addEventListener(
             "click",
-            nextFrame
+            () => {
+                nextFrame();
+            }
         );
     }
 
     if (previousButton) {
         previousButton.addEventListener(
             "click",
-            previousFrame
+            () => {
+                previousFrame();
+            }
         );
     }
 }
@@ -1901,11 +2406,21 @@ function bindPlaybackButtons() {
 // ============================================================
 
 function bindVideoKeyboardControls() {
+    if (
+        keyboardControlsBound
+    ) {
+        return;
+    }
+
+    keyboardControlsBound =
+        true;
+
     document.addEventListener(
         "keydown",
-        (event) => {
+        event => {
             if (
-                state.mediaType !== "video"
+                state.mediaType !==
+                    "video"
             ) {
                 return;
             }
@@ -1916,9 +2431,12 @@ function bindVideoKeyboardControls() {
             if (
                 target &&
                 (
-                    target.tagName === "INPUT" ||
-                    target.tagName === "TEXTAREA" ||
-                    target.tagName === "SELECT" ||
+                    target.tagName ===
+                        "INPUT" ||
+                    target.tagName ===
+                        "TEXTAREA" ||
+                    target.tagName ===
+                        "SELECT" ||
                     target.isContentEditable
                 )
             ) {
@@ -1926,15 +2444,20 @@ function bindVideoKeyboardControls() {
             }
 
             if (
-                event.key === "ArrowRight"
+                event.key ===
+                "ArrowRight"
             ) {
                 event.preventDefault();
 
-                if (event.shiftKey) {
+                if (
+                    event.shiftKey
+                ) {
                     seekVideoFrame(
                         Math.min(
-                            state.totalFrames - 1,
-                            getCurrentFrame() + 10
+                            state.totalFrames -
+                                1,
+                            getCurrentFrame() +
+                                10
                         )
                     );
                 } else {
@@ -1943,15 +2466,19 @@ function bindVideoKeyboardControls() {
             }
 
             else if (
-                event.key === "ArrowLeft"
+                event.key ===
+                "ArrowLeft"
             ) {
                 event.preventDefault();
 
-                if (event.shiftKey) {
+                if (
+                    event.shiftKey
+                ) {
                     seekVideoFrame(
                         Math.max(
                             0,
-                            getCurrentFrame() - 10
+                            getCurrentFrame() -
+                                10
                         )
                     );
                 } else {
@@ -1960,7 +2487,8 @@ function bindVideoKeyboardControls() {
             }
 
             else if (
-                event.key === " "
+                event.key ===
+                " "
             ) {
                 event.preventDefault();
 
@@ -1968,7 +2496,8 @@ function bindVideoKeyboardControls() {
             }
 
             else if (
-                event.key === "Home"
+                event.key ===
+                "Home"
             ) {
                 event.preventDefault();
 
@@ -1976,7 +2505,8 @@ function bindVideoKeyboardControls() {
             }
 
             else if (
-                event.key === "End"
+                event.key ===
+                "End"
             ) {
                 event.preventDefault();
 
@@ -1988,34 +2518,14 @@ function bindVideoKeyboardControls() {
 
 
 // ============================================================
-// VIDEO FRAME SAVE BEFORE CHANGE
-// ============================================================
-
-function saveCurrentVideoFrame() {
-    if (
-        state.mediaType !== "video"
-    ) {
-        return;
-    }
-
-    try {
-        saveFrame(
-            getCurrentFrame()
-        );
-    } catch (_) {
-        // Ignore.
-    }
-}
-
-
-// ============================================================
-// CANVAS RESIZE OBSERVER
+// RESIZE OBSERVER
 // ============================================================
 
 function setupResizeObserver() {
     if (
+        resizeObserver ||
         typeof ResizeObserver ===
-        "undefined"
+            "undefined"
     ) {
         return;
     }
@@ -2025,13 +2535,19 @@ function setupResizeObserver() {
         $("coworkerWorkbench") ||
         annotationCanvas?.parentElement;
 
-    if (!workspace) return;
+    if (!workspace) {
+        return;
+    }
 
     try {
         resizeObserver =
             new ResizeObserver(
                 () => {
-                    render();
+                    if (
+                        state.mediaType
+                    ) {
+                        render();
+                    }
                 }
             );
 
@@ -2039,7 +2555,8 @@ function setupResizeObserver() {
             workspace
         );
     } catch (_) {
-        // Ignore.
+        resizeObserver =
+            null;
     }
 }
 
@@ -2049,6 +2566,13 @@ function setupResizeObserver() {
 // ============================================================
 
 function bindWindowResize() {
+    if (resizeBound) {
+        return;
+    }
+
+    resizeBound =
+        true;
+
     window.addEventListener(
         "resize",
         () => {
@@ -2063,76 +2587,100 @@ function bindWindowResize() {
 
 
 // ============================================================
-// MEDIA DROP FROM EXTERNAL EVENTS
+// EXTERNAL MEDIA EVENT
 // ============================================================
 
-window.addEventListener(
-    "annotation:loadMedia",
-    (event) => {
-        const file =
-            event.detail?.file;
-
-        if (file) {
-            loadMediaFile(file);
-        }
+function bindExternalMediaEvent() {
+    if (
+        window.__mediaExternalEventBound
+    ) {
+        return;
     }
-);
+
+    window.__mediaExternalEventBound =
+        true;
+
+    window.addEventListener(
+        "annotation:loadMedia",
+        event => {
+            const file =
+                event.detail?.file;
+
+            if (file) {
+                loadMediaFile(
+                    file
+                );
+            }
+        }
+    );
+}
 
 
 // ============================================================
-// PUBLIC GLOBAL COMPATIBILITY
+// GLOBAL COMPATIBILITY
 // ============================================================
 
-window.loadMediaFile =
-    loadMediaFile;
+function exposeGlobals() {
+    window.loadMediaFile =
+        loadMediaFile;
 
-window.loadImageFile =
-    loadImageFile;
+    window.loadImageFile =
+        loadImageFile;
 
-window.loadVideoFile =
-    loadVideoFile;
+    window.loadVideoFile =
+        loadVideoFile;
 
-window.cleanupMedia =
-    cleanupMedia;
+    window.cleanupMedia =
+        cleanupMedia;
 
-window.captureVideoFrame =
-    captureVideoFrame;
+    window.captureVideoFrame =
+        captureVideoFrame;
 
-window.seekVideoFrame =
-    seekVideoFrame;
+    window.seekVideoFrame =
+        seekVideoFrame;
 
-window.nextFrame =
-    nextFrame;
+    window.nextFrame =
+        nextFrame;
 
-window.previousFrame =
-    previousFrame;
+    window.previousFrame =
+        previousFrame;
 
-window.firstFrame =
-    firstFrame;
+    window.firstFrame =
+        firstFrame;
 
-window.lastFrame =
-    lastFrame;
+    window.lastFrame =
+        lastFrame;
 
-window.playVideo =
-    playVideo;
+    window.playVideo =
+        playVideo;
 
-window.pauseVideo =
-    pauseVideo;
+    window.pauseVideo =
+        pauseVideo;
 
-window.toggleVideoPlayback =
-    toggleVideoPlayback;
+    window.toggleVideoPlayback =
+        toggleVideoPlayback;
 
-window.stopVideoPlayback =
-    stopVideoPlayback;
+    window.stopVideoPlayback =
+        stopVideoPlayback;
 
-window.updateFilmstrip =
-    updateFilmstrip;
+    window.updateFilmstrip =
+        updateFilmstrip;
 
-window.generateFilmstrip =
-    generateFilmstrip;
+    window.generateFilmstrip =
+        generateFilmstrip;
 
-window.resizeCanvasToMedia =
-    resizeCanvasToMedia;
+    window.resizeCanvasToMedia =
+        resizeCanvasToMedia;
+
+    window.getCurrentFrame =
+        getCurrentFrame;
+
+    window.getCurrentTime =
+        getCurrentTime;
+
+    window.detectMediaType =
+        detectMediaType;
+}
 
 
 // ============================================================
@@ -2140,43 +2688,47 @@ window.resizeCanvasToMedia =
 // ============================================================
 
 export function initializeMedia() {
+    if (mediaInitialized) {
+        return;
+    }
+
+    mediaInitialized =
+        true;
+
     bindMediaInput();
+
     bindDragAndDrop();
+
     bindVideoEvents();
+
     bindFilmstripControls();
+
     bindFrameSlider();
+
     bindPlaybackButtons();
+
     bindVideoKeyboardControls();
+
     bindWindowResize();
+
     setupResizeObserver();
 
+    bindExternalMediaEvent();
+
+    exposeGlobals();
+
     updateVideoLabels();
+
     updateFrameSlider();
 
-    emit("mediaReady");
+    emit(
+        "mediaReady"
+    );
 }
 
 
 // ============================================================
-// KEEP FRAME SLIDER SYNCHRONIZED
-// ============================================================
-
-setInterval(
-    () => {
-        if (
-            state.mediaType === "video"
-        ) {
-            updateFrameSlider();
-            updateVideoLabels();
-            updateFilmstripPosition();
-        }
-    },
-    250
-);
-
-
-// ============================================================
-// MODULE READY
+// INITIALIZE WHEN DOM IS READY
 // ============================================================
 
 if (
@@ -2185,7 +2737,9 @@ if (
 ) {
     document.addEventListener(
         "DOMContentLoaded",
-        initializeMedia,
+        () => {
+            initializeMedia();
+        },
         {
             once: true
         }
