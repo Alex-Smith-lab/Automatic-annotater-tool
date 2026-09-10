@@ -84,8 +84,10 @@ function setAuthStatus(
 function getRoleFromUser(user) {
 
     if (!user) {
+
         return APP_CONFIG.defaultRole;
     }
+
 
     const metadata =
         user.user_metadata || {};
@@ -93,12 +95,53 @@ function getRoleFromUser(user) {
     const appMetadata =
         user.app_metadata || {};
 
+
+    // --------------------------------------------------------
+    // Default administrator
+    // --------------------------------------------------------
+
+    const email =
+        String(
+            user.email || ""
+        )
+            .trim()
+            .toLowerCase();
+
+
+    const adminEmail =
+        String(
+            APP_CONFIG.adminEmail || ""
+        )
+            .trim()
+            .toLowerCase();
+
+
+    if (
+        email &&
+        adminEmail &&
+        email === adminEmail
+    ) {
+
+        return "admin";
+    }
+
+
+    // --------------------------------------------------------
+    // User role
+    // --------------------------------------------------------
+
     return normalizeRole(
+
         metadata.role ||
+
         metadata.user_role ||
+
         metadata.account_role ||
+
         appMetadata.role ||
+
         appMetadata.user_role ||
+
         APP_CONFIG.defaultRole
     );
 }
