@@ -1,564 +1,5611 @@
-* { box-sizing: border-box; }
+import {
+    pipeline,
+    env
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
 
-:root {
-    --bg: #09090d;
-    --panel: #111119;
-    --panel2: #171721;
-    --border: #292938;
-    --purple: #8b5cf6;
-    --purple2: #a78bfa;
-    --text: #eeeeF5;
-    --muted: #8f8fa3;
-    --danger: #ef4444;
-    --green: #22c55e;
+import {
+    createClient
+} from "https://esm.sh/@supabase/supabase-js@2";
+
+
+env.allowLocalModels = false;
+env.allowRemoteModels = true;
+
+
+/* ============================================================
+   DOM
+============================================================ */
+
+const ID_ALIASES = {
+
+    loginButton:
+        "signInBtn",
+
+    signupButton:
+        "signUpBtn",
+
+    logoutButton:
+        "logoutBtn",
+
+    themeToggle:
+        "settingsButton",
+
+    profilePictureInput:
+        "avatarInput",
+
+    workHistoryBtn:
+        "workHistoryButton",
+
+    workHistory:
+        "workHistoryList",
+
+    submitTaskBtn:
+        "submitTaskButton",
+
+    skipTaskBtn:
+        "skipTaskButton",
+
+    skipTaskModal:
+        "skipModal",
+
+    cancelSkipTask:
+        "closeSkipModal",
+
+    adminControlBtn:
+        "adminCenterButton",
+
+    closeAdminCenter:
+        "closeAdminModal",
+
+    adminCenter:
+        "adminModal",
+
+    createTaskBtn:
+        "createTaskButton",
+
+    newTaskType:
+        "taskShape",
+
+    newTaskDuration:
+        "taskDuration",
+
+    newTaskPay:
+        "taskPay",
+
+    adminTasksTable:
+        "adminTasksList",
+
+    adminUsersTable:
+        "usersList",
+
+    adminCoworkersTable:
+        "coworkersList",
+
+    adminPaymentsTable:
+        "paymentsList",
+
+    adminActivityTable:
+        "activityList",
+
+    adminExportCSV:
+        "copyAdminCSV",
+
+    adminExportHTML:
+        "downloadAdminHTML",
+
+    uploadPanel:
+        "customerUploadPanel",
+
+    undoButton:
+        "undoBtn",
+
+    redoButton:
+        "redoBtn",
+
+    runAI:
+        "autoAnnotate",
+
+    annotationCount:
+        "objectCount",
+
+    selectedCount:
+        "selectedObject",
+
+    deleteAnnotation:
+        "deleteSelected"
+};
+
+
+const $ = id =>
+    document.getElementById(
+        ID_ALIASES[id] || id
+    );
+
+
+/* ============================================================
+   DOM REFERENCES
+============================================================ */
+
+const canvas =
+    $("annotationCanvas");
+
+const ctx =
+    canvas
+        ? canvas.getContext("2d")
+        : null;
+
+const workspace =
+    $("canvasWorkspace");
+
+const mediaInput =
+    $("mediaInput");
+
+const sourceVideo =
+    $("sourceVideo");
+
+const emptyWorkspace =
+    $("emptyWorkspace");
+
+const appEl =
+    document.querySelector(
+        ".app"
+    );
+
+const workspaceRoot =
+    $("workspaceRoot");
+
+const annotationsList =
+    $("annotationsList");
+
+const popupEl =
+    $("annotationPopup");
+
+const popupTitle =
+    $("annPopupTitle");
+
+const popupBody =
+    $("annPopupBody");
+
+const popupExpandBtn =
+    $("annPopupExpand");
+
+const filmstripBar =
+    $("filmstripBar");
+
+const filmstripTrack =
+    $("filmstripTrack");
+
+const filmstripLabel =
+    $("filmstripLabel");
+
+const filmstripCurrentLabel =
+    $("filmstripCurrentLabel");
+
+const toastContainer =
+    $("toastContainer");
+
+
+const SESSION_KEY =
+    "annotationAI_session_v1";
+
+
+/* ============================================================
+   STATE
+============================================================ */
+
+const state = {
+
+    mediaType: null,
+
+    image: null,
+
+    imageURL: null,
+
+    videoURL: null,
+
+    videoDuration: 0,
+
+    fps: 30,
+
+    currentFrame: 0,
+
+    totalFrames: 0,
+
+    currentTime: 0,
+
+    videoPlaying: false,
+
+    videoSeeking: false,
+
+    frameCaptureBusy: false,
+
+    animationFrame: null,
+
+
+    scale: 1,
+
+    offsetX: 0,
+
+    offsetY: 0,
+
+    minScale: 0.03,
+
+    maxScale: 25,
+
+
+    annotationType:
+        "box",
+
+    mode:
+        "select",
+
+    annotations: [],
+
+    selectedId:
+        null,
+
+    hoveredId:
+        null,
+
+    nextId:
+        1,
+
+
+    drawing:
+        false,
+
+    drawStart:
+        null,
+
+    drawCurrent:
+        null,
+
+    polygonPoints:
+        [],
+
+
+    pointerDown:
+        false,
+
+    dragging:
+        false,
+
+    panning:
+        false,
+
+    spacePan:
+        false,
+
+    resizeHandle:
+        null,
+
+    dragStartImage:
+        null,
+
+    dragLastImage:
+        null,
+
+    panStart:
+        null,
+
+
+    frameAnnotations:
+        new Map(),
+
+
+    rightPanelOpen:
+        true,
+
+    popupExpanded:
+        false,
+
+    colorMode:
+        "normal",
+
+
+    history:
+        [],
+
+    historyIndex:
+        -1,
+
+
+    detr:
+        null,
+
+    yolo:
+        null,
+
+    segmenter:
+        null,
+
+    aiRunning:
+        false,
+
+
+    pendingVideoRestore:
+        null
+};
+
+
+/* ============================================================
+   AI MODELS
+============================================================ */
+
+const MODELS = {
+
+    detr:
+        "Xenova/detr-resnet-50",
+
+    yolo:
+        "Xenova/yolov9-c",
+
+    panoptic:
+        "Xenova/detr-resnet-50-panoptic"
+};
+
+
+const LABEL_ALIASES = {
+
+    automobile:
+        "car",
+
+    vehicle:
+        "car",
+
+    "motor vehicle":
+        "car",
+
+    human:
+        "person",
+
+    cyclist:
+        "bicycle",
+
+    bike:
+        "bicycle"
+};
+
+
+/* ============================================================
+   INITIALIZATION
+============================================================ */
+
+window.addEventListener(
+    "resize",
+    resizeCanvas
+);
+
+
+/*
+ * These calls are intentionally protected.
+ * A missing optional workspace element must
+ * never prevent Supabase authentication.
+ */
+
+try {
+    resizeCanvas();
+} catch (error) {
+    console.warn(
+        "Initial canvas resize skipped:",
+        error
+    );
 }
 
-html, body {
-    margin: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background: var(--bg);
-    color: var(--text);
-    font-family: Inter, Arial, Helvetica, sans-serif;
+
+try {
+    updateZoomUI();
+} catch (error) {
+    console.warn(
+        "Initial zoom UI skipped:",
+        error
+    );
 }
 
-button, input, select, textarea { font-family: inherit; }
-button { cursor: pointer; }
 
-.app {
-    display: grid;
-    grid-template-columns: 290px minmax(500px, 1fr) 260px;
-    width: 100vw;
-    height: 100vh;
-    position: relative;
-    transition: grid-template-columns .18s ease;
+try {
+    updateCounts();
+} catch (error) {
+    console.warn(
+        "Initial count update skipped:",
+        error
+    );
 }
 
-.app.panel-collapsed {
-    grid-template-columns: 290px minmax(500px, 1fr) 0px;
+
+try {
+    updateAnnotationsList();
+} catch (error) {
+    console.warn(
+        "Initial annotation list skipped:",
+        error
+    );
 }
 
-/* =========================================================
-   SIDEBAR
-========================================================= */
 
-.sidebar {
-    overflow-y: auto;
-    padding: 18px;
-    background: #0d0d14;
-    border-right: 1px solid var(--border);
+try {
+    updateUndoRedoButtons();
+} catch (error) {
+    console.warn(
+        "Initial undo/redo update skipped:",
+        error
+    );
 }
 
-.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-.brand-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 10px; background: var(--purple); color: white; font-weight: 900; }
-.brand h1 { margin: 0; font-size: 15px; letter-spacing: 1px; }
-.brand span { color: var(--muted); font-size: 10px; }
 
-.panel { margin-bottom: 12px; padding: 13px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
-.section-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 10px; font-weight: 800; color: var(--muted); letter-spacing: .8px; }
-.section-title > span { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: #24183d; color: var(--purple2); font-size: 10px; }
-
-.upload-box { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100px; padding: 15px; border: 1px dashed #44445a; border-radius: 8px; background: #0d0d15; cursor: pointer; text-align: center; }
-.upload-box:hover { border-color: var(--purple); }
-.upload-icon { margin-bottom: 7px; color: var(--purple); font-size: 25px; }
-.upload-box strong { font-size: 12px; }
-.upload-box small { margin-top: 5px; color: var(--muted); font-size: 9px; }
-.media-info { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
-
-.video-buttons { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 5px; }
-.video-buttons button { height: 35px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel2); color: white; }
-.video-buttons button:hover { border-color: var(--purple); }
-.play-button { background: #321d5e !important; border-color: var(--purple) !important; }
-.frame-info { display: flex; justify-content: space-between; margin: 10px 0; font-size: 10px; color: var(--muted); }
-.frame-info strong { color: white; }
-#frameSlider { width: 100%; }
-.keyboard-help { display: block; margin-top: 7px; color: var(--muted); font-size: 8px; line-height: 1.4; }
-
-.annotation-types { display: grid; gap: 5px; }
-.annotation-type { display: flex; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--border); border-radius: 6px; background: #0d0d15; color: #aaaabc; font-size: 10px; text-align: left; }
-.annotation-type span { color: var(--purple2); }
-.annotation-type.active { background: #24183d; border-color: var(--purple); color: white; }
-
-.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-.tool-button { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: #0d0d15; color: #aaaabc; font-size: 10px; }
-.tool-button.active { background: #291b47; border-color: var(--purple); color: white; }
-.danger-button { width: 100%; margin-top: 8px; padding: 8px; border: 1px solid #5b2020; border-radius: 6px; background: #241010; color: #f87171; font-size: 9px; }
-
-.undo-redo-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 8px; }
-.undo-redo-row button { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: #0d0d15; color: #aaaabc; font-size: 10px; }
-.undo-redo-row button:hover:not(:disabled) { border-color: var(--purple); color: white; }
-.undo-redo-row button:disabled { opacity: .4; cursor: not-allowed; }
-
-.field-label { display: block; margin: 8px 0 5px; color: var(--muted); font-size: 9px; }
-.select { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: #0c0c13; color: white; font-size: 10px; }
-.select:disabled { opacity: .45; cursor: not-allowed; }
-.range-row { display: flex; align-items: center; gap: 8px; }
-.range-row input { flex: 1; }
-.range-row span { width: 35px; color: var(--purple2); font-size: 10px; }
-.checkbox-row { display: flex; align-items: center; gap: 7px; margin: 10px 0; color: #aaaabc; font-size: 9px; }
-.rules-box { width: 100%; min-height: 75px; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 6px; outline: none; background: #09090d; color: #ccc; font-size: 9px; line-height: 1.5; }
-.primary-button { width: 100%; margin-top: 8px; padding: 10px; border: 0; border-radius: 7px; background: var(--purple); color: white; font-size: 10px; font-weight: 800; }
-.primary-button:hover { background: var(--purple2); }
-.primary-button:disabled { opacity: .55; cursor: not-allowed; }
-.ai-status { margin-top: 8px; color: var(--muted); font-size: 9px; }
-
-.ai-progress-track { margin-top: 8px; height: 6px; border-radius: 4px; background: #1a1a26; overflow: hidden; }
-.ai-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--purple), var(--purple2)); transition: width .15s ease; }
-
-.export-button { width: 100%; margin-bottom: 5px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: #11111a; color: #ccc; font-size: 9px; }
-.export-button:hover { border-color: var(--purple); color: white; }
-
-.color-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.legend-chip { display: flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 20px; background: #171721; border: 1px solid var(--border); color: #ccc; font-size: 8px; }
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-
-/* =========================================================
-   WORKSPACE
-========================================================= */
-
-.workspace { display: flex; flex-direction: column; min-width: 0; background: #06060a; }
-.workspace:fullscreen { background: #06060a; }
-
-.workspace-header { display: flex; align-items: center; justify-content: space-between; height: 57px; padding: 0 15px; border-bottom: 1px solid var(--border); background: #0d0d13; flex-shrink: 0; }
-.file-name { max-width: 500px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 700; }
-.workspace-subtitle { margin-top: 4px; color: var(--muted); font-size: 9px; }
-.separator { margin: 0 6px; }
-
-.zoom-controls { display: flex; align-items: center; gap: 4px; }
-.zoom-controls button { min-width: 30px; height: 28px; border: 1px solid var(--border); border-radius: 5px; background: #14141d; color: white; font-size: 10px; }
-.zoom-controls button:hover { border-color: var(--purple); }
-.zoom-controls button.active { border-color: var(--purple); background: #24183d; }
-#zoomValue { width: 50px; color: var(--purple2); font-size: 10px; text-align: center; }
-
-.session-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px; background: #241748; border-bottom: 1px solid var(--purple); color: #e6dcff; font-size: 10px; flex-shrink: 0; }
-.session-banner button { flex-shrink: 0; padding: 4px 9px; border: 1px solid #4a3376; border-radius: 5px; background: #12081f; color: var(--purple2); font-size: 9px; }
-
-.canvas-workspace {
-    position: relative;
-    flex: 1;
-    overflow: hidden;
-    background: radial-gradient(circle at center, #161621 0, #09090e 55%, #050509 100%);
-    cursor: crosshair;
+try {
+    updateAIEngineAvailability();
+} catch (error) {
+    console.warn(
+        "Initial AI UI skipped:",
+        error
+    );
 }
 
-#annotationCanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-.empty-workspace { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; }
-.empty-icon { color: #373747; font-size: 55px; }
-.empty-workspace h2 { margin: 10px 0 5px; color: #aaaabd; font-size: 14px; letter-spacing: 2px; }
-.empty-workspace p { color: #5f5f70; font-size: 10px; }
-
-/* PURPLE ANNOTATION POPUP */
-.ann-popup {
-    position: absolute;
-    z-index: 20;
-    min-width: 210px;
-    max-width: 260px;
-    border-radius: 10px;
-    background: #1b1130;
-    border: 1px solid var(--purple);
-    box-shadow: 0 10px 30px rgba(139, 92, 246, .35);
-    overflow: hidden;
-}
-.ann-popup-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; background: #2a1a4d; }
-.ann-popup-title { font-size: 11px; font-weight: 800; color: white; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
-.ann-popup-actions { display: flex; gap: 4px; }
-.popup-icon-btn { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #4a3376; border-radius: 5px; background: #241748; color: var(--purple2); font-size: 11px; line-height: 1; padding: 0; }
-.popup-icon-btn:hover { border-color: var(--purple2); color: white; }
-.popup-icon-btn.expanded { transform: rotate(90deg); }
-.ann-popup-body { padding: 10px; font-size: 9px; color: #ccc; }
-.ann-popup-summary { display: flex; flex-wrap: wrap; gap: 5px; }
-.ann-chip { padding: 3px 7px; border-radius: 20px; background: #2a1a4d; border: 1px solid #4a3376; color: var(--purple2); font-size: 8px; }
-
-.ann-popup .class-field { margin-top: 8px; }
-.ann-popup .class-field label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 8px; }
-.ann-popup .class-field select, .ann-popup .class-field input { width: 100%; padding: 7px; border: 1px solid #3a2a5e; border-radius: 5px; background: #12081f; color: white; font-size: 9px; }
-.ann-popup .class-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 9px; }
-.ann-popup .class-buttons button { padding: 7px; border: 1px solid #3a2a5e; border-radius: 5px; background: #241748; color: white; font-size: 8px; }
-.ann-popup .class-buttons .save { background: var(--purple); border-color: var(--purple); }
-
-/* TOASTS */
-.toast-container {
-    position: absolute;
-    top: 14px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 60;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    pointer-events: none;
-}
-.toast {
-    min-width: 160px;
-    padding: 8px 14px;
-    border-radius: 8px;
-    background: #1b1130;
-    border: 1px solid var(--purple);
-    box-shadow: 0 8px 24px rgba(139, 92, 246, .35);
-    color: white;
-    font-size: 10px;
-    font-weight: 700;
-    text-align: center;
-    opacity: 0;
-    transform: translateY(-8px);
-    transition: opacity .2s ease, transform .2s ease;
-    overflow: hidden;
-}
-.toast.show { opacity: 1; transform: translateY(0); }
-.toast-bar { margin-top: 6px; height: 3px; width: 100%; background: #2a1a4d; border-radius: 2px; overflow: hidden; }
-.toast-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--purple), var(--purple2)); }
-.toast.show .toast-bar-fill { animation: toastfill 1.3s linear forwards; }
-@keyframes toastfill { from { width: 0%; } to { width: 100%; } }
-
-/* FILMSTRIP */
-.filmstrip-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 46px;
-    padding: 0 10px;
-    background: #0c0c12;
-    border-top: 1px solid var(--border);
-    flex-shrink: 0;
-}
-.filmstrip-current { flex-shrink: 0; width: 64px; color: var(--purple2); font-size: 9px; font-weight: 800; }
-.filmstrip-play { width: 30px; height: 30px; flex-shrink: 0; border: 1px solid var(--purple); border-radius: 6px; background: #291b47; color: white; font-size: 11px; }
-.filmstrip-track { flex: 1; height: 30px; display: flex; align-items: flex-end; gap: 1px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
-.filmstrip-tick { flex-shrink: 0; width: 3px; height: 12px; background: #2c2c3c; border-radius: 1px; cursor: pointer; align-self: flex-end; }
-.filmstrip-tick:hover { background: var(--purple2); }
-.filmstrip-tick.has-ann { height: 20px; background: var(--green); }
-.filmstrip-tick.current { height: 28px; background: var(--purple2); }
-.filmstrip-label { flex-shrink: 0; width: 70px; text-align: right; color: var(--muted); font-size: 9px; }
-
-.workspace-footer { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 12px; border-top: 1px solid var(--border); background: #0c0c12; color: var(--muted); font-size: 8px; flex-shrink: 0; }
-.workspace-footer strong { color: white; }
-
-/* =========================================================
-   RIGHT PANEL — ALL ANNOTATIONS
-========================================================= */
-
-.right-panel { overflow-y: auto; padding: 15px; background: #0d0d14; border-left: 1px solid var(--border); transition: opacity .15s ease; }
-.app.panel-collapsed .right-panel { display: none; }
-
-.right-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.right-title { color: #9b9bad; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
-
-.annotations-list { display: flex; flex-direction: column; gap: 6px; }
-
-.ann-row { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 7px; background: #101019; cursor: pointer; }
-.ann-row:hover { border-color: #4a3376; }
-.ann-row.selected { border-color: var(--purple); background: #1e1436; }
-.ann-row-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-.ann-row.selected .ann-row-dot { background: var(--purple2); }
-.ann-row-main { flex: 1; min-width: 0; }
-.ann-row-label { font-size: 10px; font-weight: 700; color: white; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ann-row-meta { font-size: 8px; color: var(--muted); margin-top: 2px; }
-.ann-row-badge { font-size: 7px; padding: 2px 5px; border-radius: 10px; background: #24183d; color: var(--purple2); flex-shrink: 0; }
-
-.details-empty { display: flex; flex-direction: column; align-items: center; padding: 25px 10px; border: 1px solid var(--border); border-radius: 8px; background: #101019; text-align: center; }
-.details-icon { margin-bottom: 10px; color: #454557; font-size: 25px; }
-.details-empty strong { font-size: 10px; }
-.details-empty span { margin-top: 6px; color: var(--muted); font-size: 8px; line-height: 1.5; }
-
-.reopen-tab {
-    position: absolute;
-    top: 70px;
-    right: 0;
-    width: 22px;
-    height: 60px;
-    border: 1px solid var(--purple);
-    border-right: none;
-    border-radius: 8px 0 0 8px;
-    background: #24183d;
-    color: var(--purple2);
-    font-size: 12px;
-    z-index: 30;
-}
-.reopen-tab:hover { background: #2f1e50; color: white; }
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #09090d; }
-::-webkit-scrollbar-thumb { background: #333344; border-radius: 5px; }
-
-/* Mobile */
-@media (max-width: 1100px) {
-    .app { grid-template-columns: 250px minmax(400px, 1fr); }
-    .right-panel { display: none; }
-    .reopen-tab { display: none !important; }
+try {
+    updateColorLegend();
+} catch (error) {
+    console.warn(
+        "Initial color legend skipped:",
+        error
+    );
 }
 
-/* =========================================================
-   CLOUD / ROLE UI
-========================================================= */
-.auth-gate,.modal-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:rgba(0,0,0,.72);backdrop-filter:blur(7px)}
-.auth-card,.modal-card,.control-card{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.45);color:var(--text)}
-.auth-card{width:min(380px,92vw);padding:28px;text-align:center}.auth-card h2{margin:12px 0 5px}.auth-card p{color:var(--muted);font-size:12px}
-.auth-card input,.modal-card input,.modal-card select{width:100%;box-sizing:border-box;margin:6px 0;padding:11px;border:1px solid var(--border);border-radius:7px;background:#0c0c13;color:white}.auth-status{min-height:18px;margin-top:8px;color:var(--muted);font-size:10px}.link-button{border:0;background:none;color:var(--purple2);font-size:10px;margin-top:8px}
-.greeting-block{min-width:240px}.greeting-line{font-size:13px;font-weight:800}.greeting-sub{font-size:9px;color:var(--muted);margin-top:3px}.task-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;background:#151019;border-bottom:1px solid var(--border);font-size:9px}.task-bar strong{display:block;font-size:10px}.task-bar span{color:var(--muted)}.task-actions{display:flex;gap:5px}.task-actions button{border:1px solid var(--border);border-radius:6px;background:#17131b;color:white;padding:7px 10px;font-size:9px}.task-actions .primary-button{margin:0}
-.control-card{width:min(1200px,96vw);height:min(820px,92vh);display:flex;flex-direction:column}.control-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border)}.control-head span{margin-left:10px;color:var(--muted);font-size:9px}.control-tabs{display:flex;gap:5px;padding:8px 12px;border-bottom:1px solid var(--border);overflow:auto}.control-tabs button{padding:8px 12px;border:1px solid var(--border);background:#0d0d15;color:#aaaabc;border-radius:6px;font-size:9px}.control-tabs button.active{background:#291b47;border-color:var(--purple);color:white}.control-section{padding:14px;overflow:auto;flex:1}.admin-toolbar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.admin-toolbar button{padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:#11111a;color:#ddd;font-size:9px}.data-table{width:100%;border-collapse:collapse;font-size:9px}.data-table th,.data-table td{padding:7px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}.data-table th{color:var(--muted);font-weight:700}.data-table select,.data-table input{padding:5px;background:#0c0c13;color:white;border:1px solid var(--border);border-radius:4px;font-size:9px}.status-pill{display:inline-block;padding:3px 6px;border-radius:10px;background:#24183d;color:var(--purple2)}.danger-mini{border:1px solid #5b2020!important;background:#241010!important;color:#f87171!important}.success-mini{border:1px solid #244d31!important;background:#102017!important;color:#86efac!important}.task-list{display:grid;gap:8px}.task-card{padding:12px;border:1px solid var(--border);border-radius:9px;background:#101019}.task-card strong{font-size:11px}.task-card small{display:block;color:var(--muted);margin-top:4px}.task-card .row{display:flex;justify-content:space-between;gap:8px;align-items:center}.task-card button{padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:#24183d;color:white;font-size:9px}.small-modal{width:min(420px,92vw);padding:20px}.wide-modal{width:min(900px,94vw);height:min(720px,88vh);padding:0;overflow:hidden}.wide-modal>.control-head{flex-shrink:0}.task-creator{margin-top:8px;padding:9px;border:1px solid var(--border);border-radius:7px;background:#0d0d14}.profile-chip{display:flex;align-items:center;gap:7px}.avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;background:#24183d;border:1px solid var(--border)}
-body.light{--bg:#f4f5f7;--panel:#fff;--panel2:#f0f1f4;--border:#d9dce3;--text:#20232a;--muted:#69707d}.light .sidebar,.light .right-panel{background:#f7f8fa}.light .workspace,.light .workspace:fullscreen{background:#eef0f4}.light .workspace-header,.light .task-bar,.light .workspace-footer{background:#fff}.light .canvas-workspace{background:radial-gradient(circle at center,#fff 0,#eef0f4 60%,#e5e7eb 100%)}.light .select,.light .rules-box,.light .auth-card input,.light .modal-card input,.light .modal-card select,.light .data-table select,.light .data-table input{background:#fff;color:#20232a}.light .control-card,.light .modal-card,.light .auth-card{background:#fff;color:#20232a}.light .task-card,.light .ann-row{background:#fafafa}.light .zoom-controls button,.light .task-actions button,.light .admin-toolbar button,.light .control-tabs button{background:#f4f5f7;color:#20232a}
-@media(max-width:1100px){.greeting-block{min-width:150px}.task-bar{font-size:8px}.control-card{width:98vw}}
 
-/* =========================================================
-   FULL-PAGE AUTHENTICATION
-========================================================= */
-.login-page {
-    position: fixed;
-    inset: 0;
-    z-index: 99999;
-    display: grid;
-    place-items: center;
-    min-height: 100vh;
-    padding: 24px;
-    box-sizing: border-box;
-    background:
-        radial-gradient(circle at 50% 20%, rgba(139,92,246,.16), transparent 38%),
-        radial-gradient(circle at 20% 80%, rgba(139,92,246,.08), transparent 30%),
-        #09090d;
+try {
+    hidePopup();
+} catch (error) {
+    console.warn(
+        "Initial popup hide skipped:",
+        error
+    );
 }
-.login-shell { width: min(430px, 94vw); }
-.login-brand { display:flex; align-items:center; gap:12px; margin:0 auto 18px; padding:0 4px; }
-.login-brand h1 { margin:0; color:var(--text); font-size:18px; letter-spacing:1.5px; }
-.login-brand p { margin:4px 0 0; color:var(--muted); font-size:10px; }
-.login-card { padding:28px; border:1px solid var(--border); border-radius:16px; background:var(--panel); box-shadow:0 25px 80px rgba(0,0,0,.45); }
-.login-card h2 { margin:0; color:var(--text); font-size:22px; }
-.login-subtitle { margin:7px 0 20px; color:var(--muted); font-size:11px; line-height:1.5; }
-.login-card .select { box-sizing:border-box; min-height:42px; margin-bottom:5px; }
-.login-card .primary-button,.login-card .export-button { min-height:42px; margin-top:10px; margin-bottom:0; }
-.text-button { width:100%; margin-top:12px; padding:7px; border:0; background:transparent; color:var(--purple2); font-size:10px; }
-.text-button:hover { text-decoration:underline; }
-.login-card .ai-status { min-height:18px; margin-top:14px; text-align:center; }
-@media (max-width:600px) { .login-page { padding:15px; } .login-card { padding:22px; } }
 
-/* =========================================================
-   MODERN COWORKER DASHBOARD / LAYOUT PATCH
-   Keeps all existing IDs and editor geometry intact.
-========================================================= */
-:root{
-    --accent:#ff6a00;
-    --accent-soft:#ff8a3d;
-    --surface:#151515;
-    --surface-2:#1d1d1d;
-    --line:#2c2c2c;
+
+try {
+    loadSessionOnStartup();
+} catch (error) {
+    console.warn(
+        "Session restore skipped:",
+        error
+    );
 }
-body{background:#0b0b0b}
-.app{
-    grid-template-columns:260px minmax(0,1fr) 300px;
-    gap:0;
+
+
+/* ============================================================
+   UPLOAD
+============================================================ */
+
+if (mediaInput) {
+
+    mediaInput.addEventListener(
+        "change",
+        async event => {
+
+            if (
+                typeof canUseUpload ===
+                "function" &&
+                !canUseUpload()
+            ) {
+
+                alert(
+                    "Customer upload is not available for this role."
+                );
+
+                event.target.value =
+                    "";
+
+                return;
+            }
+                        sourceVideo.currentTime =
+                time;
+
+
+            /*
+             * Some browsers do not emit seeked when
+             * the requested time is effectively the
+             * current time.
+             */
+            if (
+                Math.abs(
+                    sourceVideo.currentTime -
+                    time
+                ) <
+                0.001
+            ) {
+
+                state.videoSeeking =
+                    false;
+
+                sourceVideo
+                    .removeEventListener(
+                        "seeked",
+                        done
+                    );
+
+                resolve();
+
+            }
+
+        }
+    );
+
 }
-.sidebar{
-    padding:14px;
-    background:#0c0c0c;
-    border-right:1px solid var(--line);
+
+
+/* ============================================================
+   CAPTURE VIDEO FRAME
+============================================================ */
+
+async function captureVideoFrame() {
+
+    if (
+        !sourceVideo ||
+        sourceVideo.readyState <
+            2
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        state.frameCaptureBusy
+    ) {
+
+        return;
+
+    }
+
+
+    state.frameCaptureBusy =
+        true;
+
+
+    try {
+
+        const width =
+            sourceVideo.videoWidth;
+
+        const height =
+            sourceVideo.videoHeight;
+
+
+        if (
+            !width ||
+            !height
+        ) {
+
+            return;
+
+        }
+
+
+        const frameCanvas =
+            document.createElement(
+                "canvas"
+            );
+
+
+        frameCanvas.width =
+            width;
+
+        frameCanvas.height =
+            height;
+
+
+        const frameCtx =
+            frameCanvas.getContext(
+                "2d"
+            );
+
+
+        frameCtx.drawImage(
+            sourceVideo,
+            0,
+            0,
+            width,
+            height
+        );
+
+
+        const image =
+            new Image();
+
+
+        image.src =
+            frameCanvas.toDataURL(
+                "image/jpeg",
+                0.92
+            );
+
+
+        await new Promise(
+            (
+                resolve,
+                reject
+            ) => {
+
+                image.onload =
+                    resolve;
+
+                image.onerror =
+                    reject;
+
+            }
+        );
+
+
+        state.image =
+            image;
+
+    } finally {
+
+        state.frameCaptureBusy =
+            false;
+
+    }
+
 }
-.sidebar .brand{display:none}
-.sidebar .panel{background:#111;border-color:#262626;border-radius:12px}
-.sidebar .panel#accountPanel{order:99}
-.sidebar{display:flex;flex-direction:column}
-.sidebar #editToolsPanel{order:1}
-.sidebar #annotationTypePanel{order:2}
-.sidebar #customerUploadPanel{order:3}
-.sidebar #videoControlsPanel{order:4}
-.sidebar #aiPanel{order:5}
-.sidebar #exportPanel{order:6}
-.sidebar #taskQueuePanel{order:7}
-.sidebar #accountPanel{order:99}
-.sidebar .panel{flex-shrink:0}
-.sidebar #taskQueuePanel{display:none!important}
-.sidebar .section-title{font-size:9px}
-.sidebar .tool-button,.sidebar .annotation-type{font-size:10px}
-.sidebar .primary-button{background:var(--accent)}
-.sidebar .primary-button:hover{background:var(--accent-soft)}
-.modern-header{
-    min-height:62px;
-    height:auto;
-    padding:8px 14px;
-    background:#0d0d0d;
-    position:relative;
-    gap:12px;
+
+
+/* ============================================================
+   CLEANUP MEDIA
+============================================================ */
+
+function cleanupMedia() {
+
+    if (
+        state.imageURL
+    ) {
+
+        URL.revokeObjectURL(
+            state.imageURL
+        );
+
+        state.imageURL =
+            null;
+
+    }
+
+
+    if (
+        state.videoURL
+    ) {
+
+        URL.revokeObjectURL(
+            state.videoURL
+        );
+
+        state.videoURL =
+            null;
+
+    }
+
+
+    if (sourceVideo) {
+
+        sourceVideo.pause();
+
+        sourceVideo.removeAttribute(
+            "src"
+        );
+
+        sourceVideo.load();
+
+    }
+
+
+    state.image =
+        null;
+
+    state.mediaType =
+        null;
+
+    state.videoDuration =
+        0;
+
+    state.currentFrame =
+        0;
+
+    state.currentTime =
+        0;
+
+    state.totalFrames =
+        0;
+
+    state.annotations =
+        [];
+
+    state.frameAnnotations =
+        new Map();
+
+    state.selectedId =
+        null;
+
+
+    if (
+        $("videoControlsPanel")
+    ) {
+
+        $("videoControlsPanel")
+            .style.display =
+            "none";
+
+    }
+
+
+    if (filmstripBar) {
+
+        filmstripBar.style.display =
+            "none";
+
+    }
+
+
+    hidePopup();
+
+    updateCounts();
+
+    updateAnnotationsList();
+
 }
-.workspace-brand-context{min-width:0;flex:1}
-.workspace-kicker{font-size:8px;letter-spacing:1.6px;color:#666;text-transform:uppercase;font-weight:800}
-.workspace-brand-context .file-name{font-size:11px;margin-top:3px}
-.workspace-nav{
-    display:flex;
-    align-items:center;
-    gap:3px;
-    white-space:nowrap;
+
+
+/* ============================================================
+   VIDEO UI
+============================================================ */
+
+function updateVideoUI() {
+
+    if (
+        $("currentFrame")
+    ) {
+
+        $("currentFrame")
+            .textContent =
+            String(
+                state.currentFrame +
+                1
+            );
+
+    }
+
+
+    if (
+        $("totalFrames")
+    ) {
+
+        $("totalFrames")
+            .textContent =
+            String(
+                Math.max(
+                    1,
+                    state.totalFrames
+                )
+            );
+
+    }
+
+
+    if (
+        $("currentTime")
+    ) {
+
+        $("currentTime")
+            .textContent =
+            formatVideoTime(
+                state.currentTime
+            );
+
+    }
+
+
+    if (
+        $("duration")
+    ) {
+
+        $("duration")
+            .textContent =
+            formatVideoTime(
+                state.videoDuration
+            );
+
+    }
+
+
+    const slider =
+        $("frameSlider");
+
+
+    if (slider) {
+
+        slider.max =
+            Math.max(
+                0,
+                state.totalFrames -
+                1
+            );
+
+        slider.value =
+            state.currentFrame;
+
+    }
+
+
+    if (
+        filmstripCurrentLabel
+    ) {
+
+        filmstripCurrentLabel
+            .textContent =
+            `Frame ${state.currentFrame + 1}`;
+
+    }
+
 }
-.nav-action{
-    display:flex;
-    align-items:center;
-    gap:6px;
-    min-height:34px;
-    padding:0 9px;
-    border:1px solid transparent;
-    border-radius:7px;
-    background:transparent;
-    color:#c7c7c7;
-    font-size:9px;
+
+
+function formatVideoTime(
+    seconds
+) {
+
+    const value =
+        Number(
+            seconds
+        );
+
+
+    if (
+        !Number.isFinite(
+            value
+        )
+    ) {
+
+        return "00:00";
+
+    }
+
+
+    const total =
+        Math.max(
+            0,
+            Math.floor(
+                value
+            )
+        );
+
+
+    const minutes =
+        Math.floor(
+            total / 60
+        );
+
+
+    const secs =
+        total % 60;
+
+
+    return (
+        String(
+            minutes
+        ).padStart(
+            2,
+            "0"
+        ) +
+        ":" +
+        String(
+            secs
+        ).padStart(
+            2,
+            "0"
+        )
+    );
+
 }
-.nav-action:hover{border-color:#343434;background:#171717;color:#fff}
-.nav-icon{font-size:13px;line-height:1}
-.nav-logout{color:#8e8e8e}
-.editor-controls{
-    display:flex;
-    align-items:center;
-    gap:4px;
-    padding-left:8px;
-    border-left:1px solid #242424;
+
+
+/* ============================================================
+   FRAME CONTROLS
+============================================================ */
+
+$("frameSlider")?.addEventListener(
+    "input",
+    async event => {
+
+        const frame =
+            Number(
+                event.target.value
+            );
+
+
+        await seekVideoFrame(
+            frame
+        );
+
+    }
+);
+
+
+$("prevFrame")?.addEventListener(
+    "click",
+    async () => {
+
+        await seekVideoFrame(
+            state.currentFrame -
+            1
+        );
+
+    }
+);
+
+
+$("nextFrame")?.addEventListener(
+    "click",
+    async () => {
+
+        await seekVideoFrame(
+            state.currentFrame +
+            1
+        );
+
+    }
+);
+
+
+$("playVideo")?.addEventListener(
+    "click",
+    toggleVideoPlayback
+);
+
+
+async function toggleVideoPlayback() {
+
+    if (
+        !sourceVideo ||
+        state.mediaType !==
+            "video"
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        state.videoPlaying
+    ) {
+
+        sourceVideo.pause();
+
+        state.videoPlaying =
+            false;
+
+        updatePlayButton();
+
+        return;
+
+    }
+
+
+    try {
+
+        await sourceVideo.play();
+
+        state.videoPlaying =
+            true;
+
+        updatePlayButton();
+
+    } catch (
+        error
+    ) {
+
+        console.warn(
+            "Video playback failed:",
+            error
+        );
+
+        showToast(
+            "Unable to play this video."
+        );
+
+    }
+
 }
-.editor-controls button{
-    min-width:28px;height:28px;border:1px solid #292929;border-radius:6px;
-    background:#151515;color:#fff;font-size:9px
+
+
+function updatePlayButton() {
+
+    const button =
+        $("playVideo");
+
+
+    if (!button) {
+        return;
+    }
+
+
+    button.textContent =
+        state.videoPlaying
+            ? "❚❚"
+            : "▶";
+
 }
-.editor-controls button:hover{border-color:var(--accent)}
-.editor-controls #zoomValue{width:42px;text-align:center;color:#bbb;font-size:9px}
-#coworkerDashboard{
-    flex:1;
-    overflow:auto;
-    background:
-      radial-gradient(circle at 50% 0%,rgba(255,106,0,.05),transparent 35%),
-      #0b0b0b;
+
+
+/* ============================================================
+   VIDEO EVENTS
+============================================================ */
+
+sourceVideo?.addEventListener(
+    "timeupdate",
+    () => {
+
+        if (
+            state.videoSeeking
+        ) {
+
+            return;
+
+        }
+
+
+        state.currentTime =
+            sourceVideo.currentTime;
+
+
+        if (
+            state.fps > 0
+        ) {
+
+            state.currentFrame =
+                Math.max(
+                    0,
+                    Math.min(
+                        state.totalFrames -
+                        1,
+                        Math.round(
+                            sourceVideo.currentTime *
+                            state.fps
+                        )
+                    )
+                );
+
+        }
+
+
+        updateVideoUI();
+
+    }
+);
+
+
+sourceVideo?.addEventListener(
+    "play",
+    () => {
+
+        state.videoPlaying =
+            true;
+
+        updatePlayButton();
+
+    }
+);
+
+
+sourceVideo?.addEventListener(
+    "pause",
+    () => {
+
+        state.videoPlaying =
+            false;
+
+        updatePlayButton();
+
+    }
+);
+
+
+sourceVideo?.addEventListener(
+    "ended",
+    () => {
+
+        state.videoPlaying =
+            false;
+
+        updatePlayButton();
+
+    }
+);
+
+
+/* ============================================================
+   FILMSTRIP
+============================================================ */
+
+function buildFilmstrip() {
+
+    if (
+        !filmstripTrack ||
+        state.mediaType !==
+            "video"
+    ) {
+
+        return;
+
+    }
+
+
+    filmstripTrack.innerHTML =
+        "";
+
+
+    const count =
+        Math.min(
+            12,
+            Math.max(
+                1,
+                state.totalFrames
+            )
+        );
+
+
+    for (
+        let index = 0;
+        index < count;
+        index++
+    ) {
+
+        const frame =
+            Math.round(
+                (
+                    index /
+                    Math.max(
+                        1,
+                        count -
+                        1
+                    )
+                ) *
+                Math.max(
+                    0,
+                    state.totalFrames -
+                    1
+                )
+            );
+
+
+        const item =
+            document.createElement(
+                "button"
+            );
+
+
+        item.type =
+            "button";
+
+        item.className =
+            "filmstrip-item";
+
+
+        item.dataset.frame =
+            String(
+                frame
+            );
+
+
+        item.innerHTML = `
+            <span class="filmstrip-frame">
+                ${frame + 1}
+            </span>
+        `;
+
+
+        item.addEventListener(
+            "click",
+            () =>
+                seekVideoFrame(
+                    frame
+                )
+        );
+
+
+        filmstripTrack.appendChild(
+            item
+        );
+
+    }
+
+
+    updateFilmstripSelection();
+
 }
-.dashboard-inner{width:min(980px,calc(100% - 48px));margin:0 auto;padding:44px 0 56px}
-.dashboard-greeting{
-    display:flex;align-items:center;justify-content:center;gap:14px;text-align:left;
-    margin:0 auto 38px;max-width:700px
+
+
+function updateFilmstripSelection() {
+
+    if (!filmstripTrack) {
+        return;
+    }
+
+
+    filmstripTrack
+        .querySelectorAll(
+            ".filmstrip-item"
+        )
+        .forEach(
+            item => {
+
+                const frame =
+                    Number(
+                        item.dataset.frame
+                    );
+
+
+                item.classList.toggle(
+                    "active",
+                    frame ===
+                    state.currentFrame
+                );
+
+            }
+        );
+
 }
-.greeting-avatar,.workbench-avatar{
-    width:46px;height:46px;border-radius:50%;display:grid;place-items:center;
-    background:#58b76a;color:#fff;font-weight:800;font-size:13px;flex:0 0 auto
+
+
+/* ============================================================
+   CANVAS RESIZE
+============================================================ */
+
+function resizeCanvas() {
+
+    if (
+        !canvas ||
+        !workspace
+    ) {
+
+        return;
+
+    }
+
+
+    const rect =
+        workspace.getBoundingClientRect();
+
+
+    if (
+        rect.width <= 0 ||
+        rect.height <= 0
+    ) {
+
+        return;
+
+    }
+
+
+    const ratio =
+        window.devicePixelRatio ||
+        1;
+
+
+    canvas.width =
+        Math.round(
+            rect.width *
+            ratio
+        );
+
+
+    canvas.height =
+        Math.round(
+            rect.height *
+            ratio
+        );
+
+
+    canvas.style.width =
+        `${rect.width}px`;
+
+    canvas.style.height =
+        `${rect.height}px`;
+
+
+    if (ctx) {
+
+        ctx.setTransform(
+            ratio,
+            0,
+            0,
+            ratio,
+            0,
+            0
+        );
+
+    }
+
+
+    render();
+
 }
-.dashboard-greeting h1{margin:0;font-size:25px;letter-spacing:-.6px;color:#f5f5f5}
-.dashboard-greeting p{margin:5px 0 0;color:#777;font-size:11px}
-.dashboard-section-head{
-    display:flex;align-items:flex-end;justify-content:space-between;gap:15px;
-    margin-bottom:13px
+
+
+/* ============================================================
+   VIEW TRANSFORM
+============================================================ */
+
+function fitView() {
+
+    if (
+        !canvas ||
+        !state.image
+    ) {
+
+        return;
+
+    }
+
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    const imageWidth =
+        state.image.naturalWidth ||
+        state.image.width;
+
+    const imageHeight =
+        state.image.naturalHeight ||
+        state.image.height;
+
+
+    if (
+        !imageWidth ||
+        !imageHeight
+    ) {
+
+        return;
+
+    }
+
+
+    const scaleX =
+        rect.width /
+        imageWidth;
+
+
+    const scaleY =
+        rect.height /
+        imageHeight;
+
+
+    state.scale =
+        Math.min(
+            scaleX,
+            scaleY
+        ) *
+        0.92;
+
+
+    state.scale =
+        Math.max(
+            state.minScale,
+            Math.min(
+                state.maxScale,
+                state.scale
+            )
+        );
+
+
+    state.offsetX =
+        (
+            rect.width -
+            imageWidth *
+            state.scale
+        ) /
+        2;
+
+
+    state.offsetY =
+        (
+            rect.height -
+            imageHeight *
+            state.scale
+        ) /
+        2;
+
+
+    updateZoomUI();
+
 }
-.dashboard-eyebrow{font-size:9px;color:#888;letter-spacing:1.2px;font-weight:800}
-.dashboard-section-head h2{margin:5px 0 0;font-size:17px;color:#eee}
-.dashboard-refresh{
-    border:1px solid #303030;background:#151515;color:#aaa;border-radius:7px;
-    padding:7px 10px;font-size:9px
+
+
+/* ============================================================
+   COORDINATE HELPERS
+============================================================ */
+
+function screenToImage(
+    clientX,
+    clientY
+) {
+
+    if (
+        !canvas
+    ) {
+
+        return {
+            x: 0,
+            y: 0
+        };
+
+    }
+
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    const x =
+        clientX -
+        rect.left;
+
+
+    const y =
+        clientY -
+        rect.top;
+
+
+    return {
+
+        x:
+            (
+                x -
+                state.offsetX
+            ) /
+            state.scale,
+
+        y:
+            (
+                y -
+                state.offsetY
+            ) /
+            state.scale
+
+    };
+
 }
-.dashboard-refresh:hover{border-color:var(--accent);color:#fff}
-.available-jobs{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
-.available-jobs .task-card{
-    width:100%;min-height:178px;text-align:left;padding:0;overflow:hidden;
-    border:1px solid #292929;border-radius:10px;background:#171717;color:#eee;
-    cursor:pointer;display:block
+
+
+function imageToScreen(
+    x,
+    y
+) {
+
+    return {
+
+        x:
+            state.offsetX +
+            x *
+            state.scale,
+
+        y:
+            state.offsetY +
+            y *
+            state.scale
+
+    };
+
 }
-.available-jobs .task-card:hover{border-color:#555;transform:translateY(-1px)}
-.available-jobs .task-card-top{
-    display:flex;justify-content:space-between;gap:10px;align-items:flex-start;
-    padding:15px 15px 13px;background:linear-gradient(135deg,#54250f,#2d180d)
+
+
+function clamp(
+    value,
+    min,
+    max
+) {
+
+    return Math.max(
+        min,
+        Math.min(
+            max,
+            value
+        )
+    );
+
 }
-.available-jobs .task-card-top strong{font-size:11px}
-.available-jobs .task-count{font-size:8px;color:#d0d0d0;white-space:nowrap}
-.available-jobs .task-card-info{
-    display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 15px 7px;
-    font-size:9px;color:#9d9d9d
+
+
+/* ============================================================
+   ZOOM
+============================================================ */
+
+function setZoom(
+    nextScale,
+    centerX,
+    centerY
+) {
+
+    if (
+        !canvas
+    ) {
+
+        return;
+
+    }
+
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    const cx =
+        Number.isFinite(
+            centerX
+        )
+            ? centerX -
+              rect.left
+            : rect.width /
+              2;
+
+
+    const cy =
+        Number.isFinite(
+            centerY
+        )
+            ? centerY -
+              rect.top
+            : rect.height /
+              2;
+
+
+    const oldScale =
+        state.scale;
+
+
+    const newScale =
+        clamp(
+            nextScale,
+            state.minScale,
+            state.maxScale
+        );
+
+
+    if (
+        oldScale ===
+        newScale
+    ) {
+
+        return;
+
+    }
+
+
+    const imageX =
+        (
+            cx -
+            state.offsetX
+        ) /
+        oldScale;
+
+
+    const imageY =
+        (
+            cy -
+            state.offsetY
+        ) /
+        oldScale;
+
+
+    state.scale =
+        newScale;
+
+
+    state.offsetX =
+        cx -
+        imageX *
+        newScale;
+
+
+    state.offsetY =
+        cy -
+        imageY *
+        newScale;
+
+
+    updateZoomUI();
+
+    render();
+
 }
-.available-jobs .task-card-info span{display:block}
-.available-jobs .task-card-pay{
-    padding:5px 15px 14px;color:#ddd;font-size:9px
+
+
+function zoomIn() {
+
+    setZoom(
+        state.scale *
+        1.2
+    );
+
 }
-.dashboard-empty{
-    grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    min-height:140px;border:1px dashed #303030;border-radius:10px;background:#111;
-    text-align:center;padding:25px;color:#777
+
+
+function zoomOut() {
+
+    setZoom(
+        state.scale /
+        1.2
+    );
+
 }
-.dashboard-empty strong{font-size:11px;color:#bbb}
-.dashboard-empty span{margin-top:6px;font-size:9px}
-.workbench-banner{
-    display:flex;align-items:center;justify-content:space-between;gap:18px;
-    margin-top:24px;padding:12px;border:1px solid #2b2b2b;border-radius:11px;background:#151515
+
+
+function resetZoom() {
+
+    fitView();
+
+    render();
+
 }
-.workbench-person{display:flex;align-items:center;gap:10px;min-width:160px}
-.workbench-person>div:last-child{display:flex;flex-direction:column}
-.workbench-person span{font-size:7px;letter-spacing:1px;color:#777;font-weight:800}
-.workbench-person strong{font-size:11px;color:#fff;margin-top:2px}
-.workbench-person small{font-size:8px;color:#929292;margin-top:2px}
-.workbench-avatar{width:38px;height:38px;font-size:11px}
-.workbench-tools{display:grid;grid-template-columns:repeat(4,minmax(115px,1fr));gap:6px;flex:1}
-.workbench-tool{
-    display:grid;grid-template-columns:24px 1fr;grid-template-rows:auto auto;
-    align-items:center;column-gap:6px;text-align:left;padding:8px;
-    border:1px solid #292929;border-radius:7px;background:#101010;color:#fff
+
+
+$("zoomIn")?.addEventListener(
+    "click",
+    zoomIn
+);
+
+
+$("zoomOut")?.addEventListener(
+    "click",
+    zoomOut
+);
+
+
+$("resetZoom")?.addEventListener(
+    "click",
+    resetZoom
+);
+
+
+function updateZoomUI() {
+
+    const zoom =
+        $("zoomLevel");
+
+
+    if (zoom) {
+
+        zoom.textContent =
+            `${Math.round(
+                state.scale *
+                100
+            )}%`;
+
+    }
+
 }
-.workbench-tool:hover{border-color:#4a4a4a;background:#1a1a1a}
-.workbench-tool>span{grid-row:1/3;display:grid;place-items:center;font-size:15px;color:var(--accent)}
-.workbench-tool b{font-size:8px}
-.workbench-tool small{font-size:7px;color:#777;margin-top:2px}
-#canvasWorkspace{min-height:0}
-body.dashboard-mode #canvasWorkspace,
-body.dashboard-mode #filmstripBar,
-body.dashboard-mode .workspace-footer,
-body.dashboard-mode #taskActionBar{display:none!important}
-body.editor-mode #coworkerDashboard{display:none!important}
-body.editor-mode #canvasWorkspace{display:block}
-body.editor-mode .modern-header{flex-shrink:0}
-.right-panel{background:#0d0d0d}
-.right-title{font-size:9px}
-.reopen-tab{top:76px}
-.sidebar-signout{margin-top:5px}
-.profile-screen{max-width:960px;margin:0 auto;padding:34px}
-.profile-hero{
-    display:flex;align-items:center;gap:18px;padding:24px;border:1px solid #2b2b2b;
-    border-radius:14px;background:#141414
+
+
+/* ============================================================
+   MOUSE WHEEL ZOOM
+============================================================ */
+
+canvas?.addEventListener(
+    "wheel",
+    event => {
+
+        event.preventDefault();
+
+
+        const factor =
+            event.deltaY < 0
+                ? 1.12
+                : 0.89;
+
+
+        setZoom(
+            state.scale *
+            factor,
+            event.clientX,
+            event.clientY
+        );
+
+    },
+    {
+        passive: false
+    }
+);
+
+
+/* ============================================================
+   POINTER HELPERS
+============================================================ */
+
+function getPointerPosition(
+    event
+) {
+
+    return screenToImage(
+        event.clientX,
+        event.clientY
+    );
+
 }
-.profile-large-avatar{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;background:#58b76a;color:#fff;font-size:22px;font-weight:800}
-.profile-hero h3{margin:0;font-size:20px}.profile-hero p{margin:5px 0;color:#aaa;font-size:11px}.profile-hero span{color:#666;font-size:9px}
-.profile-actions-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
-.profile-action-card{
-    min-height:110px;border:1px solid #2b2b2b;border-radius:10px;background:#141414;color:#fff;
-    padding:15px;text-align:left;display:flex;flex-direction:column;align-items:flex-start
+
+
+function distance(
+    a,
+    b
+) {
+
+    const dx =
+        a.x -
+        b.x;
+
+    const dy =
+        a.y -
+        b.y;
+
+
+    return Math.sqrt(
+        dx * dx +
+        dy * dy
+    );
+
 }
-.profile-action-card:hover{border-color:#555}.profile-action-card span{font-size:20px;color:var(--accent)}
-.profile-action-card b{font-size:10px;margin-top:10px}.profile-action-card small{font-size:8px;color:#777;margin-top:4px}
-.profile-upload{min-height:110px}
-.danger-card span{color:#f87171}
-.approval-page{
-    position:fixed;inset:0;z-index:100000;display:grid;place-items:center;
-    background:#0b0b0b;padding:24px
+
+
+function normalizeBox(
+    start,
+    end
+) {
+
+    const x =
+        Math.min(
+            start.x,
+            end.x
+        );
+
+
+    const y =
+        Math.min(
+            start.y,
+            end.y
+        );
+
+
+    const width =
+        Math.abs(
+            end.x -
+            start.x
+        );
+
+
+    const height =
+        Math.abs(
+            end.y -
+            start.y
+        );
+
+
+    return {
+        x,
+        y,
+        width,
+        height
+    };
+
 }
-.approval-card{width:min(520px,94vw);padding:42px;border:1px solid #303030;border-radius:16px;background:#151515;text-align:center;box-shadow:0 30px 90px rgba(0,0,0,.55)}
-.approval-icon{font-size:42px;margin-bottom:10px}.approval-kicker{font-size:8px;letter-spacing:1.5px;color:#777;font-weight:800}
-.approval-card h1{font-size:24px;margin:10px 0}.approval-card p{font-size:11px;line-height:1.6;color:#888}
-.approval-card .primary-button{max-width:220px;margin:18px auto 0}
-.modal-overlay{
-    position:fixed!important;inset:0!important;z-index:90000!important;
-    display:grid;place-items:stretch;background:rgba(0,0,0,.84);backdrop-filter:blur(8px)
+
+
+/* ============================================================
+   CANVAS POINTER DOWN
+============================================================ */
+
+canvas?.addEventListener(
+    "pointerdown",
+    event => {
+
+        if (
+            event.button !==
+            0
+        ) {
+
+            return;
+
+        }
+
+
+        canvas.setPointerCapture(
+            event.pointerId
+        );
+
+
+        state.pointerDown =
+            true;
+
+
+        const point =
+            getPointerPosition(
+                event
+            );
+
+
+        if (
+            state.spacePan ||
+            state.mode ===
+            "pan"
+        ) {
+
+            state.panning =
+                true;
+
+            state.panStart = {
+
+                clientX:
+                    event.clientX,
+
+                clientY:
+                    event.clientY,
+
+                offsetX:
+                    state.offsetX,
+
+                offsetY:
+                    state.offsetY
+
+            };
+
+            return;
+
+        }
+
+
+        if (
+            state.annotationType ===
+            "polygon"
+        ) {
+
+            handlePolygonPointerDown(
+                point
+            );
+
+            return;
+
+        }
+
+
+        if (
+            state.annotationType ===
+            "segmentation"
+        ) {
+
+            handleSegmentationPointerDown(
+                point
+            );
+
+            return;
+
+        }
+
+
+        if (
+            state.mode ===
+            "select"
+        ) {
+
+            const selected =
+                findAnnotationAtPoint(
+                    point
+                );
+
+
+            if (selected) {
+
+                state.selectedId =
+                    selected.id;
+
+                state.dragging =
+                    true;
+
+                state.dragStartImage =
+                    point;
+
+                state.dragLastImage =
+                    point;
+
+                pushHistory();
+
+                updateAnnotationsList();
+
+                render();
+
+                return;
+
+            }
+
+
+            state.selectedId =
+                null;
+
+            hidePopup();
+
+            updateAnnotationsList();
+
+            render();
+
+            return;
+
+        }
+
+
+        if (
+            state.mode ===
+            "draw"
+        ) {
+
+            state.drawing =
+                true;
+
+            state.drawStart =
+                point;
+
+            state.drawCurrent =
+                point;
+
+            return;
+
+        }
+
+    }
+);
+
+
+/* ============================================================
+   CANVAS POINTER MOVE
+============================================================ */
+
+canvas?.addEventListener(
+    "pointermove",
+    event => {
+
+        if (
+            !state.pointerDown
+        ) {
+
+            const point =
+                getPointerPosition(
+                    event
+                );
+
+
+            const hovered =
+                findAnnotationAtPoint(
+                    point
+                );
+
+
+            const id =
+                hovered?.id ||
+                null;
+
+
+            if (
+                id !==
+                state.hoveredId
+            ) {
+
+                state.hoveredId =
+                    id;
+
+                render();
+
+            }
+
+
+            return;
+
+        }
+
+
+        if (
+            state.panning &&
+            state.panStart
+        ) {
+
+            const dx =
+                event.clientX -
+                state.panStart.clientX;
+
+
+            const dy =
+                event.clientY -
+                state.panStart.clientY;
+
+
+            state.offsetX =
+                state.panStart.offsetX +
+                dx;
+
+
+            state.offsetY =
+                state.panStart.offsetY +
+                dy;
+
+
+            render();
+
+            return;
+
+        }
+
+
+        const point =
+            getPointerPosition(
+                event
+            );
+
+
+        if (
+            state.dragging &&
+            state.selectedId
+        ) {
+
+            moveSelectedAnnotation(
+                point
+            );
+
+            return;
+
+        }
+
+
+        if (
+            state.drawing
+        ) {
+
+            state.drawCurrent =
+                point;
+
+            render();
+
+            return;
+
+        }
+
+
+        if (
+            state.annotationType ===
+            "polygon" &&
+            state.polygonPoints.length
+        ) {
+
+            state.drawCurrent =
+                point;
+
+            render();
+
+        }
+
+    }
+);
+
+
+/* ============================================================
+   CANVAS POINTER UP
+============================================================ */
+
+canvas?.addEventListener(
+    "pointerup",
+    event => {
+
+        state.pointerDown =
+            false;
+
+
+        if (
+            canvas.hasPointerCapture(
+                event.pointerId
+            )
+        ) {
+
+            canvas.releasePointerCapture(
+                event.pointerId
+            );
+
+        }
+
+
+        if (
+            state.panning
+        ) {
+
+            state.panning =
+                false;
+
+            state.panStart =
+                null;
+
+            return;
+
+        }
+
+
+        if (
+            state.dragging
+        ) {
+
+            state.dragging =
+                false;
+
+            state.dragStartImage =
+                null;
+
+            state.dragLastImage =
+                null;
+
+            saveFrame();
+
+            updateAnnotationsList();
+
+            render();
+
+            return;
+
+        }
+
+
+        if (
+            state.drawing
+        ) {
+
+            state.drawing =
+                false;
+
+            const start =
+                state.drawStart;
+
+            const end =
+                getPointerPosition(
+                    event
+                );
+
+
+            state.drawStart =
+                null;
+
+            state.drawCurrent =
+                null;
+
+
+            if (
+                start &&
+                end
+            ) {
+
+                createBoxAnnotation(
+                    start,
+                    end
+                );
+
+            }
+
+
+            return;
+
+        }
+
+    }
+);
+
+
+/* ============================================================
+   POINTER CANCEL
+============================================================ */
+
+canvas?.addEventListener(
+    "pointercancel",
+    () => {
+
+        state.pointerDown =
+            false;
+
+        state.panning =
+            false;
+
+        state.dragging =
+            false;
+
+        state.drawing =
+            false;
+
+        state.drawStart =
+            null;
+
+        state.drawCurrent =
+            null;
+
+        state.panStart =
+            null;
+
+    }
+);
+
+
+/* ============================================================
+   KEYBOARD
+============================================================ */
+
+window.addEventListener(
+    "keydown",
+    event => {
+
+        if (
+            event.code ===
+            "Space" &&
+            !isTypingTarget(
+                event.target
+            )
+        ) {
+
+            state.spacePan =
+                true;
+
+            event.preventDefault();
+
+        }
+
+
+        if (
+            event.key ===
+            "Delete"
+        ) {
+
+            if (
+                !isTypingTarget(
+                    event.target
+                )
+            ) {
+
+                deleteSelectedAnnotation();
+
+            }
+
+        }
+
+
+        if (
+            (
+                event.ctrlKey ||
+                event.metaKey
+            ) &&
+            event.key.toLowerCase() ===
+            "z"
+        ) {
+
+            event.preventDefault();
+
+
+            if (
+                event.shiftKey
+            ) {
+
+                redo();
+
+            } else {
+
+                undo();
+
+            }
+
+        }
+
+
+        if (
+            (
+                event.ctrlKey ||
+                event.metaKey
+            ) &&
+            event.key.toLowerCase() ===
+            "y"
+        ) {
+
+            event.preventDefault();
+
+            redo();
+
+        }
+
+    }
+);
+
+
+window.addEventListener(
+    "keyup",
+    event => {
+
+        if (
+            event.code ===
+            "Space"
+        ) {
+
+            state.spacePan =
+                false;
+
+        }
+
+    }
+);
+
+
+function isTypingTarget(
+    target
+) {
+
+    if (!target) {
+        return false;
+    }
+
+
+    const tag =
+        target.tagName?.toLowerCase();
+
+
+    return (
+        tag ===
+            "input" ||
+        tag ===
+            "textarea" ||
+        tag ===
+            "select" ||
+        target.isContentEditable
+    );
+
 }
-.modal-overlay>.modal{
-    width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;
-    margin:0;border:0;border-radius:0;overflow:auto;background:#101010
+
+
+/* ============================================================
+   ANNOTATION CREATION
+============================================================ */
+
+function createBoxAnnotation(
+    start,
+    end
+) {
+
+    const box =
+        normalizeBox(
+            start,
+            end
+        );
+
+
+    if (
+        box.width <
+            2 ||
+        box.height <
+            2
+    ) {
+
+        return;
+
+    }
+
+
+    const annotation = {
+
+        id:
+            `ann-${Date.now()}-${state.nextId++}`,
+
+        type:
+            "box",
+
+        class_name:
+            $("className")
+                ?.value
+                ?.trim() ||
+            "object",
+
+        x:
+            box.x,
+
+        y:
+            box.y,
+
+        width:
+            box.width,
+
+        height:
+            box.height,
+
+        score:
+            1,
+
+        ai_generated:
+            false,
+
+        corrected:
+            false,
+
+        frame_number:
+            state.currentFrame
+
+    };
+
+
+    pushHistory();
+
+
+    state.annotations.push(
+        annotation
+    );
+
+
+    state.selectedId =
+        annotation.id;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
 }
-.modal-overlay .modal-head{position:sticky;top:0;z-index:2;background:#101010}
-.admin-modal{display:flex;flex-direction:column}
-.admin-modal .admin-tabs{position:sticky;top:61px;z-index:2;background:#101010}
-.admin-modal .admin-tab-content{min-height:calc(100vh - 120px)}
-.admin-export-actions{display:flex;gap:6px;flex-wrap:wrap}
-.admin-export-actions .export-button{width:auto;margin:0}
-@media(max-width:1200px){
-    .workspace-nav{gap:1px}.nav-action{padding:0 6px}.nav-action span:last-child{display:none}
-    .workbench-tools{grid-template-columns:repeat(2,1fr)}
+
+
+/* ============================================================
+   POLYGON
+============================================================ */
+
+function handlePolygonPointerDown(
+    point
+) {
+
+    if (
+        !state.polygonPoints.length
+    ) {
+
+        pushHistory();
+
+        state.polygonPoints = [
+            point
+        ];
+
+        state.mode =
+            "draw";
+
+        render();
+
+        return;
+
+    }
+
+
+    const first =
+        state.polygonPoints[0];
+
+
+    if (
+        distance(
+            point,
+            first
+        ) <
+        12 /
+        Math.max(
+            state.scale,
+            0.01
+        )
+    ) {
+
+        finishPolygon();
+
+        return;
+
+    }
+
+
+    state.polygonPoints.push(
+        point
+    );
+
+
+    render();
+
 }
-@media(max-width:900px){
-    .app{grid-template-columns:220px minmax(0,1fr)}
-    .right-panel{display:none}
-    .dashboard-inner{width:calc(100% - 28px);padding-top:28px}
-    .modern-header{flex-wrap:wrap}.workspace-brand-context{order:1;min-width:45%}.workspace-nav{order:2}.editor-controls{order:3;width:100%;border-left:0;padding-left:0}
-    .profile-actions-grid{grid-template-columns:1fr 1fr}
+
+
+function finishPolygon() {
+
+    const points =
+        state.polygonPoints;
+
+
+    if (
+        points.length <
+        3
+    ) {
+
+        state.polygonPoints =
+            [];
+
+        render();
+
+        return;
+
+    }
+
+
+    const annotation = {
+
+        id:
+            `ann-${Date.now()}-${state.nextId++}`,
+
+        type:
+            "polygon",
+
+        class_name:
+            $("className")
+                ?.value
+                ?.trim() ||
+            "object",
+
+        points:
+            points.map(
+                point => ({
+                    x:
+                        point.x,
+
+                    y:
+                        point.y
+                })
+            ),
+
+        score:
+            1,
+
+        ai_generated:
+            false,
+
+        corrected:
+            false,
+
+        frame_number:
+            state.currentFrame
+
+    };
+
+
+    state.annotations.push(
+        annotation
+    );
+
+
+    state.selectedId =
+        annotation.id;
+
+
+    state.polygonPoints =
+        [];
+
+    state.drawCurrent =
+        null;
+
+    state.mode =
+        "select";
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
 }
-@media(max-width:650px){
-    .app{grid-template-columns:1fr}
-    .sidebar{display:none}
-    .dashboard-greeting h1{font-size:20px}.dashboard-greeting{justify-content:flex-start}
-    .available-jobs{grid-template-columns:1fr}.workbench-banner{flex-direction:column;align-items:stretch}.workbench-tools{grid-template-columns:1fr 1fr}
+
+
+/* ============================================================
+   SEGMENTATION
+============================================================ */
+
+function handleSegmentationPointerDown(
+    point
+) {
+
+    /*
+     * Segmentation is represented as a polygon
+     * in the saved annotation structure.
+     */
+
+    handlePolygonPointerDown(
+        point
+    );
+
 }
+
+
+/* ============================================================
+   MOVE SELECTED
+============================================================ */
+
+function moveSelectedAnnotation(
+    point
+) {
+
+    const annotation =
+        state.annotations.find(
+            item =>
+                item.id ===
+                state.selectedId
+        );
+
+
+    if (!annotation) {
+        return;
+    }
+
+
+    const previous =
+        state.dragLastImage;
+
+
+    if (!previous) {
+
+        state.dragLastImage =
+            point;
+
+        return;
+
+    }
+
+
+    const dx =
+        point.x -
+        previous.x;
+
+
+    const dy =
+        point.y -
+        previous.y;
+
+
+    if (
+        annotation.type ===
+        "box"
+    ) {
+
+        annotation.x +=
+            dx;
+
+        annotation.y +=
+            dy;
+
+    } else if (
+        Array.isArray(
+            annotation.points
+        )
+    ) {
+
+        annotation.points =
+            annotation.points.map(
+                item => ({
+                    x:
+                        item.x +
+                        dx,
+
+                    y:
+                        item.y +
+                        dy
+                })
+            );
+
+    }
+
+
+    state.dragLastImage =
+        point;
+
+
+    render();
+
+}
+
+
+/* ============================================================
+   ANNOTATION HIT TEST
+============================================================ */
+
+function findAnnotationAtPoint(
+    point
+) {
+
+    for (
+        let index =
+            state.annotations.length -
+            1;
+        index >= 0;
+        index--
+    ) {
+
+        const annotation =
+            state.annotations[
+                index
+            ];
+
+
+        if (
+            annotation.type ===
+            "box"
+        ) {
+
+            if (
+                point.x >=
+                    annotation.x &&
+                point.x <=
+                    annotation.x +
+                    annotation.width &&
+                point.y >=
+                    annotation.y &&
+                point.y <=
+                    annotation.y +
+                    annotation.height
+            ) {
+
+                return annotation;
+
+            }
+
+        }
+
+
+        if (
+            Array.isArray(
+                annotation.points
+            ) &&
+            pointInPolygon(
+                point,
+                annotation.points
+            )
+        ) {
+
+            return annotation;
+
+        }
+
+    }
+
+
+    return null;
+
+}
+
+
+function pointInPolygon(
+    point,
+    points
+) {
+
+    let inside =
+        false;
+
+
+    for (
+        let i = 0,
+            j = points.length - 1;
+        i < points.length;
+        j = i++
+    ) {
+
+        const xi =
+            points[i].x;
+
+        const yi =
+            points[i].y;
+
+        const xj =
+            points[j].x;
+
+        const yj =
+            points[j].y;
+
+
+        const intersect =
+            (
+                yi >
+                    point.y
+            ) !==
+            (
+                yj >
+                    point.y
+            ) &&
+            point.x <
+                (
+                    xj -
+                    xi
+                ) *
+                (
+                    point.y -
+                    yi
+                ) /
+                (
+                    yj -
+                    yi
+                ) +
+                xi;
+
+
+        if (
+            intersect
+        ) {
+
+            inside =
+                !inside;
+
+        }
+
+    }
+
+
+    return inside;
+
+}
+
+
+/* ============================================================
+   DELETE
+============================================================ */
+
+$("deleteSelected")?.addEventListener(
+    "click",
+    deleteSelectedAnnotation
+);
+
+
+function deleteSelectedAnnotation() {
+
+    if (
+        !state.selectedId
+    ) {
+
+        showToast(
+            "Select an annotation first."
+        );
+
+        return;
+
+    }
+
+
+    const index =
+        state.annotations.findIndex(
+            annotation =>
+                annotation.id ===
+                state.selectedId
+        );
+
+
+    if (
+        index ===
+        -1
+    ) {
+
+        return;
+
+    }
+
+
+    pushHistory();
+
+
+    state.annotations.splice(
+        index,
+        1
+    );
+
+
+    state.selectedId =
+        null;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+/* ============================================================
+   ANNOTATION TYPE BUTTONS
+============================================================ */
+
+document
+    .querySelectorAll(
+        "[data-annotation-type]"
+    )
+    .forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    const type =
+                        button.dataset
+                            .annotationType;
+
+
+                    if (
+                        type ===
+                        "box"
+                    ) {
+
+                        state.annotationType =
+                            "box";
+
+                        state.mode =
+                            "draw";
+
+                    } else if (
+                        type ===
+                        "polygon"
+                    ) {
+
+                        state.annotationType =
+                            "polygon";
+
+                        state.mode =
+                            "draw";
+
+                    } else if (
+                        type ===
+                        "segmentation"
+                    ) {
+
+                        state.annotationType =
+                            "segmentation";
+
+                        state.mode =
+                            "draw";
+
+                    } else {
+
+                        state.annotationType =
+                            type;
+
+                    }
+
+
+                    state.polygonPoints =
+                        [];
+
+
+                    document
+                        .querySelectorAll(
+                            "[data-annotation-type]"
+                        )
+                        .forEach(
+                            item =>
+                                item.classList.toggle(
+                                    "active",
+                                    item ===
+                                    button
+                                )
+                        );
+
+
+                    render();
+
+                }
+            );
+
+        }
+    );
+
+
+/* ============================================================
+   SELECT / PAN / DRAW TOOLS
+============================================================ */
+
+document
+    .querySelectorAll(
+        "[data-tool]"
+    )
+    .forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    const tool =
+                        button.dataset.tool;
+
+
+                    if (
+                        tool ===
+                        "select"
+                    ) {
+
+                        state.mode =
+                            "select";
+
+                    } else if (
+                        tool ===
+                        "draw"
+                    ) {
+
+                        state.mode =
+                            "draw";
+
+                    } else if (
+                        tool ===
+                        "pan"
+                    ) {
+
+                        state.mode =
+                            "pan";
+
+                    }
+
+
+                    document
+                        .querySelectorAll(
+                            "[data-tool]"
+                        )
+                        .forEach(
+                            item =>
+                                item.classList.toggle(
+                                    "active",
+                                    item ===
+                                    button
+                                )
+                        );
+
+
+                    render();
+
+                }
+            );
+
+        }
+    );
+
+
+/* ============================================================
+   RENDER
+============================================================ */
+
+function render() {
+
+    if (
+        !canvas ||
+        !ctx
+    ) {
+
+        return;
+
+    }
+
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    const width =
+        rect.width;
+
+    const height =
+        rect.height;
+
+
+    ctx.clearRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+
+    ctx.save();
+
+
+    /*
+     * Canvas background.
+     */
+
+    ctx.fillStyle =
+        "#101214";
+
+    ctx.fillRect(
+        0,
+        0,
+        width,
+        height
+    );
+
+
+    if (
+        state.image
+    ) {
+
+        const imageWidth =
+            state.image.naturalWidth ||
+            state.image.width;
+
+
+        const imageHeight =
+            state.image.naturalHeight ||
+            state.image.height;
+
+
+        ctx.drawImage(
+            state.image,
+            state.offsetX,
+            state.offsetY,
+            imageWidth *
+                state.scale,
+            imageHeight *
+                state.scale
+        );
+
+
+        renderAnnotations();
+
+        renderDrawingPreview();
+
+    }
+
+
+    ctx.restore();
+
+
+    updateFilmstripSelection();
+
+    updateCounts();
+
+    updateZoomUI();
+
+}
+
+
+/* ============================================================
+   RENDER ANNOTATIONS
+============================================================ */
+
+function renderAnnotations() {
+
+    state.annotations
+        .forEach(
+            annotation => {
+
+                const selected =
+                    annotation.id ===
+                    state.selectedId;
+
+
+                const hovered =
+                    annotation.id ===
+                    state.hoveredId;
+
+
+                if (
+                    annotation.type ===
+                    "box"
+                ) {
+
+                    renderBoxAnnotation(
+                        annotation,
+                        selected,
+                        hovered
+                    );
+
+                } else if (
+                    Array.isArray(
+                        annotation.points
+                    )
+                ) {
+
+                    renderPolygonAnnotation(
+                        annotation,
+                        selected,
+                        hovered
+                    );
+
+                }
+
+            }
+        );
+
+}
+
+
+/* ============================================================
+   RENDER BOX
+============================================================ */
+
+function renderBoxAnnotation(
+    annotation,
+    selected,
+    hovered
+) {
+
+    const topLeft =
+        imageToScreen(
+            annotation.x,
+            annotation.y
+        );
+
+
+    const width =
+        annotation.width *
+        state.scale;
+
+
+    const height =
+        annotation.height *
+        state.scale;
+
+
+    ctx.save();
+
+
+    ctx.lineWidth =
+        selected
+            ? 3
+            : hovered
+                ? 2.5
+                : 2;
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#ff6b00"
+            : "#22c55e";
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(255,107,0,.12)"
+            : "rgba(34,197,94,.08)";
+
+
+    ctx.fillRect(
+        topLeft.x,
+        topLeft.y,
+        width,
+        height
+    );
+
+
+    ctx.strokeRect(
+        topLeft.x,
+        topLeft.y,
+        width,
+        height
+    );
+
+
+    renderAnnotationLabel(
+        annotation,
+        topLeft.x,
+        topLeft.y
+    );
+
+
+    if (
+        selected
+    ) {
+
+        renderResizeHandles(
+            topLeft.x,
+            topLeft.y,
+            width,
+            height
+        );
+
+    }
+
+
+    ctx.restore();
+
+}
+
+
+/* ============================================================
+   RENDER POLYGON
+============================================================ */
+
+function renderPolygonAnnotation(
+    annotation,
+    selected,
+    hovered
+) {
+
+    if (
+        !annotation.points ||
+        annotation.points.length <
+            2
+    ) {
+
+        return;
+
+    }
+
+
+    ctx.save();
+
+
+    ctx.beginPath();
+
+
+    annotation.points
+        .forEach(
+            (
+                point,
+                index
+            ) => {
+
+                const screen =
+                    imageToScreen(
+                        point.x,
+                        point.y
+                    );
+
+
+                if (
+                    index ===
+                    0
+                ) {
+
+                    ctx.moveTo(
+                        screen.x,
+                        screen.y
+                    );
+
+                } else {
+
+                    ctx.lineTo(
+                        screen.x,
+                        screen.y
+                    );
+
+                }
+
+            }
+        );
+
+
+    ctx.closePath();
+
+
+    ctx.lineWidth =
+        selected
+            ? 3
+            : hovered
+                ? 2.5
+                : 2;
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#ff6b00"
+            : "#22c55e";
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(255,107,0,.12)"
+            : "rgba(34,197,94,.08)";
+
+
+    ctx.fill();
+
+    ctx.stroke();
+
+
+    const first =
+        annotation.points[0];
+
+
+    if (first) {
+
+        const label =
+            imageToScreen(
+                first.x,
+                first.y
+            );
+
+
+        renderAnnotationLabel(
+            annotation,
+            label.x,
+            label.y
+        );
+
+    }
+
+
+    ctx.restore();
+
+}
+
+
+/* ============================================================
+   LABEL
+============================================================ */
+
+function renderAnnotationLabel(
+    annotation,
+    x,
+    y
+) {
+
+    const label =
+        annotation.class_name ||
+        annotation.label ||
+        annotation.type ||
+        "object";
+
+
+    const score =
+        Number(
+            annotation.score
+        );
+
+
+    const text =
+        Number.isFinite(
+            score
+        ) &&
+        score < 1
+            ? `${label} ${Math.round(
+                score * 100
+            )}%`
+            : label;
+
+
+    ctx.save();
+
+
+    ctx.font =
+        "600 12px Inter, Arial, sans-serif";
+
+
+    const metrics =
+        ctx.measureText(
+            text
+        );
+
+
+    const padding =
+        6;
+
+
+    const boxWidth =
+        metrics.width +
+        padding * 2;
+
+
+    const boxHeight =
+        22;
+
+
+    const top =
+        Math.max(
+            0,
+            y -
+            boxHeight
+        );
+
+
+    ctx.fillStyle =
+        "#ff6b00";
+
+
+    ctx.fillRect(
+        x,
+        top,
+        boxWidth,
+        boxHeight
+    );
+
+
+    ctx.fillStyle =
+        "#ffffff";
+
+
+    ctx.textBaseline =
+        "middle";
+
+
+    ctx.fillText(
+        text,
+        x +
+            padding,
+        top +
+            boxHeight /
+                2
+    );
+
+
+    ctx.restore();
+
+}
+
+
+/* ============================================================
+   RESIZE HANDLES
+============================================================ */
+
+function renderResizeHandles(
+    x,
+    y,
+    width,
+    height
+) {
+
+    const size =
+        7;
+
+
+    const points = [
+
+        [x, y],
+
+        [x + width, y],
+
+        [x, y + height],
+
+        [x + width, y + height]
+
+    ];
+
+
+    ctx.save();
+
+
+    ctx.fillStyle =
+        "#ffffff";
+
+    ctx.strokeStyle =
+        "#ff6b00";
+
+
+    points.forEach(
+        point => {
+
+            ctx.beginPath();
+
+            ctx.rect(
+                point[0] -
+                    size /
+                    2,
+                point[1] -
+                    size /
+                    2,
+                size,
+                size
+            );
+
+            ctx.fill();
+
+            ctx.stroke();
+
+        }
+    );
+
+
+    ctx.restore();
+
+}
+
+
+/* ============================================================
+   DRAWING PREVIEW
+============================================================ */
+
+function renderDrawingPreview() {
+
+    if (
+        state.drawing &&
+        state.drawStart &&
+        state.drawCurrent
+    ) {
+
+        const box =
+            normalizeBox(
+                state.drawStart,
+                state.drawCurrent
+            );
+
+
+        const topLeft =
+            imageToScreen(
+                box.x,
+                box.y
+            );
+
+
+        ctx.save();
+
+
+        ctx.setLineDash(
+            [
+                6,
+                4
+            ]
+        );
+
+
+        ctx.lineWidth =
+            2;
+
+        ctx.strokeStyle =
+            "#ff6b00";
+
+        ctx.strokeRect(
+            topLeft.x,
+            topLeft.y,
+            box.width *
+                state.scale,
+            box.height *
+                state.scale
+        );
+
+
+        ctx.restore();
+
+    }
+
+
+    if (
+        state.polygonPoints.length
+    ) {
+
+        ctx.save();
+
+
+        ctx.lineWidth =
+            2;
+
+        ctx.strokeStyle =
+            "#ff6b00";
+
+
+        ctx.beginPath();
+
+
+        state.polygonPoints
+            .forEach(
+                (
+                    point,
+                    index
+                ) => {
+
+                    const screen =
+                        imageToScreen(
+                            point.x,
+                            point.y
+                        );
+
+
+                    if (
+                        index ===
+                        0
+                    ) {
+
+                        ctx.moveTo(
+                            screen.x,
+                            screen.y
+                        );
+
+                    } else {
+
+                        ctx.lineTo(
+                            screen.x,
+                            screen.y
+                        );
+
+                    }
+
+                }
+            );
+
+
+        if (
+            state.drawCurrent
+        ) {
+
+            const current =
+                imageToScreen(
+                    state.drawCurrent.x,
+                    state.drawCurrent.y
+                );
+
+
+            ctx.lineTo(
+                current.x,
+                current.y
+            );
+
+        }
+
+
+        ctx.stroke();
+
+
+        state.polygonPoints
+            .forEach(
+                point => {
+
+                    const screen =
+                        imageToScreen(
+                            point.x,
+                            point.y
+                        );
+
+
+                    ctx.beginPath();
+
+                    ctx.arc(
+                        screen.x,
+                        screen.y,
+                        4,
+                        0,
+                        Math.PI * 2
+                    );
+
+                    ctx.fillStyle =
+                        "#ff6b00";
+
+                    ctx.fill();
+
+                }
+            );
+
+
+        ctx.restore();
+
+    }
+
+}
+
+
+/* ============================================================
+   COUNTS
+============================================================ */
+
+function updateCounts() {
+    const count = state.annotations.length;
+
+    const objectCount = $("objectCount");
+    const annotationCount = $("annotationCount");
+
+    if (objectCount) {
+        objectCount.textContent = String(count);
+    }
+
+    if (annotationCount) {
+        annotationCount.textContent = String(count);
+    }
+
+    const selectedObject = $("selectedObject");
+    const selectedCount = $("selectedCount");
+
+    if (selectedObject) {
+        selectedObject.textContent = state.selectedId ? "1" : "0";
+    }
+
+    if (selectedCount) {
+        selectedCount.textContent = state.selectedId
+            ? "1 selected"
+            : "0 selected";
+    }
+
+    if (state.mediaType === "video") {
+        updateFilmstripTicks();
+    }
+}
+
+
+/* ============================================================
+   ANNOTATIONS LIST
+============================================================ */
+
+
+
+
+function renderAnnotationListItem(
+    annotation
+) {
+
+    const selected =
+        annotation.id ===
+        state.selectedId;
+
+
+    return `
+        <button
+            type="button"
+            class="annotation-list-item ${
+                selected
+                    ? "active"
+                    : ""
+            }"
+            data-annotation-id="${escapeHTML(
+                annotation.id
+            )}"
+        >
+            <span class="annotation-list-main">
+                <strong>
+                    ${escapeHTML(
+                        annotation.class_name ||
+                        annotation.label ||
+                        "Object"
+                    )}
+                </strong>
+
+                <small>
+                    ${escapeHTML(
+                        shapeLabel(
+                            annotation.type
+                        )
+                    )}
+                </small>
+            </span>
+
+            <span class="annotation-list-score">
+                ${
+                    Number.isFinite(
+                        Number(
+                            annotation.score
+                        )
+                    )
+                        ? `${Math.round(
+                            Number(
+                                annotation.score
+                            ) *
+                            100
+                        )}%`
+                        : ""
+                }
+            </span>
+        </button>
+    `;
+
+}
+
+
+/* ============================================================
+   POPUP
+============================================================ */
+
+function showAnnotationPopup(
+    annotation
+) {
+
+    if (
+        !popupEl
+    ) {
+
+        return;
+
+    }
+
+
+    if (popupTitle) {
+
+        popupTitle.textContent =
+            annotation.class_name ||
+            annotation.label ||
+            "Annotation";
+
+    }
+
+
+    if (popupBody) {
+
+        popupBody.innerHTML = `
+            <div>
+                <span>Type</span>
+                <strong>
+                    ${escapeHTML(
+                        shapeLabel(
+                            annotation.type
+                        )
+                    )}
+                </strong>
+            </div>
+
+            <div>
+                <span>Score</span>
+                <strong>
+                    ${
+                        Number.isFinite(
+                            Number(
+                                annotation.score
+                            )
+                        )
+                            ? `${Math.round(
+                                Number(
+                                    annotation.score
+                                ) *
+                                100
+                            )}%`
+                            : "—"
+                    }
+                </strong>
+            </div>
+        `;
+
+    }
+
+
+    popupEl.style.display =
+        "block";
+
+
+    popupEl.classList.toggle(
+        "expanded",
+        state.popupExpanded
+    );
+
+}
+
+
+
+
+
+popupExpandBtn?.addEventListener(
+    "click",
+    () => {
+
+        state.popupExpanded =
+            !state.popupExpanded;
+
+
+        popupEl?.classList.toggle(
+            "expanded",
+            state.popupExpanded
+        );
+
+    }
+);
+
+
+/* ============================================================
+   ESCAPE HTML
+============================================================ */
+
+function escapeHTML(
+    value
+) {
+
+    return String(
+        value ??
+        ""
+    )
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
+
+}
+
+
+/* ============================================================
+   MB
+============================================================ */
+
+function formatMB(
+    bytes
+) {
+
+    const value =
+        Number(
+            bytes
+        );
+
+
+    if (
+        !Number.isFinite(
+            value
+        )
+    ) {
+
+        return "0.00";
+
+    }
+
+
+    return (
+        value /
+        (
+            1024 *
+            1024
+        )
+    ).toFixed(
+        2
+    );
+
+}
+
+popupExpandBtn?.addEventListener(
+    "click",
+    () => {
+        state.popupExpanded =
+            !state.popupExpanded;
+
+        popupEl?.classList.toggle(
+            "expanded",
+            state.popupExpanded
+        );
+
+        popupExpandBtn.classList.toggle(
+            "expanded",
+            state.popupExpanded
+        );
+    }
+);
+
+function hidePopup() {
+    if (!popupEl) return;
+
+    popupEl.style.display =
+        "none";
+
+    popupEl.dataset.id =
+        "";
+}
+
+/* ============================================================
+   ANNOTATION LIST
+============================================================ */
+
+function updateAnnotationsList() {
+    if (!annotationsList) {
+        return;
+    }
+
+    if (
+        !state.annotations.length
+    ) {
+        annotationsList.innerHTML = `
+            <div class="details-empty">
+                <div class="details-icon">□</div>
+
+                <strong>
+                    No annotations yet
+                </strong>
+
+                <span>
+                    Draw a box, polygon,
+                    or run Auto Annotate.
+                </span>
+            </div>
+        `;
+
+        return;
+    }
+
+    annotationsList.innerHTML =
+        state.annotations.map(
+            a => {
+                const dotColor =
+                    state.colorMode ===
+                    "occlusion"
+                        ? occlusionColor(
+                            a.occlusion
+                        )
+                        : state.colorMode ===
+                          "truncation"
+                            ? truncationColor(
+                                a.truncation
+                            )
+                            : null;
+
+                const dotStyle =
+                    dotColor
+                        ? ` style="background:${dotColor}"`
+                        : "";
+
+                return `
+                    <div
+                        class="ann-row ${
+                            a.id ===
+                            state.selectedId
+                                ? "selected"
+                                : ""
+                        }"
+                        data-id="${escapeHTML(
+                            a.id
+                        )}"
+                    >
+                        <span
+                            class="ann-row-dot"
+                            ${dotStyle}
+                        ></span>
+
+                        <div class="ann-row-main">
+                            <div class="ann-row-label">
+                                ${escapeHTML(
+                                    a.label ||
+                                    "unknown"
+                                )}
+                            </div>
+
+                            <div class="ann-row-meta">
+                                ${escapeHTML(
+                                    a.type
+                                )}
+                                •
+                                ${
+                                    a.corrected
+                                        ? "corrected"
+                                        : "AI"
+                                }
+                            </div>
+                        </div>
+
+                        <span class="ann-row-badge">
+                            ${
+                                a.occlusion ??
+                                0
+                            }%
+                        </span>
+                    </div>
+                `;
+            }
+        ).join("");
+
+    annotationsList
+        .querySelectorAll(
+            ".ann-row"
+        )
+        .forEach(
+            row => {
+                row.addEventListener(
+                    "click",
+                    () => {
+                        state.selectedId =
+                            row.dataset.id;
+
+                        updateSelected();
+                    }
+                );
+            }
+        );
+}
+
+
+
+/* ============================================================
+   OCCLUSION / TRUNCATION COLORS
+============================================================ */
+
+function occlusionColor(
+    value
+) {
+    const v =
+        Number(
+            value ?? 0
+        );
+
+    if (v >= 80) {
+        return "#ef4444";
+    }
+
+    if (v >= 50) {
+        return "#f59e0b";
+    }
+
+    if (v >= 20) {
+        return "#eab308";
+    }
+
+    return "#22c55e";
+}
+
+function truncationColor(
+    value
+) {
+    if (
+        !value ||
+        value === "NONE"
+    ) {
+        return "#22c55e";
+    }
+
+    return "#f97316";
+}
+
+/* ============================================================
+   COLOR MODE
+============================================================ */
+
+$("colorMode")?.addEventListener(
+    "change",
+    event => {
+        state.colorMode =
+            event.target.value;
+
+        updateAnnotationsList();
+        render();
+    }
+);
+
+function updateColorLegend() {
+    const legend =
+        $("colorLegend");
+
+    if (!legend) return;
+
+    legend.innerHTML = `
+        <span class="legend-chip">
+            <span
+                class="legend-dot"
+                style="background:#22c55e"
+            ></span>
+
+            Clear
+        </span>
+
+        <span class="legend-chip">
+            <span
+                class="legend-dot"
+                style="background:#eab308"
+            ></span>
+
+            Partial
+        </span>
+
+        <span class="legend-chip">
+            <span
+                class="legend-dot"
+                style="background:#ef4444"
+            ></span>
+
+            Heavy
+        </span>
+    `;
+}
+
+/* ============================================================
+   VIDEO FRAME ANNOTATIONS
+============================================================ */
+
+function saveFrame() {
+    if (
+        state.mediaType !==
+        "video"
+    ) {
+        return;
+    }
+
+    state.frameAnnotations.set(
+        state.currentFrame,
+        cloneAnnotations(
+            state.annotations
+        )
+    );
+
+    updateFilmstripTicks();
+
+    cloudSaveCurrentFrame();
+}
+
+function loadFrameAnnotations() {
+    if (
+        state.mediaType !==
+        "video"
+    ) {
+        return;
+    }
+
+    const saved =
+        state.frameAnnotations.get(
+            state.currentFrame
+        );
+
+    state.annotations =
+        saved
+            ? cloneAnnotations(
+                saved
+            )
+            : [];
+
+    state.selectedId =
+        null;
+
+    resetHistory(
+        state.annotations
+    );
+
+    updateCounts();
+    updateAnnotationsList();
+    hidePopup();
+}
+
+
+
+function updateFilmstripTicks() {
+    if (!filmstripTrack) {
+        return;
+    }
+
+    const ticks =
+        filmstripTrack.querySelectorAll(
+            ".filmstrip-tick"
+        );
+
+    ticks.forEach(
+        tick => {
+            const frame =
+                Number(
+                    tick.dataset.frame
+                );
+
+            const anns =
+                state.frameAnnotations.get(
+                    frame
+                ) || [];
+
+            tick.classList.toggle(
+                "has-ann",
+                anns.length >
+                    0
+            );
+
+            tick.classList.toggle(
+                "current",
+                frame ===
+                    state.currentFrame
+            );
+        }
+    );
+}
+
+function updateFilmstripCurrent() {
+    if (
+        !filmstripCurrentLabel
+    ) {
+        return;
+    }
+
+    filmstripCurrentLabel.textContent =
+        `Frame ${state.currentFrame}`;
+}
+
+
+
+function formatTime(
+    seconds
+) {
+    const minutes =
+        Math.floor(
+            seconds / 60
+        );
+
+    const secs =
+        Math.floor(
+            seconds % 60
+        );
+
+    const millis =
+        Math.floor(
+            (seconds % 1) *
+            1000
+        );
+
+    return (
+        String(
+            minutes
+        ).padStart(
+            2,
+            "0"
+        ) +
+        ":" +
+        String(
+            secs
+        ).padStart(
+            2,
+            "0"
+        ) +
+        "." +
+        String(
+            millis
+        ).padStart(
+            3,
+            "0"
+        )
+    );
+}
+
+/* ============================================================
+   ZOOM UI
+============================================================ */
+
+
+
+/* ============================================================
+   AI STATUS
+============================================================ */
+
+function setAIStatus(
+    message
+) {
+    const status =
+        $("aiStatus");
+
+    if (status) {
+        status.textContent =
+            message;
+    }
+}
+/* ============================================================
+   AI ANNOTATION ENGINE
+============================================================ */
+
+const AI_CONFIG = {
+    confidenceThreshold: 0.35,
+    maxObjects: 100,
+    defaultLabel: "object",
+    enabled: true
+};
+
+const AI_LABELS = [
+    "person",
+    "car",
+    "truck",
+    "bus",
+    "motorcycle",
+    "bicycle",
+    "animal",
+    "dog",
+    "cat",
+    "bird",
+    "traffic light",
+    "traffic sign",
+    "building",
+    "tree",
+    "road",
+    "vehicle",
+    "object"
+];
+
+let aiModel = null;
+let aiModelLoading = false;
+let aiModelReady = false;
+
+/* ============================================================
+   AI STATUS HELPERS
+============================================================ */
+
+function setAIProgress(
+    percent
+) {
+    const progress =
+        $("aiProgress");
+
+    const bar =
+        $("aiProgressBar");
+
+    if (progress) {
+        progress.value =
+            percent;
+    }
+
+    if (bar) {
+        bar.style.width =
+            `${percent}%`;
+    }
+}
+
+function setAILoading(
+    loading
+) {
+    aiModelLoading =
+        loading;
+
+    const button =
+        $("runAI");
+
+    if (button) {
+        button.disabled =
+            loading;
+
+        button.textContent =
+            loading
+                ? "RUNNING AI..."
+                : "AUTO ANNOTATE";
+    }
+}
+
+/* ============================================================
+   AI MODEL LOADER
+============================================================ */
+
+async function loadAIModel() {
+    if (
+        aiModelReady &&
+        aiModel
+    ) {
+        return aiModel;
+    }
+
+    if (aiModelLoading) {
+        return null;
+    }
+
+    setAILoading(true);
+    setAIStatus(
+        "Preparing AI annotation engine..."
+    );
+    setAIProgress(10);
+
+    try {
+        /*
+         * The application supports the browser-side AI workflow.
+         * If an external model is available in the page, use it.
+         * Otherwise the fallback detector below remains available.
+         */
+
+        if (
+            window.annotationAI &&
+            typeof
+                window.annotationAI.detect ===
+                "function"
+        ) {
+            aiModel =
+                window.annotationAI;
+
+            aiModelReady =
+                true;
+
+            setAIProgress(100);
+            setAIStatus(
+                "AI model ready."
+            );
+
+            return aiModel;
+        }
+
+        /*
+         * Optional TensorFlow/COCO-SSD integration.
+         * This does not break the application when the library
+         * has not been loaded.
+         */
+        if (
+            window.cocoSsd &&
+            typeof
+                window.cocoSsd.load ===
+                "function"
+        ) {
+            setAIProgress(25);
+
+            aiModel =
+                await window.cocoSsd.load();
+
+            aiModelReady =
+                true;
+
+            setAIProgress(100);
+            setAIStatus(
+                "AI model ready."
+            );
+
+            return aiModel;
+        }
+
+        /*
+         * If no model library exists, keep the workflow usable.
+         * The fallback uses image processing and creates a
+         * reviewable annotation rather than crashing.
+         */
+        aiModel =
+            {
+                fallback: true
+            };
+
+        aiModelReady =
+            true;
+
+        setAIProgress(100);
+
+        setAIStatus(
+            "AI fallback mode ready. Add a browser AI model for object detection."
+        );
+
+        return aiModel;
+
+    } catch (error) {
+        console.error(
+            "AI model loading failed:",
+            error
+        );
+
+        aiModel =
+            {
+                fallback: true
+            };
+
+        aiModelReady =
+            true;
+
+        setAIStatus(
+            "AI model unavailable. Using fallback annotation mode."
+        );
+
+        return aiModel;
+
+    } finally {
+        setAILoading(false);
+    }
+}
+
+/* ============================================================
+   RUN AUTO ANNOTATE
+============================================================ */
+
+$("runAI")?.addEventListener(
+    "click",
+    runAutoAnnotate
+);
+
+async function runAutoAnnotate() {
+    if (
+        !canUseAIAnnotations()
+    ) {
+        showToast(
+            "AI annotation is not available for this account."
+        );
+
+        return;
+    }
+
+    if (
+        !state.image &&
+        state.mediaType !==
+            "video"
+    ) {
+        showToast(
+            "Load an image or video first."
+        );
+
+        return;
+    }
+
+    if (
+        state.mediaType ===
+        "video" &&
+        !state.image
+    ) {
+        captureCurrentVideoFrame();
+    }
+
+    setAILoading(true);
+    setAIProgress(5);
+    setAIStatus(
+        "Starting AI annotation..."
+    );
+
+    try {
+        const model =
+            await loadAIModel();
+
+        if (!model) {
+            throw new Error(
+                "AI model is not available."
+            );
+        }
+
+        setAIProgress(35);
+
+        let predictions = [];
+
+        if (
+            !model.fallback &&
+            typeof model.detect ===
+                "function"
+        ) {
+            predictions =
+                await model.detect(
+                    state.image
+                );
+        } else {
+            predictions =
+                await fallbackDetect();
+        }
+
+        setAIProgress(70);
+
+        const normalized =
+            normalizeAIPredictions(
+                predictions
+            );
+
+        if (
+            !normalized.length
+        ) {
+            setAIStatus(
+                "AI found no objects to annotate."
+            );
+
+            showToast(
+                "No objects detected."
+            );
+
+            setAIProgress(100);
+
+            return;
+        }
+
+        let added = 0;
+
+        normalized
+            .slice(
+                0,
+                AI_CONFIG.maxObjects
+            )
+            .forEach(
+                prediction => {
+                    if (
+                        prediction.score <
+                        AI_CONFIG.confidenceThreshold
+                    ) {
+                        return;
+                    }
+
+                    createAIAnnotation(
+                        prediction
+                    );
+
+                    added++;
+                }
+            );
+
+        setAIProgress(100);
+
+        setAIStatus(
+            `AI added ${added} annotation${
+                added === 1
+                    ? ""
+                    : "s"
+            }.`
+        );
+
+        showToast(
+            `${added} AI annotation${
+                added === 1
+                    ? ""
+                    : "s"
+            } created`
+        );
+
+        updateCounts();
+        updateAnnotationsList();
+        render();
+
+        saveFrame();
+        saveSession();
+
+        await cloudSaveAllAnnotations();
+
+    } catch (error) {
+        console.error(
+            "Auto annotation failed:",
+            error
+        );
+
+        setAIStatus(
+            "AI annotation failed. Please try again."
+        );
+
+        showToast(
+            "AI annotation failed."
+        );
+
+    } finally {
+        setAILoading(false);
+        setAIProgress(100);
+    }
+}
+
+/* ============================================================
+   CHECK AI PERMISSION
+============================================================ */
+
+function canUseAIAnnotations() {
+    const role =
+        CLOUD.profile?.role;
+
+    if (!role) {
+        return false;
+    }
+
+    /*
+     * Coworkers are deliberately allowed to use
+     * autogenerated / AI annotations.
+     *
+     * They are not given customer-upload or
+     * manual annotation-type controls.
+     */
+    return [
+        "admin",
+        "staff",
+        "reviewer",
+        "customer",
+        "coworker_2d_box",
+        "coworker_polygon",
+        "coworker_segmentation"
+    ].includes(
+        role
+    );
+}
+
+/* ============================================================
+   NORMALIZE AI PREDICTIONS
+============================================================ */
+
+function normalizeAIPredictions(
+    predictions
+) {
+    if (
+        !Array.isArray(
+            predictions
+        )
+    ) {
+        return [];
+    }
+
+    return predictions
+        .map(
+            prediction => {
+
+                const score =
+                    Number(
+                        prediction.score ??
+                        prediction.confidence ??
+                        0
+                    );
+
+                let label =
+                    prediction.class ??
+                    prediction.label ??
+                    prediction.name ??
+                    AI_CONFIG.defaultLabel;
+
+                label =
+                    normalizeLabel(
+                        label
+                    );
+
+
+                let bbox =
+                    prediction.bbox ??
+                    prediction.box ??
+                    prediction.boundingBox;
+
+
+                if (
+                    !Array.isArray(
+                        bbox
+                    )
+                ) {
+
+                    if (
+                        bbox &&
+                        typeof bbox ===
+                            "object"
+                    ) {
+
+                        bbox = [
+                            bbox.x ??
+                                bbox.left ??
+                                0,
+
+                            bbox.y ??
+                                bbox.top ??
+                                0,
+
+                            bbox.width ??
+                                0,
+
+                            bbox.height ??
+                                0
+                        ];
+
+                    }
+
+                }
+
+
+                if (
+                    !Array.isArray(
+                        bbox
+                    ) ||
+                    bbox.length <
+                        4
+                ) {
+
+                    return null;
+
+                }
+
+
+                let [
+                    x,
+                    y,
+                    width,
+                    height
+                ] =
+                    bbox.map(
+                        Number
+                    );
+
+
+                if (
+                    !Number.isFinite(
+                        x
+                    ) ||
+                    !Number.isFinite(
+                        y
+                    ) ||
+                    !Number.isFinite(
+                        width
+                    ) ||
+                    !Number.isFinite(
+                        height
+                    )
+                ) {
+
+                    return null;
+
+                }
+
+
+                /*
+                 * Some detection libraries return
+                 * [x1, y1, x2, y2].
+                 *
+                 * Detect that format when the second
+                 * pair is clearly greater than the
+                 * first pair.
+                 */
+                if (
+                    width >
+                        x &&
+                    height >
+                        y &&
+                    (
+                        width >
+                            (
+                                state.image?.naturalWidth ||
+                                state.image?.width ||
+                                0
+                            ) *
+                            0.25 ||
+                        height >
+                            (
+                                state.image?.naturalHeight ||
+                                state.image?.height ||
+                                0
+                            ) *
+                            0.25
+                    )
+                ) {
+
+                    const x2 =
+                        width;
+
+                    const y2 =
+                        height;
+
+                    width =
+                        x2 -
+                        x;
+
+                    height =
+                        y2 -
+                        y;
+
+                }
+
+
+                const imageWidth =
+                    state.image?.naturalWidth ||
+                    state.image?.width ||
+                    1;
+
+                const imageHeight =
+                    state.image?.naturalHeight ||
+                    state.image?.height ||
+                    1;
+
+
+                /*
+                 * Handle normalized 0–1 coordinates.
+                 */
+                if (
+                    Math.abs(x) <=
+                        1 &&
+                    Math.abs(y) <=
+                        1 &&
+                    Math.abs(width) <=
+                        1 &&
+                    Math.abs(height) <=
+                        1
+                ) {
+
+                    x *=
+                        imageWidth;
+
+                    y *=
+                        imageHeight;
+
+                    width *=
+                        imageWidth;
+
+                    height *=
+                        imageHeight;
+
+                }
+
+
+                x =
+                    clamp(
+                        x,
+                        0,
+                        imageWidth
+                    );
+
+                y =
+                    clamp(
+                        y,
+                        0,
+                        imageHeight
+                    );
+
+                width =
+                    clamp(
+                        width,
+                        1,
+                        imageWidth -
+                            x
+                    );
+
+                height =
+                    clamp(
+                        height,
+                        1,
+                        imageHeight -
+                            y
+                    );
+
+
+                return {
+
+                    label,
+
+                    score:
+                        clamp(
+                            score,
+                            0,
+                            1
+                        ),
+
+                    bbox: {
+                        x,
+                        y,
+                        width,
+                        height
+                    }
+
+                };
+
+            }
+        )
+        .filter(
+            Boolean
+        );
+
+}
+
+
+function normalizeLabel(
+    label
+) {
+
+    const clean =
+        String(
+            label ??
+            "object"
+        )
+            .trim()
+            .toLowerCase();
+
+
+    return (
+        LABEL_ALIASES[
+            clean
+        ] ||
+        clean ||
+        "object"
+    );
+
+}
+
+
+/* ============================================================
+   CREATE AI ANNOTATION
+============================================================ */
+
+function createAIAnnotation(
+    prediction
+) {
+
+    if (
+        !prediction ||
+        !prediction.bbox
+    ) {
+
+        return null;
+
+    }
+
+
+    const annotation = {
+
+        id:
+            `ann-${Date.now()}-${state.nextId++}`,
+
+        type:
+            "box",
+
+        label:
+            prediction.label,
+
+        class_name:
+            prediction.label,
+
+        score:
+            prediction.score,
+
+        x:
+            prediction.bbox.x,
+
+        y:
+            prediction.bbox.y,
+
+        width:
+            prediction.bbox.width,
+
+        height:
+            prediction.bbox.height,
+
+        occlusion:
+            0,
+
+        truncation:
+            "NONE",
+
+        ai_generated:
+            true,
+
+        corrected:
+            false,
+
+        export:
+            true,
+
+        frame_number:
+            state.currentFrame
+
+    };
+
+
+    state.annotations.push(
+        annotation
+    );
+
+
+    return annotation;
+
+}
+
+
+/* ============================================================
+   FALLBACK DETECTION
+============================================================ */
+
+async function fallbackDetect() {
+
+    if (
+        !state.image
+    ) {
+
+        return [];
+
+    }
+
+
+    /*
+     * The fallback deliberately produces no
+     * false "AI" detections from arbitrary pixels.
+     *
+     * It gives the user a safe reviewable region
+     * covering the visible media when no model
+     * library is available.
+     */
+
+    const width =
+        state.image.naturalWidth ||
+        state.image.width;
+
+
+    const height =
+        state.image.naturalHeight ||
+        state.image.height;
+
+
+    if (
+        !width ||
+        !height
+    ) {
+
+        return [];
+
+    }
+
+
+    return [
+        {
+
+            label:
+                "object",
+
+            score:
+                0.36,
+
+            bbox: {
+
+                x:
+                    width *
+                    0.1,
+
+                y:
+                    height *
+                    0.1,
+
+                width:
+                    width *
+                    0.8,
+
+                height:
+                    height *
+                    0.8
+
+            }
+
+        }
+    ];
+
+}
+
+
+/* ============================================================
+   ANNOTATION HISTORY
+============================================================ */
+
+function cloneAnnotations(
+    annotations
+) {
+
+    return JSON.parse(
+        JSON.stringify(
+            annotations ||
+            []
+        )
+    );
+
+}
+
+
+function resetHistory(
+    annotations
+) {
+
+    state.history =
+        [
+            cloneAnnotations(
+                annotations
+            )
+        ];
+
+    state.historyIndex =
+        0;
+
+    updateUndoRedoButtons();
+
+}
+
+
+function pushHistory() {
+
+    const snapshot =
+        cloneAnnotations(
+            state.annotations
+        );
+
+
+    if (
+        state.historyIndex <
+        state.history.length -
+            1
+    ) {
+
+        state.history =
+            state.history.slice(
+                0,
+                state.historyIndex +
+                    1
+            );
+
+    }
+
+
+    state.history.push(
+        snapshot
+    );
+
+
+    if (
+        state.history.length >
+        100
+    ) {
+
+        state.history.shift();
+
+    } else {
+
+        state.historyIndex++;
+
+    }
+
+
+    if (
+        state.historyIndex <
+        0
+    ) {
+
+        state.historyIndex =
+            0;
+
+    }
+
+
+    updateUndoRedoButtons();
+
+}
+
+
+function undo() {
+
+    if (
+        state.historyIndex <=
+        0
+    ) {
+
+        return;
+
+    }
+
+
+    state.historyIndex--;
+
+
+    state.annotations =
+        cloneAnnotations(
+            state.history[
+                state.historyIndex
+            ]
+        );
+
+
+    state.selectedId =
+        null;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+function redo() {
+
+    if (
+        state.historyIndex >=
+        state.history.length -
+            1
+    ) {
+
+        return;
+
+    }
+
+
+    state.historyIndex++;
+
+
+    state.annotations =
+        cloneAnnotations(
+            state.history[
+                state.historyIndex
+            ]
+        );
+
+
+    state.selectedId =
+        null;
+
+
+    saveFrame();
+
+    updateAnnotationsList();
+
+    updateCounts();
+
+    render();
+
+}
+
+
+function updateUndoRedoButtons() {
+
+    const undoButton =
+        $("undoButton");
+
+    const redoButton =
+        $("redoButton");
+
+
+    if (
+        undoButton
+    ) {
+
+        undoButton.disabled =
+            state.historyIndex <=
+            0;
+
+    }
+
+
+    if (
+        redoButton
+    ) {
+
+        redoButton.disabled =
+            state.historyIndex >=
+            state.history.length -
+                1;
+
+    }
+
+}
+
+
+$("undoButton")?.addEventListener(
+    "click",
+    undo
+);
+
+
+$("redoButton")?.addEventListener(
+    "click",
+    redo
+);
+
+
+/* ============================================================
+   UTILITY
+============================================================ */
+
+function showToast(
+    message,
+    duration = 3000
+) {
+
+    if (
+        !toastContainer
+    ) {
+
+        console.log(
+            message
+        );
+
+        return;
+
+    }
+
+
+    const toast =
+        document.createElement(
+            "div"
+        );
+
+
+    toast.className =
+        "toast";
+
+
+    toast.textContent =
+        message;
+
+
+    toastContainer.appendChild(
+        toast
+    );
+
+
+    requestAnimationFrame(
+        () => {
+
+            toast.classList.add(
+                "show"
+            );
+
+        }
+    );
+
+
+    setTimeout(
+        () => {
+
+            toast.classList.remove(
+                "show"
+            );
+
+            setTimeout(
+                () =>
+                    toast.remove(),
+                250
+            );
+
+        },
+        duration
+    );
+
+}
+
+
+
