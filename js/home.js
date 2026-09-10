@@ -1,4 +1,3 @@
-```js
 // ============================================================
 // ANNOTATION AI
 // PART 9 — HOME / DASHBOARD MODULE
