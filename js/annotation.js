@@ -1428,3 +1428,1395 @@ function deleteSelectedAnnotation() {
 
 window.deleteSelectedAnnotation =
     deleteSelectedAnnotation;
+// ============================================================
+// ANNOTATION TYPE BUTTONS
+// ============================================================
+
+function setAnnotationType(
+    type
+) {
+
+    const allowed = [
+        "box",
+        "polygon",
+        "segmentation"
+    ];
+
+
+    if (
+        !allowed.includes(type)
+    ) {
+
+        type = "box";
+    }
+
+
+    state.annotationType =
+        type;
+
+
+    state.mode =
+        type === "box"
+            ? "draw"
+            : "draw";
+
+
+    state.drawing =
+        false;
+
+    state.polygonPoints =
+        [];
+
+    state.drawStart =
+        null;
+
+    state.drawCurrent =
+        null;
+
+
+    document
+        .querySelectorAll(
+            "[data-annotation-type]"
+        )
+        .forEach(
+            button => {
+
+                button.classList.toggle(
+                    "active",
+                    button.dataset.annotationType ===
+                        type
+                );
+            }
+        );
+
+
+    render();
+}
+
+
+// ------------------------------------------------------------
+// Find annotation type buttons by common IDs/classes
+// ------------------------------------------------------------
+
+document
+    .querySelectorAll(
+        "[data-annotation-type]"
+    )
+    .forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                event => {
+
+                    event.preventDefault();
+
+                    setAnnotationType(
+                        button.dataset.annotationType
+                    );
+                }
+            );
+        }
+    );
+
+
+// ============================================================
+// SELECT / PAN / DRAW TOOLS
+// ============================================================
+
+function setMode(
+    mode
+) {
+
+    const allowed = [
+        "select",
+        "pan",
+        "draw"
+    ];
+
+
+    if (
+        !allowed.includes(mode)
+    ) {
+
+        return;
+    }
+
+
+    state.mode =
+        mode;
+
+
+    document
+        .querySelectorAll(
+            "[data-tool]"
+        )
+        .forEach(
+            button => {
+
+                button.classList.toggle(
+                    "active",
+                    button.dataset.tool ===
+                        mode
+                );
+            }
+        );
+
+
+    if (mode !== "draw") {
+
+        state.drawing =
+            false;
+
+        state.polygonPoints =
+            [];
+
+        state.drawStart =
+            null;
+
+        state.drawCurrent =
+            null;
+    }
+
+
+    render();
+}
+
+
+document
+    .querySelectorAll(
+        "[data-tool]"
+    )
+    .forEach(
+        button => {
+
+            button.addEventListener(
+                "click",
+                event => {
+
+                    event.preventDefault();
+
+                    setMode(
+                        button.dataset.tool
+                    );
+                }
+            );
+        }
+    );
+
+
+// ============================================================
+// MOVE SELECTED ANNOTATION
+// ============================================================
+
+function moveSelectedAnnotation(
+    deltaX,
+    deltaY
+) {
+
+    if (
+        !state.selectedId
+    ) {
+
+        return;
+    }
+
+
+    const annotation =
+        state.annotations.find(
+            item =>
+                item.id ===
+                state.selectedId
+        );
+
+
+    if (!annotation) {
+        return;
+    }
+
+
+    const imageWidth =
+        state.image?.naturalWidth ||
+        state.image?.width ||
+        Infinity;
+
+
+    const imageHeight =
+        state.image?.naturalHeight ||
+        state.image?.height ||
+        Infinity;
+
+
+    if (
+        annotation.type ===
+        "polygon" ||
+        annotation.type ===
+        "segmentation"
+    ) {
+
+        if (
+            !Array.isArray(
+                annotation.points
+            )
+        ) {
+
+            return;
+        }
+
+
+        annotation.points.forEach(
+            point => {
+
+                point.x =
+                    clamp(
+                        point.x +
+                            deltaX,
+                        0,
+                        imageWidth
+                    );
+
+                point.y =
+                    clamp(
+                        point.y +
+                            deltaY,
+                        0,
+                        imageHeight
+                    );
+            }
+        );
+
+    } else {
+
+        annotation.x =
+            clamp(
+                (
+                    Number(
+                        annotation.x
+                    ) || 0
+                ) +
+                deltaX,
+                0,
+                imageWidth -
+                    (
+                        Number(
+                            annotation.width
+                        ) || 0
+                    )
+            );
+
+
+        annotation.y =
+            clamp(
+                (
+                    Number(
+                        annotation.y
+                    ) || 0
+                ) +
+                deltaY,
+                0,
+                imageHeight -
+                    (
+                        Number(
+                            annotation.height
+                        ) || 0
+                    )
+            );
+    }
+
+
+    render();
+}
+
+
+// ============================================================
+// POINTER DOWN
+// ============================================================
+
+function handleCanvasPointerDown(
+    event
+) {
+
+    if (
+        !canvas ||
+        !state.image
+    ) {
+
+        return;
+    }
+
+
+    if (
+        event.button !== 0 &&
+        event.button !== 1
+    ) {
+
+        return;
+    }
+
+
+    const point =
+        getPointerPosition(
+            event
+        );
+
+
+    state.pointerDown =
+        true;
+
+
+    canvas.setPointerCapture?.(
+        event.pointerId
+    );
+
+
+    // --------------------------------------------------------
+    // SPACE + POINTER = PAN
+    // --------------------------------------------------------
+
+    if (
+        state.spacePan ||
+        event.button === 1 ||
+        state.mode === "pan"
+    ) {
+
+        state.panning =
+            true;
+
+        state.panStart = {
+
+            x:
+                event.clientX,
+
+            y:
+                event.clientY,
+
+            offsetX:
+                state.offsetX,
+
+            offsetY:
+                state.offsetY
+        };
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // POLYGON
+    // --------------------------------------------------------
+
+    if (
+        state.mode === "draw" &&
+        (
+            state.annotationType ===
+                "polygon" ||
+            state.annotationType ===
+                "segmentation"
+        )
+    ) {
+
+        if (
+            state.annotationType ===
+            "polygon"
+        ) {
+
+            handlePolygonPointerDown(
+                point
+            );
+
+        } else {
+
+            handleSegmentationPointerDown(
+                point
+            );
+        }
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // BOX DRAW
+    // --------------------------------------------------------
+
+    if (
+        state.mode === "draw" &&
+        state.annotationType ===
+            "box"
+    ) {
+
+        state.drawing =
+            true;
+
+        state.drawStart = {
+            x: point.x,
+            y: point.y
+        };
+
+        state.drawCurrent = {
+            x: point.x,
+            y: point.y
+        };
+
+        render();
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // SELECT
+    // --------------------------------------------------------
+
+    if (
+        state.mode === "select"
+    ) {
+
+        const hit =
+            findAnnotationAtPoint(
+                point
+            );
+
+
+        if (hit) {
+
+            state.selectedId =
+                hit.id;
+
+            state.dragging =
+                true;
+
+            state.dragStartImage = {
+                x: point.x,
+                y: point.y
+            };
+
+            state.dragLastImage = {
+                x: point.x,
+                y: point.y
+            };
+
+
+            showAnnotationPopup(
+                hit
+            );
+
+        } else {
+
+            state.selectedId =
+                null;
+
+            hidePopup();
+        }
+
+
+        updateCounts();
+
+        render();
+    }
+}
+
+
+// ============================================================
+// POINTER MOVE
+// ============================================================
+
+function handleCanvasPointerMove(
+    event
+) {
+
+    if (
+        !canvas
+    ) {
+
+        return;
+    }
+
+
+    const point =
+        getPointerPosition(
+            event
+        );
+
+
+    // --------------------------------------------------------
+    // PAN
+    // --------------------------------------------------------
+
+    if (
+        state.panning &&
+        state.panStart
+    ) {
+
+        state.offsetX =
+            state.panStart.offsetX +
+            (
+                event.clientX -
+                state.panStart.x
+            );
+
+
+        state.offsetY =
+            state.panStart.offsetY +
+            (
+                event.clientY -
+                state.panStart.y
+            );
+
+
+        render();
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // BOX DRAW PREVIEW
+    // --------------------------------------------------------
+
+    if (
+        state.drawing &&
+        state.mode === "draw" &&
+        state.annotationType ===
+            "box"
+    ) {
+
+        state.drawCurrent = {
+            x: point.x,
+            y: point.y
+        };
+
+        render();
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // DRAG SELECTED
+    // --------------------------------------------------------
+
+    if (
+        state.dragging &&
+        state.selectedId
+    ) {
+
+        if (
+            !state.dragLastImage
+        ) {
+
+            state.dragLastImage = {
+                x: point.x,
+                y: point.y
+            };
+
+            return;
+        }
+
+
+        const deltaX =
+            point.x -
+            state.dragLastImage.x;
+
+
+        const deltaY =
+            point.y -
+            state.dragLastImage.y;
+
+
+        moveSelectedAnnotation(
+            deltaX,
+            deltaY
+        );
+
+
+        state.dragLastImage = {
+            x: point.x,
+            y: point.y
+        };
+
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // HOVER
+    // --------------------------------------------------------
+
+    const hit =
+        findAnnotationAtPoint(
+            point
+        );
+
+
+    state.hoveredId =
+        hit?.id || null;
+
+
+    render();
+}
+
+
+// ============================================================
+// POINTER UP
+// ============================================================
+
+function handleCanvasPointerUp(
+    event
+) {
+
+    if (!canvas) {
+        return;
+    }
+
+
+    const point =
+        getPointerPosition(
+            event
+        );
+
+
+    // --------------------------------------------------------
+    // FINISH PAN
+    // --------------------------------------------------------
+
+    if (
+        state.panning
+    ) {
+
+        state.panning =
+            false;
+
+        state.panStart =
+            null;
+
+        state.pointerDown =
+            false;
+
+        canvas.releasePointerCapture?.(
+            event.pointerId
+        );
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // FINISH BOX
+    // --------------------------------------------------------
+
+    if (
+        state.drawing &&
+        state.mode === "draw" &&
+        state.annotationType ===
+            "box"
+    ) {
+
+        state.drawCurrent = {
+            x: point.x,
+            y: point.y
+        };
+
+
+        createBoxAnnotation(
+            state.drawStart,
+            state.drawCurrent
+        );
+
+
+        state.drawing =
+            false;
+
+        state.drawStart =
+            null;
+
+        state.drawCurrent =
+            null;
+
+
+        render();
+    }
+
+
+    // --------------------------------------------------------
+    // FINISH DRAG
+    // --------------------------------------------------------
+
+    if (
+        state.dragging
+    ) {
+
+        state.dragging =
+            false;
+
+        state.dragStartImage =
+            null;
+
+        state.dragLastImage =
+            null;
+
+
+        pushHistory();
+
+        saveFrame();
+    }
+
+
+    state.pointerDown =
+        false;
+
+
+    canvas.releasePointerCapture?.(
+        event.pointerId
+    );
+
+
+    render();
+}
+
+
+// ============================================================
+// POINTER CANCEL
+// ============================================================
+
+function handleCanvasPointerCancel(
+    event
+) {
+
+    state.pointerDown =
+        false;
+
+    state.dragging =
+        false;
+
+    state.panning =
+        false;
+
+    state.drawing =
+        false;
+
+    state.drawStart =
+        null;
+
+    state.drawCurrent =
+        null;
+
+    state.polygonPoints =
+        [];
+
+    state.dragStartImage =
+        null;
+
+    state.dragLastImage =
+        null;
+
+    state.panStart =
+        null;
+
+
+    try {
+
+        canvas?.releasePointerCapture?.(
+            event.pointerId
+        );
+
+    } catch (_) {}
+
+
+    render();
+}
+
+
+// ============================================================
+// CANVAS EVENTS
+// ============================================================
+
+if (canvas) {
+
+    canvas.addEventListener(
+        "pointerdown",
+        handleCanvasPointerDown
+    );
+
+    canvas.addEventListener(
+        "pointermove",
+        handleCanvasPointerMove
+    );
+
+    canvas.addEventListener(
+        "pointerup",
+        handleCanvasPointerUp
+    );
+
+    canvas.addEventListener(
+        "pointercancel",
+        handleCanvasPointerCancel
+    );
+}
+
+
+// ============================================================
+// KEYBOARD
+// ============================================================
+
+document.addEventListener(
+    "keydown",
+    event => {
+
+        if (
+            isTypingTarget(
+                event.target
+            )
+        ) {
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // SPACE = PAN
+        // ----------------------------------------------------
+
+        if (
+            event.code ===
+            "Space"
+        ) {
+
+            state.spacePan =
+                true;
+
+            canvas?.classList.add(
+                "space-pan"
+            );
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // DELETE
+        // ----------------------------------------------------
+
+        if (
+            event.key ===
+                "Delete" ||
+            event.key ===
+                "Backspace"
+        ) {
+
+            event.preventDefault();
+
+            deleteSelectedAnnotation();
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // ESCAPE
+        // ----------------------------------------------------
+
+        if (
+            event.key ===
+            "Escape"
+        ) {
+
+            state.drawing =
+                false;
+
+            state.polygonPoints =
+                [];
+
+            state.drawStart =
+                null;
+
+            state.drawCurrent =
+                null;
+
+            state.dragging =
+                false;
+
+            state.panning =
+                false;
+
+            hidePopup();
+
+            render();
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // CTRL/CMD + Z
+        // ----------------------------------------------------
+
+        if (
+            (
+                event.ctrlKey ||
+                event.metaKey
+            ) &&
+            event.key.toLowerCase() ===
+                "z"
+        ) {
+
+            event.preventDefault();
+
+            if (event.shiftKey) {
+
+                redo();
+
+            } else {
+
+                undo();
+            }
+
+            return;
+        }
+
+
+        // ----------------------------------------------------
+        // CTRL/CMD + Y
+        // ----------------------------------------------------
+
+        if (
+            (
+                event.ctrlKey ||
+                event.metaKey
+            ) &&
+            event.key.toLowerCase() ===
+                "y"
+        ) {
+
+            event.preventDefault();
+
+            redo();
+
+            return;
+        }
+    }
+);
+
+
+document.addEventListener(
+    "keyup",
+    event => {
+
+        if (
+            event.code ===
+            "Space"
+        ) {
+
+            state.spacePan =
+                false;
+
+            canvas?.classList.remove(
+                "space-pan"
+            );
+        }
+    }
+);
+
+
+// ============================================================
+// DELETE BUTTON
+// ============================================================
+
+$(`
+deleteAnnotation
+`);
+
+
+const deleteButton =
+    $("deleteAnnotation");
+
+if (deleteButton) {
+
+    deleteButton.addEventListener(
+        "click",
+        event => {
+
+            event.preventDefault();
+
+            deleteSelectedAnnotation();
+        }
+    );
+}
+
+
+// ============================================================
+// RENDER
+// ============================================================
+
+function render() {
+
+    if (
+        !canvas ||
+        !ctx
+    ) {
+
+        return;
+    }
+
+
+    const rect =
+        canvas.getBoundingClientRect();
+
+
+    ctx.clearRect(
+        0,
+        0,
+        rect.width,
+        rect.height
+    );
+
+
+    // --------------------------------------------------------
+    // EMPTY STATE
+    // --------------------------------------------------------
+
+    if (
+        !state.image
+    ) {
+
+        if (emptyWorkspace) {
+
+            emptyWorkspace.style.display =
+                "";
+        }
+
+        return;
+    }
+
+
+    if (emptyWorkspace) {
+
+        emptyWorkspace.style.display =
+            "none";
+    }
+
+
+    const imageWidth =
+        state.image.naturalWidth ||
+        state.image.width;
+
+
+    const imageHeight =
+        state.image.naturalHeight ||
+        state.image.height;
+
+
+    if (
+        !imageWidth ||
+        !imageHeight
+    ) {
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // IMAGE
+    // --------------------------------------------------------
+
+    ctx.save();
+
+
+    ctx.translate(
+        state.offsetX,
+        state.offsetY
+    );
+
+
+    ctx.scale(
+        state.scale,
+        state.scale
+    );
+
+
+    ctx.imageSmoothingEnabled =
+        true;
+
+
+    try {
+
+        ctx.drawImage(
+            state.image,
+            0,
+            0,
+            imageWidth,
+            imageHeight
+        );
+
+    } catch (error) {
+
+        console.warn(
+            "[Annotation] Unable to draw media:",
+            error
+        );
+    }
+
+
+    // --------------------------------------------------------
+    // ANNOTATIONS
+    // --------------------------------------------------------
+
+    renderAnnotations();
+
+
+    // --------------------------------------------------------
+    // DRAW PREVIEW
+    // --------------------------------------------------------
+
+    renderDrawingPreview();
+
+
+    ctx.restore();
+}
+
+
+// ============================================================
+// RENDER ANNOTATIONS
+// ============================================================
+
+function renderAnnotations() {
+
+    state.annotations.forEach(
+        annotation => {
+
+            if (
+                annotation.type ===
+                "polygon" ||
+                annotation.type ===
+                "segmentation"
+            ) {
+
+                renderPolygonAnnotation(
+                    annotation
+                );
+
+            } else {
+
+                renderBoxAnnotation(
+                    annotation
+                );
+            }
+        }
+    );
+}
+
+
+// ============================================================
+// RENDER BOX
+// ============================================================
+
+function renderBoxAnnotation(
+    annotation
+) {
+
+    const x =
+        Number(
+            annotation.x
+        ) || 0;
+
+    const y =
+        Number(
+            annotation.y
+        ) || 0;
+
+    const width =
+        Number(
+            annotation.width
+        ) || 0;
+
+    const height =
+        Number(
+            annotation.height
+        ) || 0;
+
+
+    const selected =
+        annotation.id ===
+        state.selectedId;
+
+
+    const hovered =
+        annotation.id ===
+        state.hoveredId;
+
+
+    ctx.save();
+
+
+    ctx.lineWidth =
+        (
+            selected
+                ? 3
+                : hovered
+                    ? 2.5
+                    : 2
+        ) /
+        state.scale;
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#00e5ff"
+            : hovered
+                ? "#ffffff"
+                : "#00ff88";
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(0,229,255,0.10)"
+            : "rgba(0,255,136,0.06)";
+
+
+    ctx.fillRect(
+        x,
+        y,
+        width,
+        height
+    );
+
+
+    ctx.strokeRect(
+        x,
+        y,
+        width,
+        height
+    );
+
+
+    renderAnnotationLabel(
+        annotation,
+        x,
+        y,
+        width,
+        height
+    );
+
+
+    if (selected) {
+
+        renderResizeHandles(
+            annotation
+        );
+    }
+
+
+    ctx.restore();
+}
+
+
+// ============================================================
+// RENDER POLYGON
+// ============================================================
+
+function renderPolygonAnnotation(
+    annotation
+) {
+
+    if (
+        !Array.isArray(
+            annotation.points
+        ) ||
+        annotation.points.length <
+            2
+    ) {
+
+        return;
+    }
+
+
+    const selected =
+        annotation.id ===
+        state.selectedId;
+
+
+    const hovered =
+        annotation.id ===
+        state.hoveredId;
+
+
+    ctx.save();
+
+
+    ctx.beginPath();
+
+
+    annotation.points.forEach(
+        (
+            point,
+            index
+        ) => {
+
+            if (index === 0) {
+
+                ctx.moveTo(
+                    point.x,
+                    point.y
+                );
+
+            } else {
+
+                ctx.lineTo(
+                    point.x,
+                    point.y
+                );
+            }
+        }
+    );
+
+
+    ctx.closePath();
+
+
+    ctx.fillStyle =
+        selected
+            ? "rgba(0,229,255,0.12)"
+            : "rgba(255,193,7,0.08)";
+
+
+    ctx.strokeStyle =
+        selected
+            ? "#00e5ff"
+            : hovered
+                ? "#ffffff"
+                : "#ffc107";
+
+
+    ctx.lineWidth =
+        (
+            selected
+                ? 3
+                : 2
+        ) /
+        state.scale;
+
+
+    ctx.fill();
+
+    ctx.stroke();
+
+
+    const first =
+        annotation.points[0];
+
+
+    if (first) {
+
+        renderAnnotationLabel(
+            annotation,
+            first.x,
+            first.y,
+            0,
+            0
+        );
+    }
+
+
+    ctx.restore();
+}
