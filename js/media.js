@@ -1,22 +1,27 @@
-// ============================================================
-// ANNOTATION AI - MEDIA MODULE
-// Handles image/video loading, customer uploads, video frames,
-// media controls, and task media display.
-// ============================================================
+/* ============================================================
+   MEDIA.JS
+   Customer uploads, task media, images, video and frame control
+   ============================================================ */
 
 import {
     APP_CONFIG,
     normalizeRole,
+    roleForWorkType,
+    isAdminRole,
+    isStaffRole,
+    isReviewerRole,
     isCoworkerRole
 } from "./config.js";
 
 import {
-    getSupabase,
-    getCurrentUser
+    getSupabase
 } from "./supabase.js";
 
 import {
+    getUser,
+    getProfile,
     getRole,
+    isLoggedIn,
     isAdmin,
     isStaff,
     isReviewer,
@@ -24,57 +29,78 @@ import {
     isPendingApproval
 } from "./auth.js";
 
-const mediaState = {
+/* ============================================================
+   STATE
+   ============================================================ */
+
+export const mediaState = {
     initialized: false,
 
-    currentFile: null,
-    currentUrl: null,
-    currentObjectUrl: null,
-
     mediaType: null,
+    mediaUrl: null,
+    mediaPath: null,
+
+    currentTaskId: null,
+    currentTask: null,
 
     video: null,
     image: null,
 
-    duration: 0,
-    currentTime: 0,
     currentFrame: 0,
+    totalFrames: 1,
 
     fps: 30,
 
+    duration: 0,
+    currentTime: 0,
+
+    objectUrl: null,
+
+    loading: false,
     uploading: false,
+
     uploadProgress: 0,
 
-    error: null
+    maxImageSize:
+        APP_CONFIG.uploadLimits?.imageMaxBytes ||
+        25 * 1024 * 1024,
+
+    maxVideoSize:
+        APP_CONFIG.uploadLimits?.videoMaxBytes ||
+        500 * 1024 * 1024
 };
 
-// ------------------------------------------------------------
-// HELPERS
-// ------------------------------------------------------------
+/* ============================================================
+   DOM
+   ============================================================ */
 
 function $(id) {
     return document.getElementById(id);
 }
 
-function qs(selector, root = document) {
-    return root.querySelector(selector);
-}
-
-function qsa(selector, root = document) {
+function all(selector, root = document) {
     return Array.from(
         root.querySelectorAll(selector)
     );
 }
 
-function emit(name, detail = {}) {
-    window.dispatchEvent(
-        new CustomEvent(name, {
-            detail
-        })
-    );
+function showElement(element, display = "") {
+    if (!element) return;
+
+    element.hidden = false;
+    element.style.display = display;
+    element.removeAttribute("aria-hidden");
 }
 
-function escapeHTML(value) {
+function hideElement(element) {
+    if (!element) return;
+
+    element.hidden = true;
+    element.style.display = "none";
+    element.setAttribute("aria-hidden", "true");
+}
+
+function escapeHtml(value) {
     return String(value ?? "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -82,6 +108,10 @@ function escapeHTML(value) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 }
+
+/* ============================================================
+   TOAST
+   ============================================================ */
 
 function showToast(message, type = "info") {
     if (
@@ -92,24 +122,129 @@ function showToast(message, type = "info") {
             message,
             type
         );
+        return;
     }
+
+    const container =
+        $("toastContainer");
+
+    if (!container) {
+        console.log(message);
+        return;
+    }
+
+    const toast =
+        document.createElement("div");
+
+    toast.className =
+        `toast toast-${type}`;
+
+    toast.textContent =
+        String(message || "");
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.remove();
+    }, 4000);
 }
 
-function getFileExtension(fileName = "") {
-    const name =
-        String(fileName);
+/* ============================================================
+   SUPABASE
+   ============================================================ */
 
-    const index =
-        name.lastIndexOf(".");
+function getClient() {
+    const client =
+        getSupabase();
 
-    return index >= 0
-        ? name.slice(index + 1).toLowerCase()
-        : "";
+    if (!client) {
+        throw new Error(
+            "Supabase is not initialized."
+        );
+    }
+
+    return client;
 }
 
-function isVideoFile(file) {
+/* ============================================================
+   TASK NORMALIZATION
+   ============================================================ */
+
+function normalizeTask(task) {
+    if (!task) {
+        return null;
+    }
+
+    return {
+        ...task,
+
+        id:
+            task.id ||
+            task.task_id ||
+            null,
+
+        title:
+            task.title ||
+            task.name ||
+            "Task",
+
+        media_path:
+            task.media_path ||
+            task.file_path ||
+            task.storage_path ||
+            task.media_url ||
+            null,
+
+        media_type:
+            normalizeMediaType(
+                task.media_type ||
+                task.mediaType ||
+                task.file_type ||
+                ""
+            ),
+
+        work_type:
+            task.work_type ||
+            task.task_type ||
+            task.shape ||
+            task.annotation_type ||
+            "box",
+
+        work_role:
+            task.work_role ||
+            task.required_role ||
+            roleForWorkType(
+                task.work_type ||
+                task.task_type ||
+                task.shape ||
+                "box"
+            )
+    };
+}
+
+function normalizeMediaType(value) {
+    const type =
+        String(value || "")
+            .toLowerCase()
+            .trim();
+
+    if (
+        type.includes("video") ||
+        type.includes("mp4") ||
+        type.includes("webm") ||
+        type.includes("mov") ||
+        type.includes("avi") ||
+        type.includes("mkv")
+    ) {
+        return "video";
+    }
+
+    return "image";
+}
+
+function getFileMediaType(file) {
     if (!file) {
-        return false;
+        return null;
     }
 
     if (
@@ -117,24 +252,7 @@ function isVideoFile(file) {
             .toLowerCase()
             .startsWith("video/")
     ) {
-        return true;
-    }
-
-    return [
-        "mp4",
-        "webm",
-        "mov",
-        "avi",
-        "mkv",
-        "m4v"
-    ].includes(
-        getFileExtension(file.name)
-    );
-}
-
-function isImageFile(file) {
-    if (!file) {
-        return false;
+        return "video";
     }
 
     if (
@@ -142,39 +260,36 @@ function isImageFile(file) {
             .toLowerCase()
             .startsWith("image/")
     ) {
-        return true;
+        return "image";
     }
 
-    return [
-        "jpg",
-        "jpeg",
-        "png",
-        "webp",
-        "gif",
-        "bmp"
-    ].includes(
-        getFileExtension(file.name)
-    );
-}
+    const name =
+        String(file.name || "")
+            .toLowerCase();
 
-function getFileSizeMB(file) {
-    if (!file) {
-        return 0;
+    if (
+        /\.(mp4|webm|mov|avi|mkv|m4v)$/i
+            .test(name)
+    ) {
+        return "video";
     }
 
-    return (
-        Number(file.size || 0) /
-        1024 /
-        1024
-    );
+    if (
+        /\.(jpg|jpeg|png|gif|webp|bmp)$/i
+            .test(name)
+    ) {
+        return "image";
+    }
+
+    return null;
 }
 
-// ------------------------------------------------------------
-// ROLE PERMISSIONS
-// ------------------------------------------------------------
+/* ============================================================
+   PERMISSION
+   ============================================================ */
 
-function canUploadCustomerMedia() {
-    if (!getCurrentUser()) {
+export function canUploadCustomerMedia() {
+    if (!isLoggedIn()) {
         return false;
     }
 
@@ -182,190 +297,182 @@ function canUploadCustomerMedia() {
         return false;
     }
 
-    // Coworkers must not see/use customer upload.
-    if (isCoworker()) {
+    /*
+     * Customers can upload.
+     * Staff and admins have full access.
+     *
+     * Coworkers cannot upload customer media.
+     */
+    if (
+        isCoworker()
+    ) {
         return false;
     }
 
-    // Staff/admin have full access.
-    if (
+    return (
         isAdmin() ||
         isStaff() ||
-        isReviewer()
-    ) {
-        return true;
+        getRole() === "customer"
+    );
+}
+
+/* ============================================================
+   FILE VALIDATION
+   ============================================================ */
+
+export function validateMediaFile(file) {
+    if (!file) {
+        return {
+            valid: false,
+            error: "Please select a file."
+        };
     }
 
-    // Customers can upload.
-    return true;
+    const type =
+        getFileMediaType(file);
+
+    if (!type) {
+        return {
+            valid: false,
+            error:
+                "Unsupported file type. Please select an image or video."
+        };
+    }
+
+    if (
+        type === "image" &&
+        file.size > mediaState.maxImageSize
+    ) {
+        return {
+            valid: false,
+            error:
+                `Image is too large. Maximum size is ${formatBytes(
+                    mediaState.maxImageSize
+                )}.`
+        };
+    }
+
+    if (
+        type === "video" &&
+        file.size > mediaState.maxVideoSize
+    ) {
+        return {
+            valid: false,
+            error:
+                `Video is too large. Maximum size is ${formatBytes(
+                    mediaState.maxVideoSize
+                )}.`
+        };
+    }
+
+    return {
+        valid: true,
+        type
+    };
 }
 
-function canUseMediaTools() {
+function formatBytes(bytes) {
+    const value =
+        Number(bytes) || 0;
+
+    if (value < 1024) {
+        return `${value} B`;
+    }
+
+    if (value < 1024 * 1024) {
+        return `${(
+            value / 1024
+        ).toFixed(1)} KB`;
+    }
+
+    if (
+        value <
+        1024 * 1024 * 1024
+    ) {
+        return `${(
+            value /
+            (1024 * 1024)
+        ).toFixed(1)} MB`;
+    }
+
+    return `${(
+        value /
+        (1024 * 1024 * 1024)
+    ).toFixed(1)} GB`;
+}
+
+/* ============================================================
+   STORAGE BUCKET
+   ============================================================ */
+
+function getTaskMediaBucket() {
     return (
-        isAdmin() ||
-        isStaff() ||
-        isReviewer() ||
-        !isCoworker()
+        APP_CONFIG.buckets?.taskMedia ||
+        APP_CONFIG.buckets?.media ||
+        "task-media"
     );
 }
 
-// ------------------------------------------------------------
-// MEDIA ELEMENTS
-// ------------------------------------------------------------
-
-function getImageElement() {
-    return (
-        mediaState.image ||
-        $("annotationImage") ||
-        $("sourceImage") ||
-        $("mainImage") ||
-        $("imageViewer") ||
-        $("mediaImage")
-    );
-}
-
-function getVideoElement() {
-    return (
-        mediaState.video ||
-        $("annotationVideo") ||
-        $("videoPlayer") ||
-        $("sourceVideo") ||
-        $("mainVideo") ||
-        $("mediaVideo")
-    );
-}
-
-function getCanvasElement() {
-    return (
-        $("annotationCanvas") ||
-        $("canvas") ||
-        $("drawingCanvas") ||
-        $("imageCanvas")
-    );
-}
-
-// ------------------------------------------------------------
-// MEDIA CONTAINER
-// ------------------------------------------------------------
-
-function getMediaContainer() {
-    return (
-        $("mediaViewer") ||
-        $("mediaContainer") ||
-        $("annotationMedia") ||
-        $("workspaceMedia") ||
-        $("canvasContainer")
-    );
-}
-
-// ------------------------------------------------------------
-// HIDE / SHOW MEDIA
-// ------------------------------------------------------------
-
-function hideImage() {
-    const image =
-        getImageElement();
-
-    image?.classList.add(
-        "hidden"
-    );
-}
-
-function hideVideo() {
-    const video =
-        getVideoElement();
-
-    video?.classList.add(
-        "hidden"
-    );
-}
-
-function showImage() {
-    const image =
-        getImageElement();
-
-    image?.classList.remove(
-        "hidden"
-    );
-}
-
-function showVideo() {
-    const video =
-        getVideoElement();
-
-    video?.classList.remove(
-        "hidden"
-    );
-}
-
-// ------------------------------------------------------------
-// CLEANUP OBJECT URL
-// ------------------------------------------------------------
+/* ============================================================
+   CREATE OBJECT URL
+   ============================================================ */
 
 function revokeObjectUrl() {
     if (
-        mediaState.currentObjectUrl
+        mediaState.objectUrl
     ) {
         try {
             URL.revokeObjectURL(
-                mediaState.currentObjectUrl
+                mediaState.objectUrl
             );
         } catch (error) {
-            console.debug(
-                "Object URL cleanup failed."
+            console.warn(
+                "Could not revoke object URL:",
+                error
             );
         }
-    }
 
-    mediaState.currentObjectUrl =
-        null;
+        mediaState.objectUrl =
+            null;
+    }
 }
 
-// ------------------------------------------------------------
-// CLEAR MEDIA
-// ------------------------------------------------------------
+/* ============================================================
+   CLEAR MEDIA
+   ============================================================ */
 
-function clearMedia() {
+export function clearMedia() {
     revokeObjectUrl();
-
-    const image =
-        getImageElement();
-
-    const video =
-        getVideoElement();
-
-    if (image) {
-        image.removeAttribute(
-            "src"
-        );
-
-        image.classList.add(
-            "hidden"
-        );
-    }
-
-    if (video) {
-        video.pause();
-
-        video.removeAttribute(
-            "src"
-        );
-
-        video.load();
-
-        video.classList.add(
-            "hidden"
-        );
-    }
-
-    mediaState.currentFile =
-        null;
-
-    mediaState.currentUrl =
-        null;
 
     mediaState.mediaType =
         null;
+
+    mediaState.mediaUrl =
+        null;
+
+    mediaState.mediaPath =
+        null;
+
+    mediaState.currentTaskId =
+        null;
+
+    mediaState.currentTask =
+        null;
+
+    mediaState.video =
+        null;
+
+    mediaState.image =
+        null;
+
+    mediaState.currentFrame =
+        0;
+
+    mediaState.totalFrames =
+        1;
+
+    mediaState.fps =
+        30;
 
     mediaState.duration =
         0;
@@ -373,482 +480,563 @@ function clearMedia() {
     mediaState.currentTime =
         0;
 
-    mediaState.currentFrame =
-        0;
-
-    emit(
-        "mediaCleared"
-    );
-}
-
-// ------------------------------------------------------------
-// LOAD IMAGE
-// ------------------------------------------------------------
-
-async function loadImage(
-    source,
-    options = {}
-) {
     const image =
-        getImageElement();
-
-    if (!image) {
-        throw new Error(
-            "Image display element was not found."
-        );
-    }
-
-    revokeObjectUrl();
-
-    let url = null;
-
-    if (
-        typeof source ===
-        "string"
-    ) {
-        url = source;
-    } else if (
-        source instanceof Blob
-    ) {
-        url = URL.createObjectURL(
-            source
-        );
-
-        mediaState.currentObjectUrl =
-            url;
-    }
-
-    if (!url) {
-        throw new Error(
-            "No image source was provided."
-        );
-    }
-
-    hideVideo();
-
-    image.classList.remove(
-        "hidden"
-    );
-
-    mediaState.image =
-        image;
-
-    mediaState.mediaType =
-        "image";
-
-    mediaState.currentUrl =
-        url;
-
-    return new Promise(
-        (resolve, reject) => {
-            image.onload = () => {
-                mediaState.currentFile =
-                    options.file ||
-                    null;
-
-                emit(
-                    "imageLoaded",
-                    {
-                        image,
-                        url,
-                        width:
-                            image.naturalWidth,
-                        height:
-                            image.naturalHeight,
-                        file:
-                            options.file ||
-                            null
-                    }
-                );
-
-                emit(
-                    "mediaLoaded",
-                    {
-                        type: "image",
-                        url
-                    }
-                );
-
-                resolve({
-                    element: image,
-                    url,
-                    type: "image",
-                    width:
-                        image.naturalWidth,
-                    height:
-                        image.naturalHeight
-                });
-            };
-
-            image.onerror = () => {
-                reject(
-                    new Error(
-                        "The image could not be loaded."
-                    )
-                );
-            };
-
-            image.src = url;
-        }
-    );
-}
-
-// ------------------------------------------------------------
-// LOAD VIDEO
-// ------------------------------------------------------------
-
-async function loadVideo(
-    source,
-    options = {}
-) {
-    const video =
-        getVideoElement();
-
-    if (!video) {
-        throw new Error(
-            "Video display element was not found."
-        );
-    }
-
-    revokeObjectUrl();
-
-    let url = null;
-
-    if (
-        typeof source ===
-        "string"
-    ) {
-        url = source;
-    } else if (
-        source instanceof Blob
-    ) {
-        url = URL.createObjectURL(
-            source
-        );
-
-        mediaState.currentObjectUrl =
-            url;
-    }
-
-    if (!url) {
-        throw new Error(
-            "No video source was provided."
-        );
-    }
-
-    hideImage();
-
-    video.classList.remove(
-        "hidden"
-    );
-
-    mediaState.video =
-        video;
-
-    mediaState.mediaType =
-        "video";
-
-    mediaState.currentUrl =
-        url;
-
-    video.src = url;
-
-    video.load();
-
-    return new Promise(
-        (resolve, reject) => {
-            const onLoaded = () => {
-                cleanup();
-
-                mediaState.duration =
-                    Number(
-                        video.duration
-                    ) || 0;
-
-                mediaState.currentTime =
-                    Number(
-                        video.currentTime
-                    ) || 0;
-
-                mediaState.currentFile =
-                    options.file ||
-                    null;
-
-                emit(
-                    "videoLoaded",
-                    {
-                        video,
-                        url,
-                        duration:
-                            mediaState.duration,
-                        file:
-                            options.file ||
-                            null
-                    }
-                );
-
-                emit(
-                    "mediaLoaded",
-                    {
-                        type: "video",
-                        url,
-                        duration:
-                            mediaState.duration
-                    }
-                );
-
-                resolve({
-                    element: video,
-                    url,
-                    type: "video",
-                    duration:
-                        mediaState.duration
-                });
-            };
-
-            const onError = () => {
-                cleanup();
-
-                reject(
-                    new Error(
-                        "The video could not be loaded."
-                    )
-                );
-            };
-
-            const cleanup = () => {
-                video.removeEventListener(
-                    "loadedmetadata",
-                    onLoaded
-                );
-
-                video.removeEventListener(
-                    "error",
-                    onError
-                );
-            };
-
-            video.addEventListener(
-                "loadedmetadata",
-                onLoaded,
-                {
-                    once: true
-                }
-            );
-
-            video.addEventListener(
-                "error",
-                onError,
-                {
-                    once: true
-                }
-            );
-        }
-    );
-}
-
-// ------------------------------------------------------------
-// LOAD MEDIA SOURCE
-// ------------------------------------------------------------
-
-async function loadMedia(
-    source,
-    options = {}
-) {
-    if (!source) {
-        throw new Error(
-            "No media source was provided."
-        );
-    }
-
-    if (
-        typeof source !==
-        "string"
-    ) {
-        if (
-            isVideoFile(source)
-        ) {
-            return loadVideo(
-                source,
-                options
-            );
-        }
-
-        if (
-            isImageFile(source)
-        ) {
-            return loadImage(
-                source,
-                options
-            );
-        }
-    }
-
-    const type =
-        String(
-            options.mediaType ||
-            ""
-        ).toLowerCase();
-
-    if (
-        type.includes("video")
-    ) {
-        return loadVideo(
-            source,
-            options
-        );
-    }
-
-    return loadImage(
-        source,
-        options
-    );
-}
-
-// ------------------------------------------------------------
-// LOCAL FILE VALIDATION
-// ------------------------------------------------------------
-
-function validateUploadFile(file) {
-    if (!file) {
-        return {
-            valid: false,
-            message: "Please select a file."
-        };
-    }
-
-    if (!canUploadCustomerMedia()) {
-        return {
-            valid: false,
-            message:
-                "Your current role cannot upload customer media."
-        };
-    }
-
-    const image =
-        isImageFile(file);
+        $("annotationImage");
 
     const video =
-        isVideoFile(file);
+        $("annotationVideo");
 
-    if (!image && !video) {
-        return {
-            valid: false,
-            message:
-                "Please select a supported image or video file."
-        };
+    const placeholder =
+        $("mediaPlaceholder");
+
+    if (image) {
+        image.removeAttribute("src");
+        hideElement(image);
     }
 
-    const sizeMB =
-        getFileSizeMB(file);
+    if (video) {
+        try {
+            video.pause();
+        } catch (error) {}
 
-    if (
-        image &&
-        sizeMB >
-        APP_CONFIG.upload.maxImageMB
-    ) {
-        return {
-            valid: false,
-            message:
-                `Image is too large. Maximum size is ${APP_CONFIG.upload.maxImageMB} MB.`
-        };
+        video.removeAttribute("src");
+        video.load();
+
+        hideElement(video);
     }
 
-    if (
-        video &&
-        sizeMB >
-        APP_CONFIG.upload.maxVideoMB
-    ) {
-        return {
-            valid: false,
-            message:
-                `Video is too large. Maximum size is ${APP_CONFIG.upload.maxVideoMB} MB.`
-        };
+    if (placeholder) {
+        showElement(
+            placeholder,
+            "flex"
+        );
     }
 
-    return {
-        valid: true,
-        type:
-            image
-                ? "image"
-                : "video"
-    };
+    updateMediaUI();
 }
 
-// ------------------------------------------------------------
-// PREVIEW LOCAL FILE
-// ------------------------------------------------------------
+/* ============================================================
+   LOAD IMAGE FROM URL
+   ============================================================ */
 
-async function previewFile(file) {
-    const validation =
-        validateUploadFile(file);
-
-    if (!validation.valid) {
-        showToast(
-            validation.message,
-            "error"
+export async function loadImage(
+    url,
+    options = {}
+) {
+    if (!url) {
+        throw new Error(
+            "No image URL was provided."
         );
-
-        return null;
     }
+
+    mediaState.loading =
+        true;
 
     try {
-        mediaState.currentFile =
-            file;
+        const image =
+            $("annotationImage");
 
-        const result =
-            await loadMedia(
-                file,
-                {
-                    file,
-                    mediaType:
-                        validation.type
-                }
+        const video =
+            $("annotationVideo");
+
+        const placeholder =
+            $("mediaPlaceholder");
+
+        if (video) {
+            try {
+                video.pause();
+            } catch (error) {}
+
+            hideElement(video);
+        }
+
+        if (!image) {
+            throw new Error(
+                "Annotation image element was not found."
             );
+        }
 
-        emit(
-            "mediaPreviewReady",
-            {
-                file,
-                result
+        hideElement(
+            placeholder
+        );
+
+        await new Promise(
+            (resolve, reject) => {
+                const onLoad = () => {
+                    cleanup();
+                    resolve();
+                };
+
+                const onError = () => {
+                    cleanup();
+
+                    reject(
+                        new Error(
+                            "The image could not be loaded."
+                        )
+                    );
+                };
+
+                const cleanup = () => {
+                    image.removeEventListener(
+                        "load",
+                        onLoad
+                    );
+
+                    image.removeEventListener(
+                        "error",
+                        onError
+                    );
+                };
+
+                image.addEventListener(
+                    "load",
+                    onLoad,
+                    {
+                        once: true
+                    }
+                );
+
+                image.addEventListener(
+                    "error",
+                    onError,
+                    {
+                        once: true
+                    }
+                );
+
+                image.src = url;
+
+                /*
+                 * Cached images can already be complete before
+                 * the listener fires.
+                 */
+                if (
+                    image.complete &&
+                    image.naturalWidth > 0
+                ) {
+                    cleanup();
+                    resolve();
+                }
             }
         );
 
-        return result;
-    } catch (error) {
-        console.error(
-            "Could not preview media:",
-            error
+        mediaState.mediaType =
+            "image";
+
+        mediaState.mediaUrl =
+            url;
+
+        mediaState.image =
+            image;
+
+        mediaState.video =
+            null;
+
+        mediaState.currentFrame =
+            0;
+
+        mediaState.totalFrames =
+            1;
+
+        mediaState.currentTime =
+            0;
+
+        mediaState.duration =
+            0;
+
+        showElement(
+            image,
+            "block"
         );
 
-        showToast(
-            error.message ||
-            "Could not preview media.",
-            "error"
+        updateMediaUI();
+
+        dispatchMediaEvent(
+            "mediaLoaded",
+            {
+                mediaType: "image",
+                url
+            }
         );
 
-        return null;
+        return image;
+    } finally {
+        mediaState.loading =
+            false;
     }
 }
 
-// ------------------------------------------------------------
-// STORAGE PATH
-// ------------------------------------------------------------
+/* ============================================================
+   LOAD VIDEO FROM URL
+   ============================================================ */
 
-function createStoragePath(
+export async function loadVideo(
+    url,
+    options = {}
+) {
+    if (!url) {
+        throw new Error(
+            "No video URL was provided."
+        );
+    }
+
+    mediaState.loading =
+        true;
+
+    try {
+        const video =
+            $("annotationVideo");
+
+        const image =
+            $("annotationImage");
+
+        const placeholder =
+            $("mediaPlaceholder");
+
+        if (!video) {
+            throw new Error(
+                "Annotation video element was not found."
+            );
+        }
+
+        if (image) {
+            hideElement(image);
+        }
+
+        hideElement(
+            placeholder
+        );
+
+        /*
+         * Reset old video state.
+         */
+        try {
+            video.pause();
+        } catch (error) {}
+
+        video.removeAttribute(
+            "src"
+        );
+
+        video.load();
+
+        video.preload =
+            "metadata";
+
+        video.playsInline =
+            true;
+
+        video.muted =
+            true;
+
+        const loaded =
+            new Promise(
+                (resolve, reject) => {
+                    let settled =
+                        false;
+
+                    const cleanup = () => {
+                        video.removeEventListener(
+                            "loadedmetadata",
+                            onLoaded
+                        );
+
+                        video.removeEventListener(
+                            "error",
+                            onError
+                        );
+                    };
+
+                    const onLoaded = () => {
+                        if (settled) return;
+
+                        settled = true;
+                        cleanup();
+                        resolve();
+                    };
+
+                    const onError = () => {
+                        if (settled) return;
+
+                        settled = true;
+                        cleanup();
+
+                        reject(
+                            new Error(
+                                "The video could not be loaded."
+                            )
+                        );
+                    };
+
+                    video.addEventListener(
+                        "loadedmetadata",
+                        onLoaded
+                    );
+
+                    video.addEventListener(
+                        "error",
+                        onError
+                    );
+
+                    video.src = url;
+
+                    video.load();
+
+                    if (
+                        video.readyState >= 1
+                    ) {
+                        onLoaded();
+                    }
+                }
+            );
+
+        await loaded;
+
+        mediaState.mediaType =
+            "video";
+
+        mediaState.mediaUrl =
+            url;
+
+        mediaState.video =
+            video;
+
+        mediaState.image =
+            null;
+
+        mediaState.duration =
+            Number(
+                video.duration
+            ) || 0;
+
+        mediaState.fps =
+            Number(
+                options.fps ||
+                mediaState.currentTask?.fps ||
+                30
+            ) || 30;
+
+        mediaState.currentFrame =
+            0;
+
+        mediaState.totalFrames =
+            Math.max(
+                1,
+                Math.ceil(
+                    mediaState.duration *
+                    mediaState.fps
+                )
+            );
+
+        mediaState.currentTime =
+            0;
+
+        showElement(
+            video,
+            "block"
+        );
+
+        updateMediaUI();
+
+        dispatchMediaEvent(
+            "mediaLoaded",
+            {
+                mediaType: "video",
+                url,
+                duration:
+                    mediaState.duration,
+                fps:
+                    mediaState.fps
+            }
+        );
+
+        return video;
+    } finally {
+        mediaState.loading =
+            false;
+    }
+}
+
+/* ============================================================
+   LOAD MEDIA BY TASK
+   ============================================================ */
+
+export async function loadTaskMedia(
+    task
+) {
+    const normalized =
+        normalizeTask(task);
+
+    if (
+        !normalized?.id
+    ) {
+        throw new Error(
+            "The task does not have a valid ID."
+        );
+    }
+
+    if (
+        !normalized.media_path
+    ) {
+        throw new Error(
+            "This task does not have media attached."
+        );
+    }
+
+    mediaState.currentTask =
+        normalized;
+
+    mediaState.currentTaskId =
+        normalized.id;
+
+    mediaState.mediaPath =
+        normalized.media_path;
+
+    const client =
+        getClient();
+
+    let url =
+        normalized.media_path;
+
+    /*
+     * If the task contains a full URL, use it directly.
+     * Otherwise create a signed Supabase Storage URL.
+     */
+    if (
+        !/^https?:\/\//i.test(
+            String(url)
+        )
+    ) {
+        const bucket =
+            getTaskMediaBucket();
+
+        const {
+            data,
+            error
+        } = await client.storage
+            .from(bucket)
+            .createSignedUrl(
+                String(url),
+                60 * 60
+            );
+
+        if (error) {
+            throw error;
+        }
+
+        url =
+            data?.signedUrl;
+
+        if (!url) {
+            throw new Error(
+                "Could not create a signed media URL."
+            );
+        }
+    }
+
+    mediaState.mediaUrl =
+        url;
+
+    const type =
+        normalized.media_type ||
+        normalizeMediaType(
+            normalized.media_path
+        );
+
+    if (
+        type === "video"
+    ) {
+        return await loadVideo(
+            url,
+            {
+                fps:
+                    normalized.fps ||
+                    normalized.frame_rate ||
+                    30
+            }
+        );
+    }
+
+    return await loadImage(
+        url
+    );
+}
+
+/* ============================================================
+   LOAD MEDIA FROM FILE
+   ============================================================ */
+
+export async function loadLocalMediaFile(
+    file
+) {
+    const validation =
+        validateMediaFile(file);
+
+    if (!validation.valid) {
+        throw new Error(
+            validation.error
+        );
+    }
+
+    revokeObjectUrl();
+
+    const url =
+        URL.createObjectURL(
+            file
+        );
+
+    mediaState.objectUrl =
+        url;
+
+    mediaState.mediaPath =
+        null;
+
+    mediaState.currentTaskId =
+        null;
+
+    if (
+        validation.type === "video"
+    ) {
+        return await loadVideo(
+            url
+        );
+    }
+
+    return await loadImage(
+        url
+    );
+}
+
+/* ============================================================
+   UPLOAD PATH
+   ============================================================ */
+
+function sanitizeFileName(name) {
+    return String(name || "file")
+        .trim()
+        .replace(
+            /[^a-zA-Z0-9._-]+/g,
+            "_"
+        )
+        .replace(
+            /_+/g,
+            "_"
+        )
+        .slice(
+            0,
+            160
+        );
+}
+
+function buildStoragePath(
     userId,
     file
 ) {
-    const extension =
-        getFileExtension(
-            file?.name ||
-            ""
+    const safeName =
+        sanitizeFileName(
+            file.name
         );
-
-    const safeExtension =
-        extension
-            ? `.${extension}`
-            : "";
 
     const timestamp =
         Date.now();
@@ -858,50 +1046,65 @@ function createStoragePath(
             .toString(36)
             .slice(2, 10);
 
-    return (
-        `${userId}/` +
-        `${timestamp}-` +
-        `${random}` +
-        safeExtension
-    );
+    return [
+        "customer-uploads",
+        userId,
+        `${timestamp}_${random}_${safeName}`
+    ].join("/");
 }
 
-// ------------------------------------------------------------
-// UPLOAD TO SUPABASE STORAGE
-// ------------------------------------------------------------
+/* ============================================================
+   UPLOAD MEDIA
+   ============================================================ */
 
-async function uploadMedia(
+export async function uploadCustomerMedia(
     file,
     options = {}
 ) {
-    const client =
-        getSupabase();
-
-    const user =
-        getCurrentUser();
-
-    if (!client) {
-        throw new Error(
-            "Supabase is not configured."
-        );
-    }
-
-    if (!user?.id) {
+    if (
+        !isLoggedIn()
+    ) {
         throw new Error(
             "Please sign in before uploading."
         );
     }
 
-    const validation =
-        validateUploadFile(
-            file
+    if (
+        isPendingApproval()
+    ) {
+        throw new Error(
+            "Your account is waiting for administrator approval."
         );
+    }
+
+    if (
+        !canUploadCustomerMedia()
+    ) {
+        throw new Error(
+            "You do not have permission to upload customer media."
+        );
+    }
+
+    const validation =
+        validateMediaFile(file);
 
     if (!validation.valid) {
         throw new Error(
-            validation.message
+            validation.error
         );
     }
+
+    const user =
+        getUser();
+
+    if (!user?.id) {
+        throw new Error(
+            "No authenticated user was found."
+        );
+    }
+
+    const client =
+        getClient();
 
     mediaState.uploading =
         true;
@@ -909,17 +1112,25 @@ async function uploadMedia(
     mediaState.uploadProgress =
         0;
 
+    updateUploadProgress(
+        0,
+        "Preparing upload…"
+    );
+
     try {
+        const bucket =
+            getTaskMediaBucket();
+
         const path =
-            options.path ||
-            createStoragePath(
+            buildStoragePath(
                 user.id,
                 file
             );
 
-        const bucket =
-            options.bucket ||
-            APP_CONFIG.buckets.taskMedia;
+        updateUploadProgress(
+            10,
+            "Uploading media…"
+        );
 
         const {
             error
@@ -942,30 +1153,73 @@ async function uploadMedia(
             throw error;
         }
 
-        mediaState.uploadProgress =
-            100;
+        updateUploadProgress(
+            70,
+            "Creating task…"
+        );
 
-        emit(
-            "mediaUploaded",
+        const task =
+            await createCustomerTask({
+                title:
+                    options.title ||
+                    removeExtension(
+                        file.name
+                    ),
+
+                mediaPath:
+                    path,
+
+                mediaType:
+                    validation.type,
+
+                workType:
+                    options.workType ||
+                    options.taskType ||
+                    "box",
+
+                duration:
+                    options.duration ||
+                    null,
+
+                pay:
+                    options.pay ??
+                    null,
+
+                metadata:
+                    options.metadata ||
+                    {}
+            });
+
+        updateUploadProgress(
+            100,
+            "Upload complete."
+        );
+
+        dispatchMediaEvent(
+            "customerMediaUploaded",
             {
-                path,
-                bucket,
                 file,
-                type:
-                    validation.type
+                path,
+                task
             }
         );
 
-        return {
-            path,
-            bucket,
-            file,
-            mediaType:
-                validation.type
-        };
+        showToast(
+            "Media uploaded and task created successfully.",
+            "success"
+        );
+
+        return task;
     } catch (error) {
-        mediaState.error =
-            error;
+        console.error(
+            "Customer media upload failed:",
+            error
+        );
+
+        updateUploadProgress(
+            0,
+            "Upload failed."
+        );
 
         throw error;
     } finally {
@@ -974,140 +1228,93 @@ async function uploadMedia(
     }
 }
 
-// ------------------------------------------------------------
-// CREATE SIGNED MEDIA URL
-// ------------------------------------------------------------
-
-async function getSignedMediaUrl(
-    path,
-    expiresIn = 3600,
-    bucket =
-        APP_CONFIG.buckets.taskMedia
+function removeExtension(
+    filename
 ) {
-    const client =
-        getSupabase();
-
-    if (!client) {
-        throw new Error(
-            "Supabase is not configured."
-        );
-    }
-
-    if (!path) {
-        throw new Error(
-            "No media path was provided."
-        );
-    }
-
-    const {
-        data,
-        error
-    } = await client.storage
-        .from(bucket)
-        .createSignedUrl(
-            path,
-            expiresIn
-        );
-
-    if (error) {
-        throw error;
-    }
-
-    return (
-        data?.signedUrl ||
-        null
+    return String(
+        filename || "Untitled task"
+    ).replace(
+        /\.[^/.]+$/,
+        ""
     );
 }
 
-// ------------------------------------------------------------
-// CREATE CUSTOMER TASK
-// ------------------------------------------------------------
+/* ============================================================
+   CREATE CUSTOMER TASK
+   ============================================================ */
 
-async function createCustomerTask(
-    file,
-    taskOptions = {}
+export async function createCustomerTask(
+    options = {}
 ) {
-    const client =
-        getSupabase();
+    if (
+        !isLoggedIn()
+    ) {
+        throw new Error(
+            "You must be logged in to create a task."
+        );
+    }
+
+    if (
+        isPendingApproval()
+    ) {
+        throw new Error(
+            "Your account is waiting for administrator approval."
+        );
+    }
 
     const user =
-        getCurrentUser();
-
-    if (!client) {
-        throw new Error(
-            "Supabase is not configured."
-        );
-    }
-
-    if (!user?.id) {
-        throw new Error(
-            "Please sign in first."
-        );
-    }
-
-    if (
-        isPendingApproval() &&
-        !isAdmin()
-    ) {
-        throw new Error(
-            "Your account is waiting for admin approval."
-        );
-    }
-
-    if (
-        isCoworker()
-    ) {
-        throw new Error(
-            "Coworkers cannot create customer upload tasks."
-        );
-    }
-
-    const validation =
-        validateUploadFile(
-            file
-        );
-
-    if (!validation.valid) {
-        throw new Error(
-            validation.message
-        );
-    }
-
-    const upload =
-        await uploadMedia(
-            file
-        );
+        getUser();
 
     const workType =
-        taskOptions.workType ||
-        taskOptions.type ||
-        "2d_box";
+        options.workType ||
+        options.taskType ||
+        "box";
 
     const workRole =
-        normalizeRole(
-            taskOptions.workRole ||
-            taskOptions.role ||
-            roleForUploadWorkType(
-                workType
-            )
+        options.workRole ||
+        roleForWorkType(
+            workType
         );
 
     const title =
-        taskOptions.title ||
-        file.name ||
-        "Customer annotation task";
+        String(
+            options.title ||
+            "Customer task"
+        ).trim();
 
-    const task = {
+    if (!title) {
+        throw new Error(
+            "Task title is required."
+        );
+    }
+
+    if (
+        !options.mediaPath
+    ) {
+        throw new Error(
+            "Task media path is required."
+        );
+    }
+
+    const client =
+        getClient();
+
+    const table =
+        APP_CONFIG.tables.tasks;
+
+    /*
+     * Keep the payload compatible with the main task schema.
+     */
+    const payload = {
         title,
 
-        source_name:
-            file.name,
+        media_path:
+            options.mediaPath,
 
         media_type:
-            validation.type,
-
-        media_path:
-            upload.path,
+            normalizeMediaType(
+                options.mediaType
+            ),
 
         work_type:
             workType,
@@ -1118,318 +1325,532 @@ async function createCustomerTask(
         status:
             "available",
 
-        assigned_to:
+        created_by:
+            user.id,
+
+        duration:
+            options.duration ??
             null,
 
-        claimed_by:
+        pay:
+            options.pay ??
             null,
 
-        claimed_at:
-            null,
-
-        expected_minutes:
-            taskOptions.expectedMinutes ??
-            taskOptions.duration ??
-            null,
-
-        pay_amount:
-            taskOptions.payAmount ??
-            null
+        metadata:
+            options.metadata ||
+            {}
     };
 
-    const {
+    let {
         data,
         error
     } = await client
-        .from(APP_CONFIG.tables.tasks)
-        .insert(task)
+        .from(table)
+        .insert(payload)
         .select("*")
         .single();
 
-    if (error) {
-        // Remove uploaded file if task creation failed.
-        try {
-            await client.storage
-                .from(
-                    APP_CONFIG.buckets.taskMedia
-                )
-                .remove([
-                    upload.path
-                ]);
-        } catch (cleanupError) {
-            console.warn(
-                "Uploaded file cleanup failed:",
-                cleanupError
-            );
-        }
+    /*
+     * Older installations may not have all columns. Retry with
+     * a conservative payload if the first insert is rejected.
+     */
+    if (
+        error
+    ) {
+        console.warn(
+            "Full task insert failed. Retrying with compatible fields:",
+            error
+        );
 
+        const fallback = {
+            title,
+            media_path:
+                options.mediaPath,
+            media_type:
+                normalizeMediaType(
+                    options.mediaType
+                ),
+            status:
+                "available",
+            created_by:
+                user.id
+        };
+
+        const retry =
+            await client
+                .from(table)
+                .insert(fallback)
+                .select("*")
+                .single();
+
+        data =
+            retry.data;
+
+        error =
+            retry.error;
+    }
+
+    if (error) {
         throw error;
     }
 
-    emit(
-        "customerTaskCreated",
-        {
-            task: data,
-            upload
-        }
-    );
+    if (!data) {
+        throw new Error(
+            "Task was created but no task record was returned."
+        );
+    }
 
-    showToast(
-        "Task uploaded successfully.",
-        "success"
+    return normalizeTask(
+        data
     );
-
-    return data;
 }
 
-// ------------------------------------------------------------
-// WORK TYPE -> ROLE
-// ------------------------------------------------------------
+/* ============================================================
+   UPLOAD UI
+   ============================================================ */
 
-function roleForUploadWorkType(
-    workType
+function updateUploadProgress(
+    percent,
+    message
 ) {
-    const value =
-        String(
-            workType || ""
-        )
-            .toLowerCase()
-            .replace(/[\s-]+/g, "_");
-
-    if (
-        value.includes("polygon")
-    ) {
-        return "coworker_polygon";
-    }
-
-    if (
-        value.includes("segment")
-    ) {
-        return "coworker_segmentation";
-    }
-
-    return "coworker_2d_box";
-}
-
-// ------------------------------------------------------------
-// VIDEO CONTROLS
-// ------------------------------------------------------------
-
-function playVideo() {
-    const video =
-        getVideoElement();
-
-    if (!video) {
-        return false;
-    }
-
-    video.play().catch(
-        error => {
-            console.debug(
-                "Video play was blocked:",
-                error
-            );
-        }
-    );
-
-    return true;
-}
-
-function pauseVideo() {
-    const video =
-        getVideoElement();
-
-    if (!video) {
-        return false;
-    }
-
-    video.pause();
-
-    return true;
-}
-
-function toggleVideo() {
-    const video =
-        getVideoElement();
-
-    if (!video) {
-        return false;
-    }
-
-    if (video.paused) {
-        return playVideo();
-    }
-
-    pauseVideo();
-
-    return true;
-}
-
-// ------------------------------------------------------------
-// VIDEO SEEK
-// ------------------------------------------------------------
-
-function seekVideo(seconds) {
-    const video =
-        getVideoElement();
-
-    if (!video) {
-        return false;
-    }
-
-    const value =
-        Number(seconds);
-
-    if (!Number.isFinite(value)) {
-        return false;
-    }
-
-    video.currentTime =
+    mediaState.uploadProgress =
         Math.max(
             0,
             Math.min(
-                value,
-                Number(video.duration) ||
-                    value
+                100,
+                Number(percent) || 0
             )
         );
 
-    return true;
-}
+    const bar =
+        $("uploadProgressBar");
 
-function seekRelative(
-    seconds
-) {
-    const video =
-        getVideoElement();
+    const text =
+        $("uploadProgressText");
 
-    if (!video) {
-        return false;
+    const container =
+        $("uploadProgress");
+
+    if (bar) {
+        bar.style.width =
+            `${mediaState.uploadProgress}%`;
+
+        bar.setAttribute(
+            "aria-valuenow",
+            String(
+                mediaState.uploadProgress
+            )
+        );
     }
 
-    return seekVideo(
-        video.currentTime +
-        Number(seconds || 0)
-    );
+    if (text) {
+        text.textContent =
+            message ||
+            `${mediaState.uploadProgress}%`;
+    }
+
+    if (container) {
+        showElement(
+            container
+        );
+    }
 }
 
-// ------------------------------------------------------------
-// FRAME CALCULATION
-// ------------------------------------------------------------
-
-function getFrameRate() {
-    return (
-        Number(
-            mediaState.fps
-        ) > 0
-            ? Number(
-                  mediaState.fps
-              )
-            : 30
-    );
-}
-
-function setFrameRate(fps) {
-    const value =
-        Number(fps);
+function bindUploadInput() {
+    const input =
+        $("customerMediaInput");
 
     if (
-        !Number.isFinite(value) ||
-        value <= 0
+        !input ||
+        input.dataset.bound === "true"
     ) {
-        return false;
+        return;
     }
 
-    mediaState.fps =
-        value;
+    input.dataset.bound =
+        "true";
 
-    emit(
-        "frameRateChanged",
-        {
-            fps: value
+    input.addEventListener(
+        "change",
+        async event => {
+            const file =
+                event.target.files?.[0];
+
+            if (!file) {
+                return;
+            }
+
+            try {
+                await loadLocalMediaFile(
+                    file
+                );
+
+                /*
+                 * Do not automatically upload until the user has
+                 * selected a file. Upload immediately for the
+                 * customer workflow.
+                 */
+                await uploadCustomerMedia(
+                    file
+                );
+            } catch (error) {
+                console.error(
+                    "Media selection failed:",
+                    error
+                );
+
+                showToast(
+                    error.message ||
+                    "Unable to process the selected media.",
+                    "error"
+                );
+            } finally {
+                input.value =
+                    "";
+            }
         }
     );
-
-    return true;
 }
 
-function getCurrentFrame() {
-    const video =
-        getVideoElement();
+function bindUploadPanel() {
+    const close =
+        $("closeUploadPanel");
 
-    if (!video) {
-        return mediaState.currentFrame;
+    if (
+        close &&
+        close.dataset.bound !== "true"
+    ) {
+        close.dataset.bound =
+            "true";
+
+        close.addEventListener(
+            "click",
+            event => {
+                event.preventDefault();
+
+                const panel =
+                    $("customerUploadPanel");
+
+                if (panel) {
+                    hideElement(
+                        panel
+                    );
+                }
+            }
+        );
     }
 
-    return Math.max(
-        0,
-        Math.floor(
-            video.currentTime *
-            getFrameRate()
-        )
+    const input =
+        $("customerMediaInput");
+
+    if (input) {
+        input.accept =
+            "image/*,video/*";
+    }
+}
+
+/* ============================================================
+   ROLE VISIBILITY
+   ============================================================ */
+
+function updateUploadVisibility() {
+    const panel =
+        $("customerUploadPanel");
+
+    const workbenchUpload =
+        $("workbenchUpload");
+
+    if (
+        isCoworker()
+    ) {
+        if (panel) {
+            hideElement(
+                panel
+            );
+        }
+
+        if (workbenchUpload) {
+            hideElement(
+                workbenchUpload
+            );
+        }
+
+        return;
+    }
+
+    if (
+        canUploadCustomerMedia()
+    ) {
+        if (workbenchUpload) {
+            showElement(
+                workbenchUpload
+            );
+        }
+
+        /*
+         * Do not force the main upload panel open.
+         */
+    } else {
+        if (panel) {
+            hideElement(
+                panel
+            );
+        }
+
+        if (workbenchUpload) {
+            hideElement(
+                workbenchUpload
+            );
+        }
+    }
+}
+
+/* ============================================================
+   MEDIA TOOLBAR
+   ============================================================ */
+
+function updateMediaUI() {
+    const typeLabel =
+        $("mediaTypeLabel");
+
+    const previous =
+        $("previousFrameButton");
+
+    const next =
+        $("nextFrameButton");
+
+    const counter =
+        $("frameCounter");
+
+    const videoControls =
+        $("videoControls");
+
+    const timeline =
+        $("videoTimeline");
+
+    const time =
+        $("videoTime");
+
+    if (typeLabel) {
+        typeLabel.textContent =
+            mediaState.mediaType === "video"
+                ? "Video"
+                : mediaState.mediaType === "image"
+                    ? "Image"
+                    : "No media";
+    }
+
+    if (
+        mediaState.mediaType ===
+        "video"
+    ) {
+        if (previous) {
+            showElement(
+                previous
+            );
+
+            previous.disabled =
+                mediaState.currentFrame <= 0;
+        }
+
+        if (next) {
+            showElement(
+                next
+            );
+
+            next.disabled =
+                mediaState.currentFrame >=
+                mediaState.totalFrames - 1;
+        }
+
+        if (counter) {
+            counter.textContent =
+                `${mediaState.currentFrame + 1} / ${mediaState.totalFrames}`;
+        }
+
+        if (videoControls) {
+            showElement(
+                videoControls
+            );
+        }
+
+        if (timeline) {
+            const duration =
+                mediaState.duration;
+
+            timeline.max =
+                String(
+                    duration || 0
+                );
+
+            timeline.value =
+                String(
+                    mediaState.currentTime || 0
+                );
+        }
+
+        if (time) {
+            time.textContent =
+                `${formatTime(
+                    mediaState.currentTime
+                )} / ${formatTime(
+                    mediaState.duration
+                )}`;
+        }
+    } else {
+        if (previous) {
+            hideElement(
+                previous
+            );
+        }
+
+        if (next) {
+            hideElement(
+                next
+            );
+        }
+
+        if (counter) {
+            counter.textContent =
+                mediaState.mediaType ===
+                "image"
+                    ? "1 / 1"
+                    : "0 / 0";
+        }
+
+        if (videoControls) {
+            hideElement(
+                videoControls
+            );
+        }
+    }
+}
+
+/* ============================================================
+   VIDEO FRAME CONTROL
+   ============================================================ */
+
+export function seekVideoTime(
+    time
+) {
+    if (
+        !mediaState.video ||
+        mediaState.mediaType !==
+            "video"
+    ) {
+        return;
+    }
+
+    const duration =
+        Number(
+            mediaState.video.duration
+        ) || 0;
+
+    const target =
+        Math.max(
+            0,
+            Math.min(
+                duration,
+                Number(time) || 0
+            )
+        );
+
+    mediaState.video.currentTime =
+        target;
+
+    mediaState.currentTime =
+        target;
+
+    mediaState.currentFrame =
+        Math.max(
+            0,
+            Math.min(
+                mediaState.totalFrames - 1,
+                Math.round(
+                    target *
+                    mediaState.fps
+                )
+            )
+        );
+
+    updateMediaUI();
+
+    dispatchMediaEvent(
+        "frameChanged",
+        {
+            frame:
+                mediaState.currentFrame,
+            time:
+                mediaState.currentTime
+        }
     );
 }
 
-function seekFrame(
+export function seekFrame(
     frame
 ) {
-    const video =
-        getVideoElement();
-
-    if (!video) {
-        return false;
+    if (
+        mediaState.mediaType !==
+        "video"
+    ) {
+        return;
     }
 
-    const value =
-        Number(frame);
-
-    if (!Number.isFinite(value)) {
-        return false;
-    }
-
-    const fps =
-        getFrameRate();
-
-    return seekVideo(
+    const targetFrame =
         Math.max(
             0,
-            value
-        ) / fps
+            Math.min(
+                mediaState.totalFrames - 1,
+                Number(frame) || 0
+            )
+        );
+
+    const time =
+        targetFrame /
+        (
+            mediaState.fps ||
+            30
+        );
+
+    mediaState.currentFrame =
+        targetFrame;
+
+    seekVideoTime(
+        time
     );
 }
 
-function nextFrame() {
-    return seekFrame(
-        getCurrentFrame() + 1
+export function nextFrame() {
+    seekFrame(
+        mediaState.currentFrame + 1
     );
 }
 
-function previousFrame() {
-    return seekFrame(
-        Math.max(
-            0,
-            getCurrentFrame() - 1
-        )
+export function previousFrame() {
+    seekFrame(
+        mediaState.currentFrame - 1
     );
 }
 
-// ------------------------------------------------------------
-// CAPTURE VIDEO FRAME
-// ------------------------------------------------------------
+/* ============================================================
+   CAPTURE VIDEO FRAME
+   ============================================================ */
 
-function captureVideoFrame(
-    options = {}
-) {
-    const video =
-        getVideoElement();
-
-    if (!video) {
+export function captureCurrentFrame() {
+    if (
+        !mediaState.video ||
+        mediaState.mediaType !==
+            "video"
+    ) {
         return null;
     }
 
+    const video =
+        mediaState.video;
+
     if (
-        video.readyState <
-        2
+        !video.videoWidth ||
+        !video.videoHeight
     ) {
         return null;
     }
@@ -1439,21 +1860,11 @@ function captureVideoFrame(
             "canvas"
         );
 
-    const width =
-        video.videoWidth ||
-        video.clientWidth ||
-        1;
-
-    const height =
-        video.videoHeight ||
-        video.clientHeight ||
-        1;
-
     canvas.width =
-        width;
+        video.videoWidth;
 
     canvas.height =
-        height;
+        video.videoHeight;
 
     const context =
         canvas.getContext(
@@ -1468,60 +1879,242 @@ function captureVideoFrame(
         video,
         0,
         0,
-        width,
-        height
-    );
-
-    const dataUrl =
-        canvas.toDataURL(
-            options.type ||
-                "image/png",
-            options.quality ??
-                0.92
-        );
-
-    emit(
-        "videoFrameCaptured",
-        {
-            frame:
-                getCurrentFrame(),
-            time:
-                video.currentTime,
-            dataUrl,
-            width,
-            height
-        }
+        canvas.width,
+        canvas.height
     );
 
     return {
         canvas,
-        dataUrl,
+        dataUrl:
+            canvas.toDataURL(
+                "image/png"
+            ),
+        width:
+            canvas.width,
+        height:
+            canvas.height,
         frame:
-            getCurrentFrame(),
+            mediaState.currentFrame,
         time:
-            video.currentTime,
-        width,
-        height
+            mediaState.currentTime
     };
 }
 
-// ------------------------------------------------------------
-// DOWNLOAD CURRENT FRAME
-// ------------------------------------------------------------
+/* ============================================================
+   VIDEO PLAYBACK
+   ============================================================ */
 
-function downloadCurrentFrame(
-    fileName = "annotation-frame.png"
-) {
-    const frame =
-        captureVideoFrame();
+function toggleVideoPlayback() {
+    const video =
+        mediaState.video;
 
-    if (!frame?.dataUrl) {
-        showToast(
-            "Could not capture the current video frame.",
-            "error"
+    if (
+        !video
+    ) {
+        return;
+    }
+
+    if (
+        video.paused
+    ) {
+        video.play()
+            .catch(error => {
+                console.warn(
+                    "Video playback failed:",
+                    error
+                );
+            });
+    } else {
+        video.pause();
+    }
+}
+
+function updateVideoTimeFromElement() {
+    const video =
+        mediaState.video;
+
+    if (!video) {
+        return;
+    }
+
+    mediaState.currentTime =
+        Number(
+            video.currentTime
+        ) || 0;
+
+    mediaState.currentFrame =
+        Math.max(
+            0,
+            Math.min(
+                mediaState.totalFrames - 1,
+                Math.round(
+                    mediaState.currentTime *
+                    mediaState.fps
+                )
+            )
         );
 
-        return false;
+    updateMediaUI();
+
+    dispatchMediaEvent(
+        "frameChanged",
+        {
+            frame:
+                mediaState.currentFrame,
+            time:
+                mediaState.currentTime
+        }
+    );
+}
+
+/* ============================================================
+   VIDEO CONTROLS
+   ============================================================ */
+
+function bindVideoControls() {
+    const playButton =
+        $("videoPlayButton");
+
+    if (
+        playButton &&
+        playButton.dataset.bound !== "true"
+    ) {
+        playButton.dataset.bound =
+            "true";
+
+        playButton.addEventListener(
+            "click",
+            event => {
+                event.preventDefault();
+
+                toggleVideoPlayback();
+            }
+        );
+    }
+
+    const timeline =
+        $("videoTimeline");
+
+    if (
+        timeline &&
+        timeline.dataset.bound !== "true"
+    ) {
+        timeline.dataset.bound =
+            "true";
+
+        timeline.addEventListener(
+            "input",
+            () => {
+                seekVideoTime(
+                    Number(
+                        timeline.value
+                    )
+                );
+            }
+        );
+    }
+
+    const video =
+        $("annotationVideo");
+
+    if (
+        video &&
+        video.dataset.bound !== "true"
+    ) {
+        video.dataset.bound =
+            "true";
+
+        video.addEventListener(
+            "timeupdate",
+            updateVideoTimeFromElement
+        );
+
+        video.addEventListener(
+            "play",
+            () => {
+                if (playButton) {
+                    playButton.textContent =
+                        "Pause";
+                }
+            }
+        );
+
+        video.addEventListener(
+            "pause",
+            () => {
+                if (playButton) {
+                    playButton.textContent =
+                        "Play";
+                }
+            }
+        );
+
+        video.addEventListener(
+            "ended",
+            () => {
+                if (playButton) {
+                    playButton.textContent =
+                        "Play";
+                }
+            }
+        );
+    }
+
+    const previous =
+        $("previousFrameButton");
+
+    if (
+        previous &&
+        previous.dataset.bound !== "true"
+    ) {
+        previous.dataset.bound =
+            "true";
+
+        previous.addEventListener(
+            "click",
+            event => {
+                event.preventDefault();
+
+                previousFrame();
+            }
+        );
+    }
+
+    const next =
+        $("nextFrameButton");
+
+    if (
+        next &&
+        next.dataset.bound !== "true"
+    ) {
+        next.dataset.bound =
+            "true";
+
+        next.addEventListener(
+            "click",
+            event => {
+                event.preventDefault();
+
+                nextFrame();
+            }
+        );
+    }
+}
+
+/* ============================================================
+   MEDIA DOWNLOAD
+   ============================================================ */
+
+export function downloadCurrentMedia() {
+    if (
+        !mediaState.mediaUrl
+    ) {
+        showToast(
+            "There is no media to download.",
+            "warning"
+        );
+
+        return;
     }
 
     const link =
@@ -1530,10 +2123,17 @@ function downloadCurrentFrame(
         );
 
     link.href =
-        frame.dataUrl;
+        mediaState.mediaUrl;
+
+    link.target =
+        "_blank";
+
+    link.rel =
+        "noopener";
 
     link.download =
-        fileName;
+        mediaState.currentTask?.title ||
+        "task-media";
 
     document.body.appendChild(
         link
@@ -1542,315 +2142,133 @@ function downloadCurrentFrame(
     link.click();
 
     link.remove();
-
-    return true;
 }
 
-// ------------------------------------------------------------
-// VIDEO EVENT BINDING
-// ------------------------------------------------------------
+/* ============================================================
+   FORMAT TIME
+   ============================================================ */
 
-function bindVideoEvents() {
-    const video =
-        getVideoElement();
+function formatTime(seconds) {
+    const value =
+        Math.max(
+            0,
+            Number(seconds) || 0
+        );
 
-    if (!video) {
-        return;
-    }
+    const minutes =
+        Math.floor(
+            value / 60
+        );
 
-    if (
-        video.dataset.mediaBound ===
-        "true"
-    ) {
-        return;
-    }
+    const remaining =
+        Math.floor(
+            value % 60
+        );
 
-    video.dataset.mediaBound =
-        "true";
+    return `${String(
+        minutes
+    ).padStart(2, "0")}:${String(
+        remaining
+    ).padStart(2, "0")}`;
+}
 
-    mediaState.video =
-        video;
+/* ============================================================
+   MEDIA EVENTS
+   ============================================================ */
 
-    video.addEventListener(
-        "timeupdate",
-        () => {
-            mediaState.currentTime =
-                Number(
-                    video.currentTime
-                ) || 0;
-
-            mediaState.currentFrame =
-                getCurrentFrame();
-
-            emit(
-                "videoTimeChanged",
+function dispatchMediaEvent(
+    name,
+    detail = {}
+) {
+    try {
+        window.dispatchEvent(
+            new CustomEvent(
+                name,
                 {
-                    time:
-                        mediaState.currentTime,
-                    frame:
-                        mediaState.currentFrame,
-                    duration:
-                        mediaState.duration
+                    detail
                 }
-            );
-        }
-    );
-
-    video.addEventListener(
-        "play",
-        () => {
-            emit(
-                "videoPlaying"
-            );
-        }
-    );
-
-    video.addEventListener(
-        "pause",
-        () => {
-            emit(
-                "videoPaused"
-            );
-        }
-    );
-
-    video.addEventListener(
-        "ended",
-        () => {
-            emit(
-                "videoEnded"
-            );
-        }
-    );
-
-    video.addEventListener(
-        "loadedmetadata",
-        () => {
-            mediaState.duration =
-                Number(
-                    video.duration
-                ) || 0;
-
-            emit(
-                "videoMetadataLoaded",
-                {
-                    duration:
-                        mediaState.duration,
-                    width:
-                        video.videoWidth,
-                    height:
-                        video.videoHeight
-                }
-            );
-        }
-    );
-}
-
-// ------------------------------------------------------------
-// MEDIA CONTROL BUTTONS
-// ------------------------------------------------------------
-
-function bindMediaControls() {
-    const play =
-        $("playVideo") ||
-        $("playButton");
-
-    const pause =
-        $("pauseVideo") ||
-        $("pauseButton");
-
-    const toggle =
-        $("toggleVideo") ||
-        $("videoPlayPause");
-
-    const previous =
-        $("previousFrame") ||
-        $("prevFrame");
-
-    const next =
-        $("nextFrame");
-
-    const capture =
-        $("captureFrame") ||
-        $("captureVideoFrame");
-
-    play?.addEventListener(
-        "click",
-        event => {
-            event.preventDefault();
-            playVideo();
-        }
-    );
-
-    pause?.addEventListener(
-        "click",
-        event => {
-            event.preventDefault();
-            pauseVideo();
-        }
-    );
-
-    toggle?.addEventListener(
-        "click",
-        event => {
-            event.preventDefault();
-            toggleVideo();
-        }
-    );
-
-    previous?.addEventListener(
-        "click",
-        event => {
-            event.preventDefault();
-            previousFrame();
-        }
-    );
-
-    next?.addEventListener(
-        "click",
-        event => {
-            event.preventDefault();
-            nextFrame();
-        }
-    );
-
-    capture?.addEventListener(
-        "click",
-        event => {
-            event.preventDefault();
-            captureVideoFrame();
-        }
-    );
-}
-
-// ------------------------------------------------------------
-// FILE INPUT
-// ------------------------------------------------------------
-
-function getUploadInput() {
-    return (
-        $("customerUploadInput") ||
-        $("uploadInput") ||
-        $("mediaUploadInput") ||
-        $("fileUploadInput") ||
-        $("customerMediaInput")
-    );
-}
-
-function bindUploadInput() {
-    const input =
-        getUploadInput();
-
-    if (!input) {
-        return;
+            )
+        );
+    } catch (error) {
+        console.warn(
+            `Could not dispatch ${name}:`,
+            error
+        );
     }
+}
 
-    if (
-        input.dataset.mediaBound ===
-        "true"
-    ) {
-        return;
-    }
+/* ============================================================
+   TASK EVENT LISTENERS
+   ============================================================ */
 
-    input.dataset.mediaBound =
-        "true";
-
-    input.addEventListener(
-        "change",
+function bindTaskEvents() {
+    window.addEventListener(
+        "taskSelected",
         async event => {
-            const file =
-                event.target.files?.[0];
+            const task =
+                event.detail?.task;
 
-            if (!file) {
+            const taskId =
+                event.detail?.taskId ||
+                task?.id;
+
+            if (!taskId) {
                 return;
             }
 
-            await previewFile(
-                file
-            );
-        }
-    );
-}
-
-// ------------------------------------------------------------
-// UPLOAD BUTTON
-// ------------------------------------------------------------
-
-function bindUploadButton() {
-    const buttons = [
-        $("customerUploadButton"),
-        $("uploadMediaButton"),
-        $("uploadPanelButton"),
-        $("workbenchUpload")
-    ].filter(Boolean);
-
-    buttons.forEach(button => {
-        if (
-            button.dataset.mediaBound ===
-            "true"
-        ) {
-            return;
-        }
-
-        button.dataset.mediaBound =
-            "true";
-
-        button.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
+            /*
+             * If the task object already contains the media,
+             * load it directly. Otherwise fetch it from Supabase.
+             */
+            try {
+                let selectedTask =
+                    task;
 
                 if (
-                    !canUploadCustomerMedia()
+                    !selectedTask
                 ) {
-                    showToast(
-                        "Your role cannot upload customer media.",
-                        "error"
-                    );
+                    const client =
+                        getClient();
 
-                    return;
+                    const {
+                        data,
+                        error
+                    } = await client
+                        .from(
+                            APP_CONFIG.tables.tasks
+                        )
+                        .select("*")
+                        .eq(
+                            "id",
+                            taskId
+                        )
+                        .maybeSingle();
+
+                    if (error) {
+                        throw error;
+                    }
+
+                    selectedTask =
+                        data;
                 }
 
-                getUploadInput()
-                    ?.click();
-            }
-        );
-    });
-}
+                if (
+                    selectedTask
+                ) {
+                    await loadTaskMedia(
+                        selectedTask
+                    );
+                }
+            } catch (error) {
+                console.error(
+                    "Could not load task media:",
+                    error
+                );
 
-// ------------------------------------------------------------
-// TASK MEDIA EVENT
-// ------------------------------------------------------------
-
-function bindTaskMediaEvents() {
-    window.addEventListener(
-        "taskMediaLoaded",
-        event => {
-            const detail =
-                event.detail || {};
-
-            if (
-                detail.type ===
-                "video"
-            ) {
-                mediaState.currentUrl =
-                    detail.url;
-
-                mediaState.mediaType =
-                    "video";
-
-                bindVideoEvents();
-            }
-
-            if (
-                detail.type ===
-                "image"
-            ) {
-                mediaState.currentUrl =
-                    detail.url;
-
-                mediaState.mediaType =
-                    "image";
+                showToast(
+                    "The task was opened, but its media could not be loaded.",
+                    "error"
+                );
             }
         }
     );
@@ -1861,213 +2279,223 @@ function bindTaskMediaEvents() {
             clearMedia();
         }
     );
-
-    window.addEventListener(
-        "authChanged",
-        () => {
-            applyUploadVisibility();
-        }
-    );
 }
 
-// ------------------------------------------------------------
-// UPLOAD UI VISIBILITY
-// ------------------------------------------------------------
+/* ============================================================
+   KEYBOARD VIDEO SHORTCUTS
+   ============================================================ */
 
-function applyUploadVisibility() {
-    const allowed =
-        canUploadCustomerMedia();
-
-    const elements = [
-        $("customerUploadPanel"),
-        $("customerUploadButton"),
-        $("uploadMediaButton"),
-        $("uploadPanelButton"),
-        $("workbenchUpload")
-    ].filter(Boolean);
-
-    elements.forEach(element => {
-        element.classList.toggle(
-            "hidden",
-            !allowed
-        );
-    });
-
-    // Hide customer upload input from coworker roles.
-    const input =
-        getUploadInput();
-
-    if (input) {
-        input.disabled =
-            !allowed;
+function bindKeyboardShortcuts() {
+    if (
+        document.body.dataset.mediaKeyboardBound ===
+        "true"
+    ) {
+        return;
     }
 
-    qsa(
-        "[data-customer-upload]"
-    ).forEach(
-        element => {
-            element.classList.toggle(
-                "hidden",
-                !allowed
-            );
+    document.body.dataset.mediaKeyboardBound =
+        "true";
+
+    document.addEventListener(
+        "keydown",
+        event => {
+            /*
+             * Do not interfere with text inputs.
+             */
+            const target =
+                event.target;
+
+            if (
+                target instanceof
+                    HTMLInputElement ||
+                target instanceof
+                    HTMLTextAreaElement ||
+                target instanceof
+                    HTMLSelectElement ||
+                target?.isContentEditable
+            ) {
+                return;
+            }
+
+            if (
+                mediaState.mediaType !==
+                "video"
+            ) {
+                return;
+            }
+
+            if (
+                event.key === "ArrowRight"
+            ) {
+                event.preventDefault();
+                nextFrame();
+            }
+
+            if (
+                event.key === "ArrowLeft"
+            ) {
+                event.preventDefault();
+                previousFrame();
+            }
+
+            if (
+                event.code ===
+                "Space"
+            ) {
+                event.preventDefault();
+                toggleVideoPlayback();
+            }
         }
     );
 }
 
-// ------------------------------------------------------------
-// INITIALIZE
-// ------------------------------------------------------------
+/* ============================================================
+   INITIALIZATION
+   ============================================================ */
 
-async function initializeMedia() {
+export function initializeMedia() {
     if (
         mediaState.initialized
     ) {
-        return mediaState;
+        updateUploadVisibility();
+        return;
     }
 
     mediaState.initialized =
         true;
 
-    mediaState.image =
-        getImageElement();
-
-    mediaState.video =
-        getVideoElement();
-
-    bindVideoEvents();
-    bindMediaControls();
     bindUploadInput();
-    bindUploadButton();
-    bindTaskMediaEvents();
+    bindUploadPanel();
+    bindVideoControls();
+    bindTaskEvents();
+    bindKeyboardShortcuts();
 
-    applyUploadVisibility();
-
-    return mediaState;
+    updateUploadVisibility();
+    updateMediaUI();
 }
 
-// ------------------------------------------------------------
-// GLOBAL API
-// ------------------------------------------------------------
+/* ============================================================
+   PROFILE / AUTH REFRESH
+   ============================================================ */
 
-window.mediaState =
-    mediaState;
+function bindAuthRefresh() {
+    window.addEventListener(
+        "authStateChanged",
+        () => {
+            updateUploadVisibility();
+        }
+    );
+}
 
-window.loadMedia =
-    loadMedia;
+/* ============================================================
+   GLOBAL API
+   ============================================================ */
 
-window.loadImage =
-    loadImage;
+if (
+    typeof window !==
+    "undefined"
+) {
+    window.mediaState =
+        mediaState;
 
-window.loadVideo =
-    loadVideo;
+    window.loadTaskMedia =
+        loadTaskMedia;
 
-window.previewMediaFile =
-    previewFile;
+    window.loadImage =
+        loadImage;
 
-window.uploadMedia =
-    uploadMedia;
+    window.loadVideo =
+        loadVideo;
 
-window.createCustomerTask =
-    createCustomerTask;
+    window.clearMedia =
+        clearMedia;
 
-window.clearMedia =
-    clearMedia;
+    window.nextFrame =
+        nextFrame;
 
-window.playVideo =
-    playVideo;
+    window.previousFrame =
+        previousFrame;
 
-window.pauseVideo =
-    pauseVideo;
+    window.seekFrame =
+        seekFrame;
 
-window.toggleVideo =
-    toggleVideo;
+    window.seekVideoTime =
+        seekVideoTime;
 
-window.seekVideo =
-    seekVideo;
+    window.captureCurrentFrame =
+        captureCurrentFrame;
 
-window.seekFrame =
-    seekFrame;
+    window.downloadCurrentMedia =
+        downloadCurrentMedia;
 
-window.nextFrame =
-    nextFrame;
+    window.uploadCustomerMedia =
+        uploadCustomerMedia;
 
-window.previousFrame =
-    previousFrame;
+    window.createCustomerTask =
+        createCustomerTask;
 
-window.captureVideoFrame =
-    captureVideoFrame;
+    window.validateMediaFile =
+        validateMediaFile;
 
-window.captureFrame =
-    captureVideoFrame;
+    window.canUploadCustomerMedia =
+        canUploadCustomerMedia;
+}
 
-window.downloadCurrentFrame =
-    downloadCurrentFrame;
+/* ============================================================
+   AUTO INITIALIZATION
+   ============================================================ */
 
-window.getCurrentFrame =
-    getCurrentFrame;
+if (
+    typeof document !==
+    "undefined"
+) {
+    bindAuthRefresh();
 
-window.getFrameRate =
-    getFrameRate;
+    if (
+        document.readyState ===
+        "loading"
+    ) {
+        document.addEventListener(
+            "DOMContentLoaded",
+            () => {
+                initializeMedia();
+            },
+            {
+                once: true
+            }
+        );
+    } else {
+        initializeMedia();
+    }
+}
 
-window.setFrameRate =
-    setFrameRate;
+/* ============================================================
+   EXPORTS
+   ============================================================ */
 
-// ------------------------------------------------------------
-// EXPORTS
-// ------------------------------------------------------------
-
-export {
+export default {
     mediaState,
 
     initializeMedia,
 
-    loadMedia,
+    loadTaskMedia,
     loadImage,
     loadVideo,
-
-    previewFile,
-
-    uploadMedia,
-    createCustomerTask,
-
-    getSignedMediaUrl,
+    loadLocalMediaFile,
 
     clearMedia,
 
+    uploadCustomerMedia,
+    createCustomerTask,
+
+    validateMediaFile,
     canUploadCustomerMedia,
-    canUseMediaTools,
 
-    playVideo,
-    pauseVideo,
-    toggleVideo,
-
-    seekVideo,
-    seekRelative,
-
-    getFrameRate,
-    setFrameRate,
-    getCurrentFrame,
-
+    seekVideoTime,
     seekFrame,
     nextFrame,
     previousFrame,
 
-    captureVideoFrame,
-    downloadCurrentFrame
+    captureCurrentFrame,
+    downloadCurrentMedia
 };
-
-// ------------------------------------------------------------
-// AUTO INITIALIZATION
-// ------------------------------------------------------------
-
-if (document.readyState === "loading") {
-    document.addEventListener(
-        "DOMContentLoaded",
-        () => {
-            initializeMedia();
-        },
-        { once: true }
-    );
-} else {
-    initializeMedia();
-}
