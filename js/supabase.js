@@ -299,6 +299,16 @@ export function clearLocalSession() {
 
 // ============================================================
 // UPDATE CLOUD STATUS
+//
+// IMPORTANT:
+// profiles does NOT contain a last_seen_at column.
+//
+// Available relevant columns include:
+// - last_login_at
+// - last_logout_at
+// - updated_at
+//
+// This function therefore uses the real schema.
 // ============================================================
 
 export async function updateCloudStatus(
@@ -313,34 +323,123 @@ export async function updateCloudStatus(
         !user ||
         !isSupabaseReady()
     ) {
+
         return {
-            ok: false
+            ok: false,
+            error: new Error(
+                "No authenticated Supabase user."
+            )
         };
     }
 
     try {
 
+        const now =
+            new Date().toISOString();
+
         const updates = {
-            last_seen_at:
-                new Date().toISOString()
+            updated_at: now
         };
 
-        // Keep optional metadata available
-        // without forcing unsupported columns
-        // into the profiles table.
+
+        // ----------------------------------------------------
+        // NORMALIZE STATUS
+        // ----------------------------------------------------
+
+        const normalizedStatus =
+            String(
+                status || ""
+            )
+                .toLowerCase()
+                .trim();
+
+
+        // ----------------------------------------------------
+        // LOGIN / ONLINE STATUS
+        // ----------------------------------------------------
+
+        if (
+            normalizedStatus === "login" ||
+            normalizedStatus === "signed_in" ||
+            normalizedStatus === "signin" ||
+            normalizedStatus === "online" ||
+            normalizedStatus === "active"
+        ) {
+
+            updates.last_login_at =
+                now;
+        }
+
+
+        // ----------------------------------------------------
+        // LOGOUT / OFFLINE STATUS
+        // ----------------------------------------------------
+
+        else if (
+            normalizedStatus === "logout" ||
+            normalizedStatus === "signed_out" ||
+            normalizedStatus === "signout" ||
+            normalizedStatus === "offline" ||
+            normalizedStatus === "inactive"
+        ) {
+
+            updates.last_logout_at =
+                now;
+        }
+
+
+        // ----------------------------------------------------
+        // OPTIONAL PROFILE METADATA
+        //
+        // Only columns that actually exist in profiles
+        // are accepted here.
+        // ----------------------------------------------------
+
         if (
             metadata &&
             typeof metadata === "object"
         ) {
 
             if (
-                metadata.full_name !== undefined
+                metadata.full_name !== undefined &&
+                metadata.full_name !== null
             ) {
 
                 updates.full_name =
-                    metadata.full_name;
+                    String(
+                        metadata.full_name
+                    ).trim();
+            }
+
+
+            if (
+                metadata.avatar_url !== undefined &&
+                metadata.avatar_url !== null
+            ) {
+
+                updates.avatar_url =
+                    String(
+                        metadata.avatar_url
+                    ).trim();
+            }
+
+
+            if (
+                metadata.theme !== undefined &&
+                metadata.theme !== null
+            ) {
+
+                updates.theme =
+                    String(
+                        metadata.theme
+                    ).trim();
             }
         }
+
+
+        // ----------------------------------------------------
+        // UPDATE PROFILE
+        // ----------------------------------------------------
 
         const {
             error
@@ -355,6 +454,7 @@ export async function updateCloudStatus(
                     user.id
                 );
 
+
         if (error) {
 
             console.warn(
@@ -368,8 +468,13 @@ export async function updateCloudStatus(
             };
         }
 
+
         return {
-            ok: true
+            ok: true,
+            status:
+                normalizedStatus,
+            updated:
+                updates
         };
 
     } catch (error) {
@@ -406,12 +511,55 @@ export async function signOutUser() {
 
     try {
 
+        // ----------------------------------------------------
+        // Try to record logout before signing out.
+        // Failure here should NOT prevent logout.
+        // ----------------------------------------------------
+
+        try {
+
+            const user =
+                await getCurrentUser();
+
+            if (user) {
+
+                await supabase
+                    .from(
+                        APP_CONFIG.tables.profiles
+                    )
+                    .update({
+                        last_logout_at:
+                            new Date().toISOString(),
+
+                        updated_at:
+                            new Date().toISOString()
+                    })
+                    .eq(
+                        "id",
+                        user.id
+                    );
+            }
+
+        } catch (logoutUpdateError) {
+
+            console.warn(
+                "Unable to update logout timestamp:",
+                logoutUpdateError
+            );
+        }
+
+
+        // ----------------------------------------------------
+        // Supabase logout
+        // ----------------------------------------------------
+
         const {
             error
         } =
             await supabase.auth.signOut();
 
         clearLocalSession();
+
 
         if (error) {
 
@@ -425,6 +573,7 @@ export async function signOutUser() {
                 error
             };
         }
+
 
         return {
             success: true
@@ -469,6 +618,7 @@ export function onAuthStateChange(
         };
     }
 
+
     const {
         data
     } =
@@ -491,6 +641,7 @@ export function onAuthStateChange(
                         clearLocalSession();
                     }
 
+
                     await callback(
                         event,
                         session
@@ -505,6 +656,7 @@ export function onAuthStateChange(
                 }
             }
         );
+
 
     return data;
 }
@@ -539,6 +691,7 @@ export function getAuthEventName(
             "User updated"
     };
 
+
     return (
         names[event] ||
         event ||
@@ -559,8 +712,10 @@ export async function getProfileByUserId(
         !userId ||
         !isSupabaseReady()
     ) {
+
         return null;
     }
+
 
     try {
 
@@ -579,6 +734,7 @@ export async function getProfileByUserId(
                 )
                 .maybeSingle();
 
+
         if (error) {
 
             console.error(
@@ -589,7 +745,11 @@ export async function getProfileByUserId(
             return null;
         }
 
-        return data || null;
+
+        return (
+            data ||
+            null
+        );
 
     } catch (error) {
 
@@ -602,6 +762,10 @@ export async function getProfileByUserId(
     }
 }
 
+
+// ============================================================
+// GET CURRENT PROFILE
+// ============================================================
 
 export async function getCurrentProfile() {
 
@@ -630,8 +794,10 @@ export async function logActivity(
     if (
         !isSupabaseReady()
     ) {
+
         return null;
     }
+
 
     const user =
         await getCurrentUser();
@@ -640,9 +806,11 @@ export async function logActivity(
         return null;
     }
 
+
     try {
 
         const row = {
+
             user_id:
                 user.id,
 
@@ -656,6 +824,7 @@ export async function logActivity(
                 new Date().toISOString()
         };
 
+
         const {
             data,
             error
@@ -668,6 +837,7 @@ export async function logActivity(
                 .select()
                 .maybeSingle();
 
+
         if (error) {
 
             console.warn(
@@ -678,7 +848,11 @@ export async function logActivity(
             return null;
         }
 
-        return data || null;
+
+        return (
+            data ||
+            null
+        );
 
     } catch (error) {
 
@@ -706,15 +880,19 @@ export async function logWorkflowEvent(
         !taskId ||
         !isSupabaseReady()
     ) {
+
         return null;
     }
+
 
     const user =
         await getCurrentUser();
 
+
     try {
 
         const row = {
+
             task_id:
                 taskId,
 
@@ -722,7 +900,8 @@ export async function logWorkflowEvent(
                 eventType,
 
             user_id:
-                user?.id || null,
+                user?.id ||
+                null,
 
             metadata:
                 metadata || {},
@@ -730,6 +909,7 @@ export async function logWorkflowEvent(
             created_at:
                 new Date().toISOString()
         };
+
 
         const {
             data,
@@ -743,6 +923,7 @@ export async function logWorkflowEvent(
                 .select()
                 .maybeSingle();
 
+
         if (error) {
 
             console.warn(
@@ -753,7 +934,11 @@ export async function logWorkflowEvent(
             return null;
         }
 
-        return data || null;
+
+        return (
+            data ||
+            null
+        );
 
     } catch (error) {
 
@@ -771,41 +956,44 @@ export async function logWorkflowEvent(
 // GLOBAL COMPATIBILITY
 // ============================================================
 
-window.supabase =
-    supabase;
+if (typeof window !== "undefined") {
 
-window.getSupabase =
-    getSupabase;
+    window.supabase =
+        supabase;
 
-window.isSupabaseReady =
-    isSupabaseReady;
+    window.getSupabase =
+        getSupabase;
 
-window.getSession =
-    getSession;
+    window.isSupabaseReady =
+        isSupabaseReady;
 
-window.getCurrentSession =
-    getCurrentSession;
+    window.getSession =
+        getSession;
 
-window.getCurrentUser =
-    getCurrentUser;
+    window.getCurrentSession =
+        getCurrentSession;
 
-window.getCurrentProfile =
-    getCurrentProfile;
+    window.getCurrentUser =
+        getCurrentUser;
 
-window.checkSupabaseConnection =
-    checkSupabaseConnection;
+    window.getCurrentProfile =
+        getCurrentProfile;
 
-window.signOutUser =
-    signOutUser;
+    window.checkSupabaseConnection =
+        checkSupabaseConnection;
 
-window.onAuthStateChange =
-    onAuthStateChange;
+    window.signOutUser =
+        signOutUser;
 
-window.updateCloudStatus =
-    updateCloudStatus;
+    window.onAuthStateChange =
+        onAuthStateChange;
 
-window.logActivity =
-    logActivity;
+    window.updateCloudStatus =
+        updateCloudStatus;
 
-window.logWorkflowEvent =
-    logWorkflowEvent;
+    window.logActivity =
+        logActivity;
+
+    window.logWorkflowEvent =
+        logWorkflowEvent;
+}
