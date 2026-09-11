@@ -3610,6 +3610,5 @@ export {
     renderPayRates,
     renderActivities,
     renderOverview,
-    calculateStats,
-    updateAdminButtonVisibility
+    calculateStats
 };
