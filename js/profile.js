@@ -45,6 +45,7 @@ export const profileState = {
   user: null,
   profile: null,
   role: null,
+  userId: null,
 
   originalName: "",
   originalEmail: "",
@@ -67,19 +68,28 @@ const $ = (id) =>
   document.getElementById(id);
 
 function getClient() {
-  return (
-    getSupabase?.() ||
-    window.supabaseClient ||
-    null
-  );
+  try {
+    return (
+      getSupabase?.() ||
+      window.supabaseClient ||
+      null
+    );
+  } catch {
+    return (
+      window.supabaseClient ||
+      null
+    );
+  }
 }
 
 function text(
   value,
   fallback = ""
 ) {
-  return value == null ||
+  return (
+    value == null ||
     value === ""
+  )
     ? fallback
     : String(value);
 }
@@ -173,7 +183,52 @@ function currentAdminEmail() {
   return String(
     APP_CONFIG?.adminEmail ||
       "antonymbali96@gmail.com"
-  ).toLowerCase();
+  )
+    .trim()
+    .toLowerCase();
+}
+
+/* ============================================================
+   SAFE USER ID
+   ------------------------------------------------------------
+   Centralized helper so no Supabase request can accidentally
+   become:
+       id=eq.undefined
+   ============================================================ */
+
+function getValidUserId() {
+  const authUser =
+    typeof getCurrentUser ===
+    "function"
+      ? getCurrentUser()
+      : null;
+
+  const supabaseUser =
+    typeof getSupabaseUser ===
+    "function"
+      ? getSupabaseUser()
+      : null;
+
+  const possibleIds = [
+    authUser?.id,
+    supabaseUser?.id,
+    profileState.user?.id,
+    profileState.profile?.id,
+    profileState.userId,
+  ];
+
+  for (
+    const value of possibleIds
+  ) {
+    if (
+      typeof value === "string" &&
+      value.trim()
+    ) {
+      return value.trim();
+    }
+  }
+
+  return null;
 }
 
 /* ============================================================
@@ -181,17 +236,66 @@ function currentAdminEmail() {
    ============================================================ */
 
 function refreshState() {
+  const authUser =
+    typeof getCurrentUser ===
+    "function"
+      ? getCurrentUser()
+      : null;
+
+  const supabaseUser =
+    typeof getSupabaseUser ===
+    "function"
+      ? getSupabaseUser()
+      : null;
+
+  /*
+   * Prefer auth.js user when it has a valid ID.
+   */
+  let resolvedUser = null;
+
+  if (
+    authUser &&
+    typeof authUser.id ===
+      "string" &&
+    authUser.id.trim()
+  ) {
+    resolvedUser =
+      authUser;
+  } else if (
+    supabaseUser &&
+    typeof supabaseUser.id ===
+      "string" &&
+    supabaseUser.id.trim()
+  ) {
+    resolvedUser =
+      supabaseUser;
+  } else if (
+    profileState.user &&
+    typeof profileState.user.id ===
+      "string" &&
+    profileState.user.id.trim()
+  ) {
+    resolvedUser =
+      profileState.user;
+  }
+
   profileState.user =
-    getCurrentUser?.() ||
-    getSupabaseUser?.() ||
-    profileState.user ||
-    null;
+    resolvedUser;
 
   profileState.profile =
     getCurrentProfile?.() ||
     profileState.profile ||
     null;
 
+  /*
+   * Resolve ID safely.
+   */
+  profileState.userId =
+    getValidUserId();
+
+  /*
+   * Role.
+   */
   profileState.role =
     normalizeRole(
       getRole?.() ||
@@ -202,6 +306,9 @@ function refreshState() {
         ""
     );
 
+  /*
+   * Full name.
+   */
   profileState.originalName =
     text(
       profileState.profile
@@ -218,6 +325,9 @@ function refreshState() {
       ""
     );
 
+  /*
+   * Email.
+   */
   profileState.originalEmail =
     text(
       profileState.user?.email ||
@@ -225,6 +335,9 @@ function refreshState() {
       ""
     );
 
+  /*
+   * Avatar.
+   */
   profileState.avatarUrl =
     profileState.profile
       ?.avatar_url ||
@@ -305,6 +418,20 @@ export function openProfile() {
     toast(
       "Please sign in first.",
       "warning"
+    );
+
+    return false;
+  }
+
+  if (!profileState.userId) {
+    toast(
+      "Unable to identify your account. Please sign in again.",
+      "error"
+    );
+
+    console.warn(
+      "openProfile: Missing user ID",
+      profileState.user
     );
 
     return false;
@@ -391,11 +518,6 @@ function populateProfileForm() {
     emailInput.value =
       profileState.originalEmail;
 
-    /*
-     * Email is intentionally read-only.
-     * Changing authentication email requires
-     * a separate verified flow.
-     */
     emailInput.readOnly =
       true;
 
@@ -489,19 +611,13 @@ function bindAvatarUpload() {
           file
         );
 
-        /*
-         * Reset input so selecting
-         * the same file again triggers
-         * change.
-         */
         input.value = "";
       }
     );
   }
 
   /*
-   * Older HTML may use
-   * profilePictureInput.
+   * Legacy HTML support.
    */
   const legacyInput =
     $("profilePictureInput");
@@ -531,6 +647,10 @@ function bindAvatarUpload() {
   }
 }
 
+/* ============================================================
+   UPLOAD PROFILE AVATAR
+   ============================================================ */
+
 export async function uploadProfileAvatar(
   file
 ) {
@@ -551,6 +671,23 @@ export async function uploadProfileAvatar(
     return false;
   }
 
+  const userId =
+    getValidUserId();
+
+  if (!userId) {
+    toast(
+      "Unable to identify your account. Please sign in again.",
+      "error"
+    );
+
+    console.warn(
+      "uploadProfileAvatar: Missing user ID",
+      profileState.user
+    );
+
+    return false;
+  }
+
   if (!file) {
     toast(
       "Please choose an image file.",
@@ -560,9 +697,6 @@ export async function uploadProfileAvatar(
     return false;
   }
 
-  /*
-   * Image-only validation.
-   */
   if (
     !String(
       file.type || ""
@@ -576,9 +710,6 @@ export async function uploadProfileAvatar(
     return false;
   }
 
-  /*
-   * 5 MB limit.
-   */
   const maxSize =
     5 * 1024 * 1024;
 
@@ -620,11 +751,6 @@ export async function uploadProfileAvatar(
         throw result.error;
       }
 
-      /*
-       * updateAvatar implementations
-       * may return the URL directly,
-       * a profile, or an object.
-       */
       const newUrl =
         result?.avatar_url ||
         result?.url ||
@@ -643,19 +769,36 @@ export async function uploadProfileAvatar(
           newUrl;
       }
 
+      /*
+       * Do not let a failed refresh
+       * erase a newly returned avatar.
+       */
+      const savedUrl =
+        profileState.avatarUrl;
+
       refreshState();
 
-      /*
-       * Keep the returned URL if the
-       * profile refresh has not yet
-       * picked it up.
-       */
       if (
-        !profileState.avatarUrl &&
-        newUrl
+        savedUrl &&
+        !profileState.avatarUrl
+      ) {
+        profileState.avatarUrl =
+          savedUrl;
+      }
+
+      if (
+        newUrl &&
+        !profileState.avatarUrl
       ) {
         profileState.avatarUrl =
           newUrl;
+      }
+
+      if (
+        profileState.profile
+      ) {
+        profileState.profile.avatar_url =
+          profileState.avatarUrl;
       }
 
       renderAvatarPreview();
@@ -671,7 +814,7 @@ export async function uploadProfileAvatar(
     }
 
     /*
-     * Fallback direct Supabase upload.
+     * Direct Supabase fallback.
      */
     const client =
       getClient();
@@ -697,8 +840,15 @@ export async function uploadProfileAvatar(
             .toLowerCase()
         : "jpg";
 
+    const safeExtension =
+      /^[a-z0-9]+$/i.test(
+        extension
+      )
+        ? extension
+        : "jpg";
+
     const path =
-      `${profileState.user.id}/profile-${Date.now()}.${extension}`;
+      `${userId}/profile-${Date.now()}.${safeExtension}`;
 
     const {
       error:
@@ -720,12 +870,12 @@ export async function uploadProfileAvatar(
       throw uploadError;
     }
 
-    /*
-     * Public bucket first.
-     */
     let avatarUrl =
       null;
 
+    /*
+     * Public bucket.
+     */
     try {
       const {
         data,
@@ -790,13 +940,16 @@ export async function uploadProfileAvatar(
       })
       .eq(
         "id",
-        profileState.user.id
+        userId
       );
 
     if (profileError) {
       throw profileError;
     }
 
+    /*
+     * Synchronize Auth metadata.
+     */
     try {
       await client.auth.updateUser(
         {
@@ -806,11 +959,11 @@ export async function uploadProfileAvatar(
           },
         }
       );
-    } catch {
-      /*
-       * Profile table remains the
-       * source of truth.
-       */
+    } catch (error) {
+      console.warn(
+        "Auth avatar metadata update:",
+        error
+      );
     }
 
     profileState.avatarUrl =
@@ -923,6 +1076,23 @@ export async function saveProfile() {
     return false;
   }
 
+  const userId =
+    getValidUserId();
+
+  if (!userId) {
+    toast(
+      "Unable to identify your account. Please sign in again.",
+      "error"
+    );
+
+    console.warn(
+      "saveProfile: Missing user ID",
+      profileState.user
+    );
+
+    return false;
+  }
+
   const nameInput =
     $("profileFullName");
 
@@ -976,9 +1146,6 @@ export async function saveProfile() {
   );
 
   try {
-    /*
-     * Email remains protected/read-only.
-     */
     const email =
       profileState.originalEmail;
 
@@ -988,16 +1155,16 @@ export async function saveProfile() {
       );
 
     /*
-     * Keep variables referenced so
-     * protected values are explicit.
+     * Email and role are intentionally
+     * not editable here.
      */
     void email;
 
-    /*
-     * Update profile using auth.js helper.
-     */
     let result = null;
 
+    /*
+     * Use auth.js profile helper.
+     */
     if (
       typeof updateUserProfile ===
       "function"
@@ -1034,12 +1201,13 @@ export async function saveProfile() {
         .update({
           full_name:
             newName,
+
           updated_at:
             new Date().toISOString(),
         })
         .eq(
           "id",
-          profileState.user.id
+          userId
         );
 
       if (error) {
@@ -1048,38 +1216,40 @@ export async function saveProfile() {
     }
 
     /*
-     * Also synchronize Supabase Auth
-     * metadata when possible.
-     *
-     * This does NOT change email.
+     * Update Auth metadata where possible.
+     * This does not change the email.
      */
     const client =
       getClient();
 
     if (client) {
       try {
-        await client.auth.updateUser(
-          {
-            data: {
-              full_name:
-                newName,
+        const {
+          error:
+            authError,
+        } =
+          await client.auth.updateUser(
+            {
+              data: {
+                full_name:
+                  newName,
 
-              /*
-               * Keep the existing role
-               * untouched.
-               */
-              ...(role
-                ? {
-                    role,
-                  }
-                : {}),
-            },
-          }
-        );
+                ...(role
+                  ? {
+                      role,
+                    }
+                  : {}),
+              },
+            }
+          );
+
+        if (authError) {
+          console.warn(
+            "Auth metadata update:",
+            authError
+          );
+        }
       } catch (error) {
-        /*
-         * Profile update already succeeded.
-         */
         console.warn(
           "Auth metadata update:",
           error
@@ -1105,9 +1275,6 @@ export async function saveProfile() {
         newName;
     }
 
-    /*
-     * Refresh profile-related UI.
-     */
     updateNavigationProfile();
     updateDashboardProfile();
 
@@ -1118,9 +1285,6 @@ export async function saveProfile() {
 
     closeProfile();
 
-    /*
-     * Notify other modules.
-     */
     window.dispatchEvent(
       new CustomEvent(
         "profileUpdated",
@@ -1128,8 +1292,10 @@ export async function saveProfile() {
           detail: {
             name:
               newName,
+
             role:
               profileState.role,
+
             avatar:
               profileState.avatarUrl,
           },
@@ -1237,9 +1403,7 @@ export function updateNavigationProfile() {
   }
 
   /*
-   * Admin icon belongs immediately
-   * after profile and is only shown
-   * to administrators.
+   * Admin icon appears only for admins.
    */
   const adminButton =
     $("adminCenterButton");
@@ -1249,8 +1413,12 @@ export function updateNavigationProfile() {
       String(
         profileState.user
           ?.email ||
+          profileState.profile
+            ?.email ||
           ""
-      ).toLowerCase();
+      )
+        .trim()
+        .toLowerCase();
 
     const admin =
       isAdminRole(
@@ -1349,12 +1517,48 @@ export async function refreshProfile() {
   const client =
     getClient();
 
-  if (
-    !client ||
-    !profileState.user
-  ) {
+  /*
+   * Resolve the ID independently.
+   */
+  const userId =
+    getValidUserId();
+
+  /*
+   * This is the critical protection.
+   *
+   * We will NEVER execute:
+   *
+   * .eq("id", undefined)
+   *
+   * or:
+   *
+   * .eq("id", null)
+   */
+  if (!client || !userId) {
+    console.warn(
+      "refreshProfile: No valid user ID.",
+      {
+        hasClient:
+          !!client,
+
+        user:
+          profileState.user,
+
+        profile:
+          profileState.profile,
+
+        userId,
+      }
+    );
+
     return profileState;
   }
+
+  /*
+   * Keep state synchronized.
+   */
+  profileState.userId =
+    userId;
 
   try {
     const {
@@ -1369,7 +1573,7 @@ export async function refreshProfile() {
       .select("*")
       .eq(
         "id",
-        profileState.user.id
+        userId
       )
       .maybeSingle();
 
@@ -1406,6 +1610,10 @@ export async function refreshProfile() {
       profileState.avatarUrl =
         data.avatar_url ||
         profileState.avatarUrl;
+
+      profileState.userId =
+        data.id ||
+        userId;
     }
 
     updateNavigationProfile();
@@ -1434,35 +1642,40 @@ async function logProfileActivity(
   action,
   metadata = {}
 ) {
+  const userId =
+    getValidUserId();
+
   try {
     await logActivity(
       action,
       {
         user_id:
-          profileState.user?.id ||
+          userId ||
           null,
+
         metadata,
       }
     );
 
     return;
-  } catch {
-    /*
-     * Use direct fallback below.
-     */
+  } catch (error) {
+    console.warn(
+      "logActivity helper failed:",
+      error
+    );
   }
 
+  /*
+   * Direct fallback.
+   */
   try {
     const client =
       getClient();
 
-    if (!client) return;
+    if (!client) {
+      return;
+    }
 
-    /*
-     * IMPORTANT:
-     * activity_logs does NOT contain
-     * actor_id in the current schema.
-     */
     await client
       .from(
         APP_CONFIG?.tables
@@ -1471,7 +1684,7 @@ async function logProfileActivity(
       )
       .insert({
         user_id:
-          profileState.user?.id ||
+          userId ||
           null,
 
         action,
@@ -1528,7 +1741,8 @@ export async function logoutFromProfile() {
     );
   } catch {
     /*
-     * Do not block logout.
+     * Activity logging must never
+     * prevent logout.
      */
   }
 
@@ -1565,7 +1779,8 @@ function bindAuthEvents() {
       refreshState();
 
       if (
-        !profileState.user
+        !profileState.user ||
+        !getValidUserId()
       ) {
         closeProfile();
 
@@ -1640,6 +1855,31 @@ function clearProfileUI() {
       false
     );
   }
+
+  /*
+   * Clear local profile state after
+   * logout/auth expiration.
+   */
+  profileState.user =
+    null;
+
+  profileState.profile =
+    null;
+
+  profileState.userId =
+    null;
+
+  profileState.role =
+    null;
+
+  profileState.originalName =
+    "";
+
+  profileState.originalEmail =
+    "";
+
+  profileState.avatarUrl =
+    null;
 }
 
 /* ============================================================
@@ -1654,7 +1894,9 @@ export function isProtectedAdminProfile() {
       profileState.user?.email ||
         profileState.profile?.email ||
         ""
-    ).toLowerCase();
+    )
+      .trim()
+      .toLowerCase();
 
   return (
     isAdminRole(
@@ -1666,7 +1908,7 @@ export function isProtectedAdminProfile() {
 }
 
 /*
- * The profile page never exposes controls
+ * Profile page never exposes controls
  * for changing role or email.
  */
 export function canEditProfileField(
@@ -1726,7 +1968,7 @@ export async function getAvatarUrl(
     "avatars";
 
   /*
-   * Try public URL first.
+   * Public URL first.
    */
   try {
     const {
@@ -1779,10 +2021,12 @@ export async function getAvatarUrl(
 export function getProfileSnapshot() {
   refreshState();
 
+  const id =
+    getValidUserId();
+
   return {
     id:
-      profileState.user?.id ||
-      profileState.profile?.id ||
+      id ||
       null,
 
     email:
@@ -1872,10 +2116,6 @@ if (
 
 /* ============================================================
    MODULE LOADED
-   ------------------------------------------------------------
-   IMPORTANT:
-   There is intentionally NO second export block here.
-   Every exported function is exported exactly once above.
    ============================================================ */
 
 console.log(
