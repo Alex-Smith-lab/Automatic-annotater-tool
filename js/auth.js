@@ -4,24 +4,15 @@
    Authentication, session management, profiles, roles,
    approval status and authorization helpers.
 
-   Compatibility exports included for:
-   - app.js
-   - annotation.js
-   - admin.js
-   - profile.js
-   - home.js
-   - history.js
-   - media.js
-   - tasks.js
-   - workspace.js
-
    IMPORTANT:
    - Normal signup = customer + inactive/pending
    - Default administrator is always protected
    - Admin email is not displayed to normal users
-   - Supabase remains the source of authentication
-   - Profile timestamps use the real profiles schema
-   - No last_seen_at column is used
+   - Supabase is the authentication source
+   - profiles.last_seen_at is NOT used
+   - Login uses profiles.last_login_at
+   - Logout uses profiles.last_logout_at
+   - workflow_events is only for task workflow events
    ============================================================ */
 
 import {
@@ -37,8 +28,6 @@ import {
 import {
     supabase,
     getSupabase,
-    getCurrentUser as getSupabaseCurrentUser,
-    getCurrentSession,
     saveLocalSession,
     clearLocalSession,
     updateCloudStatus,
@@ -48,35 +37,48 @@ import {
 
 
 // ============================================================
-// STATE
+// AUTH STATE
 // ============================================================
 
 const authState = {
-    initialized: false,
 
-    loading: false,
+    initialized:
+        false,
 
-    authenticated: false,
+    loading:
+        false,
 
-    user: null,
+    authenticated:
+        false,
 
-    session: null,
+    user:
+        null,
 
-    profile: null,
+    session:
+        null,
 
-    role: "customer",
+    profile:
+        null,
 
-    active: false,
+    role:
+        "customer",
 
-    pendingApproval: false,
+    active:
+        false,
 
-    listeners: new Set()
+    pendingApproval:
+        false,
+
+    listeners:
+        new Set()
 };
 
 
 if (
-    typeof window !== "undefined"
+    typeof window !==
+    "undefined"
 ) {
+
     window.authState =
         authState;
 }
@@ -119,11 +121,15 @@ function cleanName(
     const value =
         String(
             name || ""
-        ).trim();
+        )
+        .trim();
+
 
     if (value) {
+
         return value;
     }
+
 
     const fallback =
         cleanEmail(
@@ -131,37 +137,118 @@ function cleanName(
         )
             .split("@")[0];
 
-    return (
-        fallback ||
-        "User"
-    );
+
+    if (fallback) {
+
+        return fallback
+            .replace(
+                /[._-]+/g,
+                " "
+            )
+            .replace(
+                /\b\w/g,
+                letter =>
+                    letter.toUpperCase()
+            );
+    }
+
+
+    return "User";
 }
 
 
 function getErrorMessage(
     error,
-    fallback =
-        "Something went wrong."
+    fallback = "Something went wrong."
 ) {
 
-    if (!error) {
-        return fallback;
-    }
+    const message =
+        String(
+            error?.message ||
+            error?.error_description ||
+            error?.details ||
+            error?.hint ||
+            ""
+        ).trim();
+
+
+    const lower =
+        message.toLowerCase();
+
 
     if (
-        typeof error ===
-        "string"
+        lower.includes(
+            "invalid login credentials"
+        )
     ) {
-        return error;
+
+        return (
+            "Incorrect email or password."
+        );
     }
 
-    return (
-        error.message ||
-        error.error_description ||
-        error.details ||
-        error.hint ||
-        fallback
-    );
+
+    if (
+        lower.includes(
+            "email not confirmed"
+        )
+    ) {
+
+        return (
+            "Please confirm your email address before signing in."
+        );
+    }
+
+
+    if (
+        lower.includes(
+            "user not found"
+        )
+    ) {
+
+        return (
+            "No account was found with that email address."
+        );
+    }
+
+
+    if (
+        lower.includes(
+            "too many requests"
+        ) ||
+        lower.includes(
+            "rate limit"
+        )
+    ) {
+
+        return (
+            "Too many attempts. Please wait a moment and try again."
+        );
+    }
+
+
+    if (
+        lower.includes(
+            "network"
+        ) ||
+        lower.includes(
+            "fetch"
+        )
+    ) {
+
+        return (
+            "Network connection failed. Please check your internet connection and try again."
+        );
+    }
+
+
+    if (message) {
+
+        return message;
+    }
+
+
+    return fallback;
 }
 
 
@@ -214,14 +301,15 @@ function normalizeProfile(
 
 
     /*
-     * The protected administrator can never accidentally
-     * become a normal user because of a stale profile record.
+     * Protected administrator.
      */
 
     if (
         isAdminEmail(email)
     ) {
-        role = "admin";
+
+        role =
+            "admin";
     }
 
 
@@ -230,8 +318,7 @@ function normalizeProfile(
 
 
     /*
-     * Compatibility with older databases that may have
-     * used a textual status column.
+     * Compatibility with older databases.
      */
 
     if (
@@ -247,33 +334,39 @@ function normalizeProfile(
             const status =
                 String(
                     profile.status
-                ).toLowerCase();
+                )
+                    .toLowerCase();
 
 
-            active = [
-                "active",
-                "approved",
-                "enabled",
-                "true"
-            ].includes(
-                status
-            );
+            active =
+                [
+                    "active",
+                    "approved",
+                    "enabled",
+                    "true"
+                ]
+                .includes(
+                    status
+                );
 
         } else {
 
-            active = false;
+            active =
+                false;
         }
     }
 
 
     /*
-     * Default administrator is always active.
+     * Protected administrator is always active.
      */
 
     if (
         isAdminEmail(email)
     ) {
-        active = true;
+
+        active =
+            true;
     }
 
 
@@ -308,7 +401,7 @@ function normalizeProfile(
 
 
 // ============================================================
-// AUTH EVENT SYSTEM
+// AUTH EVENT EMITTER
 // ============================================================
 
 function emitAuthChange(
@@ -352,7 +445,9 @@ function emitAuthChange(
                     "authStateChanged",
                     {
                         detail: {
+
                             ...snapshot,
+
                             reason
                         }
                     }
@@ -368,10 +463,6 @@ function emitAuthChange(
         );
     }
 
-
-    /*
-     * Compatibility event for older modules.
-     */
 
     if (
         reason === "login" ||
@@ -432,7 +523,7 @@ function emitAuthChange(
 
 
 // ============================================================
-// LISTENER
+// AUTH LISTENER
 // ============================================================
 
 export function onAuthStateChange(
@@ -667,12 +758,14 @@ function getClient() {
         getSupabase?.() ||
         supabase;
 
+
     if (!client) {
 
         throw new Error(
             "Supabase is not initialized. Check js/config.js and js/supabase.js."
         );
     }
+
 
     return client;
 }
@@ -700,6 +793,7 @@ export async function loadProfile(
         authState.pendingApproval =
             false;
 
+
         return null;
     }
 
@@ -709,21 +803,15 @@ export async function loadProfile(
 
 
     /*
-     * First use the shared Supabase helper.
+     * Shared helper first.
      */
 
     try {
 
-        if (
-            typeof getProfileByUserId ===
-            "function"
-        ) {
-
-            profile =
-                await getProfileByUserId(
-                    user.id
-                );
-        }
+        profile =
+            await getProfileByUserId(
+                user.id
+            );
 
     } catch (error) {
 
@@ -735,7 +823,7 @@ export async function loadProfile(
 
 
     /*
-     * Direct Supabase fallback.
+     * Direct fallback.
      */
 
     if (!profile) {
@@ -782,8 +870,7 @@ export async function loadProfile(
 
 
     /*
-     * Normalize profile even when the database row
-     * does not exist.
+     * Normalize even if profile row does not exist.
      */
 
     const normalized =
@@ -796,13 +883,9 @@ export async function loadProfile(
     /*
      * Protected administrator.
      *
-     * We deliberately do NOT perform an automatic
-     * upsert here on every login.
-     *
-     * This prevents a repeated POST /profiles 403
-     * and allows the protected administrator to continue
-     * using the application even if database permissions
-     * need to be corrected.
+     * Do not automatically upsert the admin profile
+     * during every login. This prevents repeated 403
+     * profile POST/UPDATE requests.
      */
 
     if (
@@ -819,22 +902,21 @@ export async function loadProfile(
     }
 
 
-    /*
-     * Save authentication state.
-     */
-
     authState.profile =
         normalized;
+
 
     authState.role =
         normalizeRole(
             normalized.role
         );
 
+
     authState.active =
         Boolean(
             normalized.active
         );
+
 
     authState.pendingApproval =
         !isAdmin() &&
@@ -855,10 +937,14 @@ async function applySession(
 ) {
 
     authState.session =
-        session || null;
+        session ||
+        null;
+
 
     authState.user =
-        session?.user || null;
+        session?.user ||
+        null;
+
 
     authState.authenticated =
         Boolean(
@@ -870,7 +956,9 @@ async function applySession(
      * Logged out.
      */
 
-    if (!authState.user) {
+    if (
+        !authState.user
+    ) {
 
         authState.profile =
             null;
@@ -908,7 +996,7 @@ async function applySession(
 
 
     /*
-     * Save session locally.
+     * Save session.
      */
 
     try {
@@ -927,23 +1015,58 @@ async function applySession(
 
 
     /*
-     * Load profile and role.
+     * Load profile.
      */
 
-    await loadProfile(
-        authState.user
-    );
+    try {
+
+        await loadProfile(
+            authState.user
+        );
+
+    } catch (profileError) {
+
+        /*
+         * A profile database failure must NOT make
+         * authentication itself fail.
+         */
+
+        console.warn(
+            "Profile loading failed during session apply:",
+            profileError
+        );
+
+
+        authState.profile =
+            normalizeProfile(
+                null,
+                authState.user
+            );
+
+
+        authState.role =
+            normalizeRole(
+                authState.profile.role
+            );
+
+
+        authState.active =
+            Boolean(
+                authState.profile.active
+            );
+
+
+        authState.pendingApproval =
+            !isAdmin() &&
+            !authState.active;
+    }
 
 
     /*
-     * Update cloud login timestamp.
+     * Record login timestamp.
      *
-     * IMPORTANT:
-     * updateCloudStatus() expects:
-     *
-     * updateCloudStatus(status, metadata)
-     *
-     * NOT an object as the first argument.
+     * This uses profiles.last_login_at.
+     * It does NOT use last_seen_at.
      */
 
     try {
@@ -951,6 +1074,10 @@ async function applySession(
         await updateCloudStatus(
             "login",
             {
+
+                userId:
+                    authState.user.id,
+
                 full_name:
                     authState.profile?.full_name ||
                     getUserName()
@@ -958,6 +1085,10 @@ async function applySession(
         );
 
     } catch (error) {
+
+        /*
+         * Timestamp failure must never block login.
+         */
 
         console.warn(
             "Could not update cloud login status:",
@@ -1025,8 +1156,10 @@ export async function signIn(
             data,
             error
         } =
-            await client.auth
+            await client
+                .auth
                 .signInWithPassword({
+
                     email:
                         clean,
 
@@ -1035,6 +1168,7 @@ export async function signIn(
 
 
         if (error) {
+
             throw error;
         }
 
@@ -1050,6 +1184,11 @@ export async function signIn(
         }
 
 
+        /*
+         * Authentication is successful here.
+         * Profile problems are handled inside applySession.
+         */
+
         await applySession(
             data.session,
             "login"
@@ -1057,7 +1196,7 @@ export async function signIn(
 
 
         /*
-         * Activity logging must never break login.
+         * Login activity is optional.
          */
 
         try {
@@ -1065,6 +1204,7 @@ export async function signIn(
             await logActivity(
                 "login",
                 {
+
                     user_id:
                         data.user.id,
 
@@ -1086,12 +1226,11 @@ export async function signIn(
 
 
         /*
+         * IMPORTANT:
          * Do NOT call logWorkflowEvent() here.
          *
-         * workflow_events.task_id is NOT NULL and therefore
-         * authentication events do not belong in that table.
+         * workflow_events.task_id is NOT NULL.
          */
-
 
         return {
 
@@ -1128,7 +1267,7 @@ export async function signIn(
         throw new Error(
             getErrorMessage(
                 error,
-                "Unable to sign in. Please check your details."
+                "Unable to sign in. Please check your email and password."
             )
         );
 
@@ -1214,11 +1353,6 @@ export async function signUp(
     }
 
 
-    /*
-     * The protected administrator cannot be recreated
-     * through the normal customer signup workflow.
-     */
-
     if (
         isAdminEmail(
             clean
@@ -1247,7 +1381,7 @@ export async function signUp(
 
 
         /*
-         * ALL normal signups start as:
+         * Normal signup:
          *
          * customer
          * inactive
@@ -1274,7 +1408,8 @@ export async function signUp(
             data,
             error
         } =
-            await client.auth
+            await client
+                .auth
                 .signUp({
 
                     email:
@@ -1283,6 +1418,7 @@ export async function signUp(
                     password,
 
                     options: {
+
                         data:
                             metadata
                     }
@@ -1290,6 +1426,7 @@ export async function signUp(
 
 
         if (error) {
+
             throw error;
         }
 
@@ -1305,10 +1442,10 @@ export async function signUp(
 
 
         /*
-         * Create the corresponding profiles row.
+         * Try to create the profile row.
          *
-         * The database must permit INSERT for the role used
-         * by this authenticated request.
+         * A database permission error does not invalidate
+         * the Supabase authentication account.
          */
 
         let profileError =
@@ -1328,6 +1465,7 @@ export async function signUp(
                             APP_CONFIG.tables.profiles
                         )
                         .upsert(
+
                             {
 
                                 id:
@@ -1345,7 +1483,9 @@ export async function signUp(
                                 active:
                                     false
                             },
+
                             {
+
                                 onConflict:
                                     "id"
                             }
@@ -1357,7 +1497,9 @@ export async function signUp(
                     null;
 
 
-                if (profileError) {
+                if (
+                    profileError
+                ) {
 
                     console.warn(
                         "Signup profile creation failed:",
@@ -1381,7 +1523,7 @@ export async function signUp(
 
         /*
          * If email confirmation is disabled,
-         * Supabase may provide a session immediately.
+         * Supabase may return a session immediately.
          */
 
         if (session) {
@@ -1393,21 +1535,14 @@ export async function signUp(
         }
 
 
-        /*
-         * Do not make a profile INSERT error look like
-         * a successful fully synchronized account.
-         *
-         * Authentication itself can still be successful,
-         * but the UI can report that administrator approval
-         * is required and the database permissions need attention.
-         */
-
         let message;
 
 
         if (session) {
 
-            if (profileError) {
+            if (
+                profileError
+            ) {
 
                 message =
                     "Account created, but the profile could not be synchronized. Please wait for administrator approval.";
@@ -1420,7 +1555,9 @@ export async function signUp(
 
         } else {
 
-            if (profileError) {
+            if (
+                profileError
+            ) {
 
                 message =
                     "Account created. Please confirm your email and wait for administrator approval.";
@@ -1522,47 +1659,32 @@ export async function requestPasswordReset(
 
         const redirectTo =
             APP_CONFIG?.passwordResetUrl ||
-            `${window.location.origin}${window.location.pathname}`;
+            (
+                typeof window !==
+                "undefined"
+                    ? `${window.location.origin}${window.location.pathname}`
+                    : undefined
+            );
 
 
         const {
             error
         } =
-            await client.auth
+            await client
+                .auth
                 .resetPasswordForEmail(
                     clean,
-                    {
-                        redirectTo
-                    }
+                    redirectTo
+                        ? {
+                            redirectTo
+                        }
+                        : undefined
                 );
 
 
         if (error) {
+
             throw error;
-        }
-
-
-        /*
-         * Activity logging is optional and must not
-         * break password reset.
-         */
-
-        try {
-
-            await logActivity(
-                "password_reset_requested",
-                {
-                    email:
-                        clean
-                }
-            );
-
-        } catch (error) {
-
-            console.warn(
-                "Password reset activity log failed:",
-                error
-            );
         }
 
 
@@ -1630,14 +1752,17 @@ export async function updatePassword(
             data,
             error
         } =
-            await client.auth
+            await client
+                .auth
                 .updateUser({
+
                     password:
                         newPassword
                 });
 
 
         if (error) {
+
             throw error;
         }
 
@@ -1698,7 +1823,9 @@ export async function updateUserProfile(
     updates = {}
 ) {
 
-    if (!authState.user?.id) {
+    if (
+        !authState.user?.id
+    ) {
 
         throw new Error(
             "You must be logged in to update your profile."
@@ -1715,17 +1842,16 @@ export async function updateUserProfile(
             updates.full_name ||
             updates.name ||
             ""
-        ).trim();
+        )
+        .trim();
 
 
     /*
-     * Never permit this function to modify:
+     * Users cannot change their own:
      *
-     * - role
-     * - active
-     * - approval
-     *
-     * Those belong to administrator controls.
+     * role
+     * active
+     * approval
      */
 
 
@@ -1756,7 +1882,8 @@ export async function updateUserProfile(
         error:
             authError
     } =
-        await client.auth
+        await client
+            .auth
             .updateUser({
 
                 data:
@@ -1765,12 +1892,13 @@ export async function updateUserProfile(
 
 
     if (authError) {
+
         throw authError;
     }
 
 
     /*
-     * Update profiles table.
+     * Update profile table.
      */
 
     if (name) {
@@ -1801,7 +1929,9 @@ export async function updateUserProfile(
                     );
 
 
-            if (profileError) {
+            if (
+                profileError
+            ) {
 
                 console.warn(
                     "Profile table update failed:",
@@ -1846,7 +1976,9 @@ export async function updateAvatar(
     avatarInput
 ) {
 
-    if (!authState.user?.id) {
+    if (
+        !authState.user?.id
+    ) {
 
         throw new Error(
             "You must be logged in to update your profile picture."
@@ -1866,7 +1998,7 @@ export async function updateAvatar(
      * FILE UPLOAD
      */
 
-    if (
+    const isFile =
         (
             typeof File !==
             "undefined" &&
@@ -1879,8 +2011,10 @@ export async function updateAvatar(
             avatarInput.name &&
             avatarInput.size !==
                 undefined
-        )
-    ) {
+        );
+
+
+    if (isFile) {
 
         const file =
             avatarInput;
@@ -1888,8 +2022,10 @@ export async function updateAvatar(
 
         if (
             !String(
-                file.type || ""
-            ).startsWith(
+                file.type ||
+                ""
+            )
+            .startsWith(
                 "image/"
             )
         ) {
@@ -1902,7 +2038,8 @@ export async function updateAvatar(
 
         if (
             Number(
-                file.size || 0
+                file.size ||
+                0
             ) >
             5 * 1024 * 1024
         ) {
@@ -1938,14 +2075,19 @@ export async function updateAvatar(
             error:
                 uploadError
         } =
-            await client.storage
+            await client
+                .storage
                 .from(
                     bucket
                 )
                 .upload(
+
                     path,
+
                     file,
+
                     {
+
                         upsert:
                             true,
 
@@ -1956,13 +2098,16 @@ export async function updateAvatar(
                 );
 
 
-        if (uploadError) {
+        if (
+            uploadError
+        ) {
+
             throw uploadError;
         }
 
 
         /*
-         * Try public URL.
+         * Public URL.
          */
 
         try {
@@ -1970,7 +2115,8 @@ export async function updateAvatar(
             const {
                 data
             } =
-                client.storage
+                client
+                    .storage
                     .from(
                         bucket
                     )
@@ -2033,15 +2179,12 @@ export async function updateAvatar(
 
     } else {
 
-        /*
-         * Existing URL.
-         */
-
         avatarUrl =
             String(
                 avatarInput ||
                 ""
-            ).trim();
+            )
+            .trim();
 
 
         if (!avatarUrl) {
@@ -2054,10 +2197,7 @@ export async function updateAvatar(
 
 
     /*
-     * Update database.
-     *
-     * IMPORTANT:
-     * Do not silently hide a database error here.
+     * Update profile table.
      */
 
     try {
@@ -2086,7 +2226,10 @@ export async function updateAvatar(
                 );
 
 
-        if (profileError) {
+        if (
+            profileError
+        ) {
+
             throw profileError;
         }
 
@@ -2097,17 +2240,13 @@ export async function updateAvatar(
             error
         );
 
-        /*
-         * The uploaded image may still exist, but the
-         * database was not updated.
-         */
 
         throw error;
     }
 
 
     /*
-     * Update Auth metadata.
+     * Update Supabase Auth metadata.
      */
 
     try {
@@ -2129,7 +2268,8 @@ export async function updateAvatar(
             data,
             error
         } =
-            await client.auth
+            await client
+                .auth
                 .updateUser({
 
                     data:
@@ -2188,8 +2328,7 @@ export async function signOut() {
 
 
     /*
-     * Update logout timestamp BEFORE clearing
-     * authState.user.
+     * Record logout BEFORE clearing auth state.
      */
 
     if (userId) {
@@ -2197,7 +2336,12 @@ export async function signOut() {
         try {
 
             await updateCloudStatus(
-                "logout"
+                "logout",
+                {
+
+                    userId:
+                        userId
+                }
             );
 
         } catch (error) {
@@ -2211,7 +2355,7 @@ export async function signOut() {
 
 
     /*
-     * Log activity before authentication state is cleared.
+     * Activity log.
      */
 
     if (userId) {
@@ -2244,17 +2388,14 @@ export async function signOut() {
 
 
     /*
-     * Do NOT use logWorkflowEvent() for login/logout.
+     * Do NOT use logWorkflowEvent() for logout.
      *
-     * workflow_events.task_id is NOT NULL and therefore
-     * authentication events are not valid workflow events.
+     * workflow_events.task_id is required.
      */
 
 
     /*
-     * Supabase sign out.
-     *
-     * Failure here must not leave the UI looking logged in.
+     * Supabase logout.
      */
 
     try {
@@ -2266,7 +2407,8 @@ export async function signOut() {
         const {
             error
         } =
-            await client.auth
+            await client
+                .auth
                 .signOut();
 
 
@@ -2288,7 +2430,7 @@ export async function signOut() {
 
 
     /*
-     * Clear local authentication state.
+     * Clear local auth state.
      */
 
     authState.session =
@@ -2372,11 +2514,13 @@ export async function loadSessionOnStartup() {
             data,
             error
         } =
-            await client.auth
+            await client
+                .auth
                 .getSession();
 
 
         if (error) {
+
             throw error;
         }
 
@@ -2450,9 +2594,16 @@ let authSubscription =
     null;
 
 
+let authInitializationPromise =
+    null;
+
+
 function setupSupabaseAuthListener() {
 
-    if (authSubscription) {
+    if (
+        authSubscription
+    ) {
+
         return authSubscription;
     }
 
@@ -2466,7 +2617,8 @@ function setupSupabaseAuthListener() {
         const {
             data
         } =
-            client.auth
+            client
+                .auth
                 .onAuthStateChange(
                     (
                         event,
@@ -2474,8 +2626,8 @@ function setupSupabaseAuthListener() {
                     ) => {
 
                         /*
-                         * INITIAL_SESSION is already handled
-                         * by loadSessionOnStartup().
+                         * INITIAL_SESSION is handled by
+                         * loadSessionOnStartup().
                          */
 
                         if (
@@ -2488,7 +2640,7 @@ function setupSupabaseAuthListener() {
 
 
                         /*
-                         * Signed in / refreshed / user updated.
+                         * Signed in / refreshed / updated.
                          */
 
                         if (
@@ -2501,8 +2653,8 @@ function setupSupabaseAuthListener() {
                         ) {
 
                             /*
-                             * Defer profile query so that Supabase
-                             * authentication locks are not blocked.
+                             * Defer the profile query so that
+                             * Supabase auth locks are not blocked.
                              */
 
                             setTimeout(
@@ -2620,10 +2772,39 @@ export async function initializeAuth() {
     }
 
 
-    setupSupabaseAuthListener();
+    /*
+     * Prevent app.js and the automatic initializer from
+     * starting two simultaneous initialization processes.
+     */
+
+    if (
+        authInitializationPromise
+    ) {
+
+        return await authInitializationPromise;
+    }
 
 
-    return await loadSessionOnStartup();
+    authInitializationPromise =
+        (async () => {
+
+            setupSupabaseAuthListener();
+
+
+            return await loadSessionOnStartup();
+
+        })();
+
+
+    try {
+
+        return await authInitializationPromise;
+
+    } finally {
+
+        authInitializationPromise =
+            null;
+    }
 }
 
 
@@ -2633,7 +2814,9 @@ export async function initializeAuth() {
 
 export async function refreshProfileStatus() {
 
-    if (!authState.user?.id) {
+    if (
+        !authState.user?.id
+    ) {
 
         return null;
     }
@@ -2760,13 +2943,16 @@ export function canManagePayments() {
 
 export function canAccessWorkspace() {
 
-    if (!isLoggedIn()) {
+    if (
+        !isLoggedIn()
+    ) {
+
         return false;
     }
 
 
     /*
-     * Admin/staff bypass approval.
+     * Admin and staff bypass approval.
      */
 
     if (
@@ -2779,7 +2965,8 @@ export function canAccessWorkspace() {
 
 
     /*
-     * Normal workers/reviewers/customers need approval.
+     * Normal workers/reviewers/customers require
+     * administrator approval.
      */
 
     return Boolean(
@@ -2804,7 +2991,10 @@ export function canAccessAdminCenter() {
 
 export function canUploadCustomerMedia() {
 
-    if (!isLoggedIn()) {
+    if (
+        !isLoggedIn()
+    ) {
+
         return false;
     }
 
@@ -2831,18 +3021,22 @@ export function canUploadCustomerMedia() {
 
 export function canUseManualAnnotationTools() {
 
-    if (!isLoggedIn()) {
+    if (
+        !isLoggedIn()
+    ) {
+
         return false;
     }
 
 
     /*
      * Coworkers must use their assigned workflow.
-     *
-     * They must not receive the customer manual selector.
      */
 
-    if (isCoworker()) {
+    if (
+        isCoworker()
+    ) {
+
         return false;
     }
 
@@ -2863,7 +3057,10 @@ export function canUseManualAnnotationTools() {
 
 export function getPublicUser() {
 
-    if (!authState.user) {
+    if (
+        !authState.user
+    ) {
+
         return null;
     }
 
@@ -3073,6 +3270,7 @@ if (
                             );
                         }
                     );
+
             },
             {
                 once:
