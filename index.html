@@ -1,3026 +1,3204 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+  <meta charset="UTF-8">
 
-    <title>ANNOTATION AI</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
 
-    <meta
-        name="description"
-        content="AI assisted data annotation workspace"
-    >
+  <meta
+    name="theme-color"
+    content="#6f4e37"
+  >
 
-    <meta
-        name="theme-color"
-        content="#6b4226"
-    >
+  <meta
+    name="description"
+    content="Data annotation workspace"
+  >
 
-    <link
-        rel="stylesheet"
-        href="./styles.css"
-    >
+  <title>Annotation Workspace</title>
+
+  <!-- =====================================================
+       STYLES
+       ===================================================== -->
+
+  <link
+    rel="stylesheet"
+    href="./styles.css"
+  >
 </head>
 
 <body>
 
-    <!-- =========================================================
-         APP LOADING SCREEN
-         ========================================================= -->
-    <div
-        id="appLoader"
-        class="app-loader"
-        aria-hidden="true"
-    >
-        <div class="loader-content">
-            <div class="loader-logo">AI</div>
-            <div class="loader-title">ANNOTATION AI</div>
-            <div class="loader-spinner"></div>
-            <div class="loader-text">Loading workspace...</div>
+  <!-- =====================================================
+       APPLICATION LOADER
+       ===================================================== -->
+
+  <div
+    id="appLoader"
+    class="app-loader"
+    aria-live="polite"
+  >
+    <div class="loader-card">
+      <div class="loader-spinner"></div>
+
+      <div class="loader-title">
+        Loading workspace...
+      </div>
+
+      <div class="loader-subtitle">
+        Please wait
+      </div>
+    </div>
+  </div>
+
+
+  <!-- =====================================================
+       AUTHENTICATION
+       ===================================================== -->
+
+  <section
+    id="authPage"
+    class="auth-page"
+  >
+
+    <div class="auth-container">
+
+      <!-- LOGIN -->
+
+      <div
+        id="loginPanel"
+        class="auth-panel"
+      >
+
+        <div class="auth-header">
+
+          <div class="brand-mark">
+            AW
+          </div>
+
+          <h1>
+            Welcome back
+          </h1>
+
+          <p>
+            Sign in to continue to your workspace.
+          </p>
+
         </div>
+
+
+        <form
+          id="loginForm"
+          class="auth-form"
+          autocomplete="on"
+        >
+
+          <div class="form-group">
+
+            <label for="loginEmail">
+              Email
+            </label>
+
+            <input
+              id="loginEmail"
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="Enter your email"
+              required
+            >
+
+          </div>
+
+
+          <div class="form-group">
+
+            <label for="loginPassword">
+              Password
+            </label>
+
+            <input
+              id="loginPassword"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Enter your password"
+              required
+            >
+
+          </div>
+
+
+          <button
+            id="signInBtn"
+            type="submit"
+            class="primary-button"
+          >
+            Sign in
+          </button>
+
+
+          <button
+            id="forgotPasswordButton"
+            type="button"
+            class="text-button"
+          >
+            Forgot password?
+          </button>
+
+        </form>
+
+
+        <div class="auth-footer">
+
+          <span>
+            Don't have an account?
+          </span>
+
+          <button
+            id="showSignupButton"
+            type="button"
+            class="link-button"
+          >
+            Create account
+          </button>
+
+        </div>
+
+      </div>
+
+
+      <!-- SIGN UP -->
+
+      <div
+        id="signupPanel"
+        class="auth-panel hidden"
+        hidden
+      >
+
+        <div class="auth-header">
+
+          <div class="brand-mark">
+            AW
+          </div>
+
+          <h1>
+            Create your account
+          </h1>
+
+          <p>
+            Create an account and wait for admin approval.
+          </p>
+
+        </div>
+
+
+        <form
+          id="signupForm"
+          class="auth-form"
+          autocomplete="on"
+        >
+
+          <div class="form-group">
+
+            <label for="signupName">
+              Full name
+            </label>
+
+            <input
+              id="signupName"
+              name="full_name"
+              type="text"
+              autocomplete="name"
+              placeholder="Enter your full name"
+              required
+            >
+
+          </div>
+
+
+          <div class="form-group">
+
+            <label for="signupEmail">
+              Email
+            </label>
+
+            <input
+              id="signupEmail"
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="Enter your email"
+              required
+            >
+
+          </div>
+
+
+          <div class="form-group">
+
+            <label for="signupPassword">
+              Password
+            </label>
+
+            <input
+              id="signupPassword"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Create a password"
+              minlength="6"
+              required
+            >
+
+          </div>
+
+
+          <div class="form-group">
+
+            <label for="signupPasswordConfirm">
+              Confirm password
+            </label>
+
+            <input
+              id="signupPasswordConfirm"
+              name="password_confirm"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Confirm your password"
+              minlength="6"
+              required
+            >
+
+          </div>
+
+
+          <button
+            id="signUpBtn"
+            type="submit"
+            class="primary-button"
+          >
+            Create account
+          </button>
+
+        </form>
+
+
+        <div class="auth-footer">
+
+          <span>
+            Already have an account?
+          </span>
+
+          <button
+            id="showLoginButton"
+            type="button"
+            class="link-button"
+          >
+            Sign in
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================================
+       TOP NAVIGATION
+       ===================================================== -->
+
+  <header
+    id="topNav"
+    class="top-nav hidden"
+    hidden
+  >
+
+    <div class="nav-left">
+
+      <button
+        id="homeButton"
+        type="button"
+        class="brand-button"
+        title="Home"
+      >
+
+        <span class="brand-icon">
+          AW
+        </span>
+
+        <span class="brand-title">
+          Annotation Workspace
+        </span>
+
+      </button>
+
     </div>
 
 
-    <!-- =========================================================
-         AUTHENTICATION
-         ========================================================= -->
+    <div class="nav-right">
+
+      <button
+        id="settingsButton"
+        type="button"
+        class="nav-icon-button"
+        title="Settings"
+        aria-label="Settings"
+      >
+        ⚙️
+      </button>
+
+
+      <button
+        id="workHistoryButton"
+        type="button"
+        class="nav-icon-button"
+        title="Work history"
+        aria-label="Work history"
+      >
+        🕘
+      </button>
+
+
+      <button
+        id="profileButton"
+        type="button"
+        class="nav-profile-button"
+        title="Profile"
+        aria-label="Profile"
+      >
+
+        <span
+          id="navAvatar"
+          class="nav-avatar"
+        >
+          <span id="navAvatarFallback">
+            👤
+          </span>
+        </span>
+
+        <span
+          id="navProfileName"
+          class="nav-profile-name"
+        >
+          Profile
+        </span>
+
+      </button>
+
+
+      <!-- ADMIN ICON
+           Hidden from normal users.
+      -->
+
+      <button
+        id="adminCenterButton"
+        type="button"
+        class="nav-icon-button admin-nav-button hidden"
+        title="Admin Center"
+        aria-label="Admin Center"
+        hidden
+      >
+        🛡️
+      </button>
+
+
+      <button
+        id="logoutBtn"
+        type="button"
+        class="nav-icon-button"
+        title="Sign out"
+        aria-label="Sign out"
+      >
+        ↪
+      </button>
+
+    </div>
+
+  </header>
+
+
+  <!-- =====================================================
+       MAIN APPLICATION
+       ===================================================== -->
+
+  <main
+    id="mainContent"
+    class="main-content"
+    hidden
+  >
+
+
+    <!-- ===================================================
+         HOME / DASHBOARD
+         =================================================== -->
+
     <section
-        id="authPage"
-        class="page auth-page"
+      id="homePage"
+      class="page home-page"
     >
 
-        <div class="auth-container">
+      <!-- GREETING -->
 
-            <div class="auth-brand">
-                <div class="brand-mark">AI</div>
+      <div
+        id="dashboardGreeting"
+        class="dashboard-greeting"
+      >
 
-                <h1>ANNOTATION AI</h1>
+        <div class="dashboard-avatar-wrapper">
 
-                <p>
-                    Intelligent data annotation workspace
-                </p>
-            </div>
+          <div
+            id="dashboardAvatar"
+            class="dashboard-avatar"
+          >
 
-
-            <!-- LOGIN -->
-            <div
-                id="loginPanel"
-                class="auth-panel"
+            <span
+              id="dashboardAvatarFallback"
             >
+              👤
+            </span>
 
-                <div class="auth-panel-header">
-                    <h2>Welcome back</h2>
-                    <p>Sign in to continue working</p>
-                </div>
-
-                <form id="loginForm">
-
-                    <div class="form-group">
-                        <label for="loginEmail">
-                            Email
-                        </label>
-
-                        <input
-                            type="email"
-                            id="loginEmail"
-                            name="email"
-                            autocomplete="email"
-                            required
-                        >
-                    </div>
-
-
-                    <div class="form-group">
-                        <label for="loginPassword">
-                            Password
-                        </label>
-
-                        <input
-                            type="password"
-                            id="loginPassword"
-                            name="password"
-                            autocomplete="current-password"
-                            required
-                        >
-                    </div>
-
-
-                    <button
-                        type="submit"
-                        id="signInBtn"
-                        class="primary-button full-width"
-                    >
-                        Sign in
-                    </button>
-
-                </form>
-
-
-                <button
-                    type="button"
-                    id="forgotPasswordButton"
-                    class="text-button"
-                >
-                    Forgot password?
-                </button>
-
-
-                <div class="auth-switch">
-                    <span>Don't have an account?</span>
-
-                    <button
-                        type="button"
-                        id="showSignupButton"
-                        class="text-button"
-                    >
-                        Create account
-                    </button>
-                </div>
-
-            </div>
-
-
-            <!-- SIGN UP -->
-            <div
-                id="signupPanel"
-                class="auth-panel hidden"
-            >
-
-                <div class="auth-panel-header">
-                    <h2>Create your account</h2>
-
-                    <p>
-                        New accounts start as customer accounts and
-                        require admin approval.
-                    </p>
-                </div>
-
-
-                <form id="signupForm">
-
-                    <div class="form-group">
-                        <label for="signupName">
-                            Full name
-                        </label>
-
-                        <input
-                            type="text"
-                            id="signupName"
-                            name="full_name"
-                            autocomplete="name"
-                            required
-                        >
-                    </div>
-
-
-                    <div class="form-group">
-                        <label for="signupEmail">
-                            Email
-                        </label>
-
-                        <input
-                            type="email"
-                            id="signupEmail"
-                            name="email"
-                            autocomplete="email"
-                            required
-                        >
-                    </div>
-
-
-                    <div class="form-group">
-                        <label for="signupPassword">
-                            Password
-                        </label>
-
-                        <input
-                            type="password"
-                            id="signupPassword"
-                            name="password"
-                            autocomplete="new-password"
-                            minlength="6"
-                            required
-                        >
-                    </div>
-
-
-                    <div class="form-group">
-                        <label for="signupPasswordConfirm">
-                            Confirm password
-                        </label>
-
-                        <input
-                            type="password"
-                            id="signupPasswordConfirm"
-                            name="password_confirm"
-                            autocomplete="new-password"
-                            minlength="6"
-                            required
-                        >
-                    </div>
-
-
-                    <button
-                        type="submit"
-                        id="signUpBtn"
-                        class="primary-button full-width"
-                    >
-                        Create account
-                    </button>
-
-                </form>
-
-
-                <div class="auth-switch">
-                    <span>Already have an account?</span>
-
-                    <button
-                        type="button"
-                        id="showLoginButton"
-                        class="text-button"
-                    >
-                        Sign in
-                    </button>
-                </div>
-
-            </div>
+          </div>
 
         </div>
+
+
+        <div class="greeting-content">
+
+          <div
+            id="dashboardGreetingText"
+            class="dashboard-greeting-text"
+          >
+            Good day
+          </div>
+
+          <h1>
+            <span id="dashboardUserName">
+              User
+            </span>
+          </h1>
+
+          <p id="dashboardRoleText">
+            Customer
+          </p>
+
+        </div>
+
+
+        <div
+          id="dashboardTimeline"
+          class="dashboard-timeline"
+        >
+        </div>
+
+      </div>
+
+
+      <!-- AVAILABLE JOBS -->
+
+      <section
+        id="availableJobsSection"
+        class="jobs-section"
+      >
+
+        <div class="section-header">
+
+          <div>
+
+            <h2>
+              Available work
+            </h2>
+
+            <p>
+              Work available for your role.
+            </p>
+
+          </div>
+
+
+          <button
+            id="refreshJobsButton"
+            type="button"
+            class="secondary-button"
+          >
+            ↻ Refresh
+          </button>
+
+        </div>
+
+
+        <div
+          id="availableJobs"
+          class="available-jobs"
+        >
+        </div>
+
+
+        <div
+          id="noJobsMessage"
+          class="no-jobs-message hidden"
+          hidden
+        >
+
+          <div class="no-jobs-icon">
+            📋
+          </div>
+
+          <h3>
+            Oops, looking for more work for you
+          </h3>
+
+          <p>
+            We’re checking for the next role-matched
+            job. Please check again soon.
+          </p>
+
+        </div>
+
+      </section>
+
+
+      <!-- =================================================
+           COWORKER WORKBENCH
+           ================================================= -->
+
+      <section
+        id="coworkerDashboard"
+        class="coworker-dashboard"
+      >
+
+        <div class="workbench-header">
+
+          <div
+            id="workbenchAvatar"
+            class="workbench-avatar"
+          >
+            👤
+          </div>
+
+
+          <div class="workbench-user">
+
+            <h2 id="workbenchName">
+              Coworker
+            </h2>
+
+            <p id="workbenchRole">
+              Coworker
+            </p>
+
+            <span
+              id="workbenchTaskStatus"
+              class="workbench-task-status"
+            >
+              Ready for work
+            </span>
+
+          </div>
+
+        </div>
+
+
+        <div
+          id="coworkerWorkbench"
+          class="coworker-workbench"
+        >
+
+          <!-- ANNOTATION TYPE -->
+
+          <div
+            id="workbenchAnnotationType"
+            class="workbench-card"
+          >
+
+            <div class="workbench-card-icon">
+              🏷️
+            </div>
+
+            <div class="workbench-card-content">
+
+              <h3>
+                Annotation type
+              </h3>
+
+              <p>
+                Your assigned annotation workflow
+              </p>
+
+            </div>
+
+            <div
+              id="workbenchAnnotationTypeValue"
+              class="workbench-card-value"
+            >
+              —
+            </div>
+
+          </div>
+
+
+          <!-- EDIT TOOL -->
+
+          <button
+            id="workbenchEditTool"
+            type="button"
+            class="workbench-card workbench-action-card"
+            data-focus-panel="editToolsPanel"
+          >
+
+            <div class="workbench-card-icon">
+              ✏️
+            </div>
+
+            <div class="workbench-card-content">
+
+              <h3>
+                Edit tool
+              </h3>
+
+              <p>
+                Open annotation editing tools
+              </p>
+
+            </div>
+
+            <span class="workbench-arrow">
+              →
+            </span>
+
+          </button>
+
+
+          <!-- CUSTOMER UPLOAD
+               Hidden for coworkers.
+          -->
+
+          <button
+            id="workbenchUpload"
+            type="button"
+            class="workbench-card workbench-action-card customer-only"
+          >
+
+            <div class="workbench-card-icon">
+              ⬆️
+            </div>
+
+            <div class="workbench-card-content">
+
+              <h3>
+                Upload media
+              </h3>
+
+              <p>
+                Upload a new customer task
+              </p>
+
+            </div>
+
+            <span class="workbench-arrow">
+              →
+            </span>
+
+          </button>
+
+
+          <!-- AI -->
+
+          <button
+            id="workbenchAI"
+            type="button"
+            class="workbench-card workbench-action-card"
+          >
+
+            <div class="workbench-card-icon">
+              🤖
+            </div>
+
+            <div class="workbench-card-content">
+
+              <h3>
+                Annotation AI
+              </h3>
+
+              <p>
+                Generate annotations automatically
+              </p>
+
+            </div>
+
+            <span class="workbench-arrow">
+              →
+            </span>
+
+          </button>
+
+        </div>
+
+      </section>
 
     </section>
 
 
-    <!-- =========================================================
-         MAIN APPLICATION
-         ========================================================= -->
+    <!-- ===================================================
+         ANNOTATION WORKSPACE
+         =================================================== -->
+
     <section
-        id="appPage"
-        class="page app-page hidden"
+      id="annotationPage"
+      class="page annotation-page hidden"
+      hidden
     >
 
-        <!-- =====================================================
-             TOP NAVIGATION
-             ===================================================== -->
-        <header
-            id="topNav"
-            class="top-nav"
-        >
+      <div
+        id="annotationWorkspace"
+        class="annotation-workspace"
+      >
 
-            <div class="nav-left">
+        <!-- WORKSPACE HEADER -->
 
-                <button
-                    type="button"
-                    id="homeButton"
-                    class="brand-button"
-                    title="Home"
+        <header class="annotation-header">
+
+          <div class="annotation-header-left">
+
+            <button
+              id="backToHomeButton"
+              type="button"
+              class="icon-button"
+              title="Back to home"
+              aria-label="Back to home"
+            >
+              ←
+            </button>
+
+
+            <div class="task-heading">
+
+              <h1 id="currentTaskTitle">
+                Annotation task
+              </h1>
+
+              <div class="task-meta">
+
+                <span>
+                  Task:
+                  <strong id="currentTaskId">
+                    —
+                  </strong>
+                </span>
+
+                <span>
+                  Role:
+                  <strong id="currentTaskRole">
+                    —
+                  </strong>
+                </span>
+
+                <span
+                  id="currentTaskStatus"
+                  class="task-status"
                 >
-                    <span class="brand-icon">AI</span>
+                  —
+                </span>
 
-                    <span class="brand-name">
-                        ANNOTATION AI
-                    </span>
-                </button>
+              </div>
 
             </div>
 
-
-            <div class="nav-right">
-
-                <!-- SETTINGS -->
-                <button
-                    type="button"
-                    id="settingsButton"
-                    class="nav-icon-button"
-                    title="Settings"
-                    aria-label="Settings"
-                >
-                    ⚙️
-                </button>
+          </div>
 
 
-                <!-- WORK HISTORY -->
-                <button
-                    type="button"
-                    id="workHistoryButton"
-                    class="nav-icon-button"
-                    title="Work history"
-                    aria-label="Work history"
-                >
-                    🕘
-                </button>
+          <div class="annotation-header-actions">
+
+            <button
+              id="undoBtn"
+              type="button"
+              class="toolbar-button"
+              title="Undo"
+            >
+              ↶
+            </button>
+
+            <button
+              id="redoBtn"
+              type="button"
+              class="toolbar-button"
+              title="Redo"
+            >
+              ↷
+            </button>
 
 
-                <!-- PROFILE -->
-                <button
-                    type="button"
-                    id="profileButton"
-                    class="nav-profile-button"
-                    title="Profile"
-                    aria-label="Profile"
-                >
-
-                    <span
-                        id="navAvatar"
-                        class="nav-avatar"
-                    >
-                        👤
-                    </span>
-
-                    <span
-                        id="navProfileName"
-                        class="nav-profile-name"
-                    >
-                        Profile
-                    </span>
-
-                </button>
+            <button
+              id="saveAnnotationsButton"
+              type="button"
+              class="secondary-button"
+            >
+              Save
+            </button>
 
 
-                <!-- ADMIN
-                     Hidden automatically for non-admin users -->
-                <button
-                    type="button"
-                    id="adminCenterButton"
-                    class="nav-icon-button admin-nav-button hidden"
-                    title="Admin center"
-                    aria-label="Admin center"
-                >
-                    🛡️
-                </button>
+            <button
+              id="submitTaskButton"
+              type="button"
+              class="primary-button"
+            >
+              Submit
+            </button>
 
 
-                <!-- LOGOUT -->
-                <button
-                    type="button"
-                    id="logoutBtn"
-                    class="nav-icon-button"
-                    title="Sign out"
-                    aria-label="Sign out"
-                >
-                    🚪
-                </button>
+            <button
+              id="skipTaskButton"
+              type="button"
+              class="danger-button"
+            >
+              Skip
+            </button>
 
-            </div>
+          </div>
 
         </header>
 
 
-        <!-- =====================================================
-             MAIN CONTENT
-             ===================================================== -->
-        <main
-            id="mainContent"
-            class="main-content"
-        >
-
-
-            <!-- =================================================
-                 HOME / DASHBOARD
-                 ================================================= -->
-            <section
-                id="homePage"
-                class="app-section"
-            >
-
-                <!-- GREETING -->
-                <div
-                    id="dashboardGreeting"
-                    class="dashboard-greeting"
-                >
-
-                    <div class="greeting-avatar-wrap">
-
-                        <img
-                            id="dashboardAvatar"
-                            class="dashboard-avatar hidden"
-                            alt="Profile"
-                        >
-
-                        <div
-                            id="dashboardAvatarFallback"
-                            class="dashboard-avatar-fallback"
-                        >
-                            👋
-                        </div>
-
-                    </div>
-
-
-                    <div class="greeting-content">
-
-                        <div
-                            id="dashboardGreetingText"
-                            class="dashboard-greeting-text"
-                        >
-                            Good day
-                        </div>
-
-                        <h1>
-                            Welcome,
-                            <span id="dashboardUserName">
-                                User
-                            </span>
-                        </h1>
-
-                        <p id="dashboardRoleText">
-                            Welcome to your annotation workspace.
-                        </p>
-
-                    </div>
-
-                </div>
-
-
-                <!-- ACCOUNT TIMELINE -->
-                <div
-                    id="dashboardTimeline"
-                    class="dashboard-timeline"
-                >
-                    <!-- workspace.js fills this -->
-                </div>
-
-
-                <!-- AVAILABLE JOBS -->
-                <section
-                    id="availableJobsSection"
-                    class="jobs-section"
-                >
-
-                    <div class="section-heading">
-
-                        <div>
-                            <h2>Available jobs</h2>
-
-                            <p>
-                                Work available for your role
-                            </p>
-                        </div>
-
-                        <button
-                            type="button"
-                            id="refreshJobsButton"
-                            class="secondary-button"
-                        >
-                            ↻ Refresh
-                        </button>
-
-                    </div>
-
-
-                    <div
-                        id="availableJobs"
-                        class="available-jobs"
-                    >
-                        <!-- home.js renders jobs -->
-                    </div>
-
-
-                    <!-- NO JOBS -->
-                    <div
-                        id="noJobsMessage"
-                        class="no-jobs-message hidden"
-                    >
-
-                        <div class="no-jobs-icon">
-                            🧑‍💻
-                        </div>
-
-                        <h3>
-                            Oops, looking for more work for you
-                        </h3>
-
-                        <p>
-                            We’re checking for the next
-                            role-matched job. Please check again soon.
-                        </p>
-
-                    </div>
-
-                </section>
-
-
-                <!-- =================================================
-                     COWORKER WORKBENCH
-                     ================================================= -->
-                <section
-                    id="coworkerDashboard"
-                    class="coworker-dashboard"
-                >
-
-                    <div class="workbench-header">
-
-                        <div class="workbench-person">
-
-                            <div
-                                id="workbenchAvatar"
-                                class="workbench-avatar"
-                            >
-                                👤
-                            </div>
-
-                            <div>
-
-                                <h2 id="workbenchName">
-                                    Annotation workspace
-                                </h2>
-
-                                <p id="workbenchRole">
-                                    Worker
-                                </p>
-
-                            </div>
-
-                        </div>
-
-
-                        <div class="workbench-status">
-
-                            <span
-                                id="workbenchTaskStatus"
-                                class="status-pill"
-                            >
-                                No task selected
-                            </span>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- WORKBENCH TOOLS -->
-                    <div
-                        id="coworkerWorkbench"
-                        class="coworker-workbench"
-                    >
-
-                        <!-- ANNOTATION TYPE -->
-                        <button
-                            type="button"
-                            class="workbench-tool"
-                            id="workbenchAnnotationType"
-                            data-focus-panel="annotationTypePanel"
-                        >
-
-                            <span class="workbench-tool-icon">
-                                🧩
-                            </span>
-
-                            <span class="workbench-tool-content">
-                                <strong>Annotation type</strong>
-
-                                <small id="workbenchAnnotationTypeText">
-                                    Automatic
-                                </small>
-                            </span>
-
-                        </button>
-
-
-                        <!-- EDIT TOOL -->
-                        <button
-                            type="button"
-                            class="workbench-tool"
-                            id="workbenchEditTool"
-                            data-focus-panel="editToolsPanel"
-                        >
-
-                            <span class="workbench-tool-icon">
-                                ✏️
-                            </span>
-
-                            <span class="workbench-tool-content">
-
-                                <strong>Edit tool</strong>
-
-                                <small>
-                                    Edit annotations
-                                </small>
-
-                            </span>
-
-                        </button>
-
-
-                        <!-- VIDEO UPLOAD -->
-                        <button
-                            type="button"
-                            class="workbench-tool"
-                            id="workbenchUpload"
-                        >
-
-                            <span class="workbench-tool-icon">
-                                🎥
-                            </span>
-
-                            <span class="workbench-tool-content">
-
-                                <strong>Video upload</strong>
-
-                                <small>
-                                    Upload customer media
-                                </small>
-
-                            </span>
-
-                        </button>
-
-
-                        <!-- AI -->
-                        <button
-                            type="button"
-                            class="workbench-tool"
-                            id="workbenchAI"
-                        >
-
-                            <span class="workbench-tool-icon">
-                                🤖
-                            </span>
-
-                            <span class="workbench-tool-content">
-
-                                <strong>Annotation AI</strong>
-
-                                <small>
-                                    Generate annotations
-                                </small>
-
-                            </span>
-
-                        </button>
-
-                    </div>
-
-                </section>
-
-            </section>
-
-
-            <!-- =================================================
-                 ANNOTATION WORKSPACE
-                 ================================================= -->
-            <section
-                id="annotationPage"
-                class="app-section annotation-page hidden"
-            >
+        <!-- WORKSPACE BODY -->
+
+        <div class="annotation-workspace-body">
+
+
+          <!-- LEFT EDIT TOOLS -->
+
+          <aside
+            id="editToolsPanel"
+            class="edit-tools-panel"
+          >
+
+            <div class="panel-header">
+
+              <h2>
+                Edit tools
+              </h2>
+
+              <span
+                id="activeToolLabel"
+                class="active-tool-label"
+              >
+                Select
+              </span>
+
+            </div>
+
+
+            <div class="tool-group">
+
+              <button
+                id="selectTool"
+                type="button"
+                class="tool-button active"
+                data-tool="select"
+                title="Select annotation"
+              >
+                <span>
+                  ↖
+                </span>
+
+                <span>
+                  Select
+                </span>
+              </button>
+
+
+              <button
+                id="drawBoxTool"
+                type="button"
+                class="tool-button"
+                data-tool="box"
+                title="Draw box"
+              >
+                <span>
+                  ▣
+                </span>
+
+                <span>
+                  Box
+                </span>
+              </button>
+
+
+              <button
+                id="drawPolygonTool"
+                type="button"
+                class="tool-button"
+                data-tool="polygon"
+                title="Draw polygon"
+              >
+                <span>
+                  ⬡
+                </span>
+
+                <span>
+                  Polygon
+                </span>
+              </button>
+
+
+              <button
+                id="drawSegmentationTool"
+                type="button"
+                class="tool-button"
+                data-tool="segmentation"
+                title="Draw segmentation"
+              >
+                <span>
+                  ◈
+                </span>
+
+                <span>
+                  Segmentation
+                </span>
+              </button>
+
+
+              <button
+                id="moveTool"
+                type="button"
+                class="tool-button"
+                data-tool="move"
+                title="Move annotation"
+              >
+                <span>
+                  ✥
+                </span>
+
+                <span>
+                  Move
+                </span>
+              </button>
+
+
+              <button
+                id="editTool"
+                type="button"
+                class="tool-button"
+                data-tool="edit"
+                title="Edit annotation"
+              >
+                <span>
+                  ✏️
+                </span>
+
+                <span>
+                  Edit
+                </span>
+              </button>
+
+            </div>
+
+
+            <div class="tool-divider"></div>
+
+
+            <div class="tool-group">
+
+              <button
+                id="deleteSelected"
+                type="button"
+                class="tool-button danger-tool"
+              >
+                <span>
+                  🗑️
+                </span>
+
+                <span>
+                  Delete selected
+                </span>
+              </button>
+
+
+              <button
+                id="clearAnnotationsButton"
+                type="button"
+                class="tool-button danger-tool"
+              >
+                <span>
+                  ✕
+                </span>
+
+                <span>
+                  Clear all
+                </span>
+              </button>
+
+            </div>
+
+
+            <!-- AI -->
+
+            <div class="ai-tool-section">
+
+              <div class="ai-tool-title">
+                AI annotation
+              </div>
+
+              <button
+                id="autoAnnotate"
+                type="button"
+                class="ai-button"
+              >
+                🤖 Auto annotate
+              </button>
+
+              <div
+                id="aiProgress"
+                class="ai-progress hidden"
+                hidden
+              >
 
                 <div
-                    id="annotationWorkspace"
-                    class="annotation-workspace"
-                >
+                  id="aiProgressBar"
+                  class="ai-progress-bar"
+                ></div>
 
-                    <!-- =========================================
-                         WORKSPACE HEADER
-                         ========================================= -->
-                    <div class="annotation-header">
+                <span id="aiProgressText">
+                  Preparing AI...
+                </span>
 
-                        <div class="annotation-header-left">
+              </div>
 
-                            <button
-                                type="button"
-                                id="backToHomeButton"
-                                class="secondary-button"
-                            >
-                                ← Jobs
-                            </button>
+            </div>
 
 
-                            <div class="task-title-area">
+            <!-- OBJECT COUNT -->
 
-                                <h2 id="currentTaskTitle">
-                                    Annotation task
-                                </h2>
+            <div class="object-count-card">
 
-                                <div class="task-meta">
+              <span>
+                Objects
+              </span>
 
-                                    <span
-                                        id="currentTaskId"
-                                        class="task-id"
-                                    >
-                                        —
-                                    </span>
+              <strong id="objectCount">
+                0
+              </strong>
 
-                                    <span
-                                        id="currentTaskRole"
-                                        class="status-pill"
-                                    >
-                                        —
-                                    </span>
+            </div>
 
-                                    <span
-                                        id="currentTaskStatus"
-                                        class="status-pill"
-                                    >
-                                        —
-                                    </span>
+          </aside>
 
-                                </div>
 
-                            </div>
+          <!-- CENTER CANVAS -->
 
-                        </div>
+          <section
+            id="canvasPanel"
+            class="canvas-panel"
+          >
 
+            <!-- MEDIA TOOLBAR -->
 
-                        <div class="annotation-header-actions">
-
-                            <button
-                                type="button"
-                                id="undoBtn"
-                                class="tool-button"
-                                title="Undo"
-                                aria-label="Undo"
-                            >
-                                ↶
-                            </button>
-
-                            <button
-                                type="button"
-                                id="redoBtn"
-                                class="tool-button"
-                                title="Redo"
-                                aria-label="Redo"
-                            >
-                                ↷
-                            </button>
-
-                            <button
-                                type="button"
-                                id="saveAnnotationsButton"
-                                class="secondary-button"
-                            >
-                                Save
-                            </button>
-
-                            <button
-                                type="button"
-                                id="submitTaskButton"
-                                class="primary-button"
-                            >
-                                Submit
-                            </button>
-
-                            <button
-                                type="button"
-                                id="skipTaskButton"
-                                class="danger-button"
-                            >
-                                Skip
-                            </button>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         WORKSPACE BODY
-                         ========================================= -->
-                    <div class="annotation-workspace-body">
-
-
-                        <!-- =====================================
-                             LEFT TOOL PANEL
-                             ===================================== -->
-                        <aside
-                            id="editToolsPanel"
-                            class="annotation-left-panel"
-                        >
-
-                            <div class="panel-heading">
-
-                                <h3>Edit tools</h3>
-
-                                <span
-                                    id="activeToolLabel"
-                                    class="status-pill"
-                                >
-                                    Select
-                                </span>
-
-                            </div>
-
-
-                            <div class="tool-group">
-
-                                <button
-                                    type="button"
-                                    id="selectTool"
-                                    class="annotation-tool active"
-                                    data-tool="select"
-                                >
-                                    <span>↖</span>
-                                    Select
-                                </button>
-
-
-                                <button
-                                    type="button"
-                                    id="drawBoxTool"
-                                    class="annotation-tool"
-                                    data-tool="box"
-                                >
-                                    <span>▣</span>
-                                    Box
-                                </button>
-
-
-                                <button
-                                    type="button"
-                                    id="drawPolygonTool"
-                                    class="annotation-tool"
-                                    data-tool="polygon"
-                                >
-                                    <span>⬡</span>
-                                    Polygon
-                                </button>
-
-
-                                <button
-                                    type="button"
-                                    id="drawSegmentationTool"
-                                    class="annotation-tool"
-                                    data-tool="segmentation"
-                                >
-                                    <span>✣</span>
-                                    Segmentation
-                                </button>
-
-
-                                <button
-                                    type="button"
-                                    id="moveTool"
-                                    class="annotation-tool"
-                                    data-tool="move"
-                                >
-                                    <span>✥</span>
-                                    Move
-                                </button>
-
-
-                                <button
-                                    type="button"
-                                    id="editTool"
-                                    class="annotation-tool"
-                                    data-tool="edit"
-                                >
-                                    <span>✎</span>
-                                    Edit
-                                </button>
-
-                            </div>
-
-
-                            <div class="tool-group">
-
-                                <button
-                                    type="button"
-                                    id="deleteSelected"
-                                    class="annotation-tool danger"
-                                >
-                                    <span>🗑</span>
-                                    Delete
-                                </button>
-
-
-                                <button
-                                    type="button"
-                                    id="clearAnnotationsButton"
-                                    class="annotation-tool danger"
-                                >
-                                    <span>⌫</span>
-                                    Clear all
-                                </button>
-
-                            </div>
-
-
-                            <!-- AI -->
-                            <div class="panel-card">
-
-                                <h4>Annotation AI</h4>
-
-                                <p>
-                                    Automatically detect objects
-                                    in the current media.
-                                </p>
-
-                                <button
-                                    type="button"
-                                    id="autoAnnotate"
-                                    class="primary-button full-width"
-                                >
-                                    🤖 Run AI
-                                </button>
-
-                            </div>
-
-
-                            <!-- COUNTS -->
-                            <div class="annotation-counts">
-
-                                <div class="count-item">
-
-                                    <span>
-                                        Objects
-                                    </span>
-
-                                    <strong id="objectCount">
-                                        0
-                                    </strong>
-
-                                </div>
-
-
-                                <div class="count-item">
-
-                                    <span>
-                                        Selected
-                                    </span>
-
-                                    <strong id="selectedObject">
-                                        0
-                                    </strong>
-
-                                </div>
-
-                            </div>
-
-                        </aside>
-
-
-                        <!-- =====================================
-                             CENTER CANVAS
-                             ===================================== -->
-                        <section
-                            id="canvasPanel"
-                            class="annotation-canvas-panel"
-                        >
-
-                            <div
-                                id="mediaToolbar"
-                                class="media-toolbar"
-                            >
-
-                                <div class="media-toolbar-left">
-
-                                    <button
-                                        type="button"
-                                        id="previousFrameButton"
-                                        class="tool-button"
-                                        title="Previous frame"
-                                    >
-                                        ◀
-                                    </button>
-
-
-                                    <span
-                                        id="frameCounter"
-                                        class="frame-counter"
-                                    >
-                                        Frame 1
-                                    </span>
-
-
-                                    <button
-                                        type="button"
-                                        id="nextFrameButton"
-                                        class="tool-button"
-                                        title="Next frame"
-                                    >
-                                        ▶
-                                    </button>
-
-                                </div>
-
-
-                                <div class="media-toolbar-right">
-
-                                    <span
-                                        id="mediaTypeLabel"
-                                        class="status-pill"
-                                    >
-                                        Image
-                                    </span>
-
-                                    <button
-                                        type="button"
-                                        id="zoomOutButton"
-                                        class="tool-button"
-                                        title="Zoom out"
-                                    >
-                                        −
-                                    </button>
-
-                                    <span
-                                        id="zoomLabel"
-                                    >
-                                        100%
-                                    </span>
-
-                                    <button
-                                        type="button"
-                                        id="zoomInButton"
-                                        class="tool-button"
-                                        title="Zoom in"
-                                    >
-                                        +
-                                    </button>
-
-                                </div>
-
-                            </div>
-
-
-                            <div
-                                id="annotationCanvasContainer"
-                                class="annotation-canvas-container"
-                            >
-
-                                <canvas
-                                    id="annotationCanvas"
-                                    width="1280"
-                                    height="720"
-                                ></canvas>
-
-
-                                <div
-                                    id="mediaPlaceholder"
-                                    class="media-placeholder"
-                                >
-                                    <div class="media-placeholder-icon">
-                                        🖼️
-                                    </div>
-
-                                    <p>
-                                        Select a task to begin
-                                    </p>
-                                </div>
-
-
-                                <img
-                                    id="annotationImage"
-                                    class="annotation-media hidden"
-                                    alt="Annotation media"
-                                >
-
-
-                                <video
-                                    id="annotationVideo"
-                                    class="annotation-media hidden"
-                                    controls
-                                    playsinline
-                                ></video>
-
-                            </div>
-
-
-                            <!-- VIDEO CONTROLS -->
-                            <div
-                                id="videoControls"
-                                class="video-controls hidden"
-                            >
-
-                                <button
-                                    type="button"
-                                    id="videoPlayButton"
-                                    class="tool-button"
-                                >
-                                    ▶
-                                </button>
-
-                                <input
-                                    type="range"
-                                    id="videoTimeline"
-                                    min="0"
-                                    max="100"
-                                    value="0"
-                                >
-
-                                <span id="videoTime">
-                                    00:00 / 00:00
-                                </span>
-
-                            </div>
-
-                        </section>
-
-
-                        <!-- =====================================
-                             RIGHT ANNOTATION PANEL
-                             ===================================== -->
-                        <aside
-                            id="annotationTypePanel"
-                            class="annotation-right-panel"
-                        >
-
-                            <div class="panel-heading">
-
-                                <div>
-                                    <h3>Annotations</h3>
-
-                                    <p id="annotationPanelSubtitle">
-                                        Object properties
-                                    </p>
-                                </div>
-
-                                <span
-                                    id="annotationPanelCount"
-                                    class="status-pill"
-                                >
-                                    0
-                                </span>
-
-                            </div>
-
-
-                            <!-- MANUAL TYPE
-                                 Hidden for coworker roles -->
-                            <div
-                                id="manualAnnotationTypePanel"
-                                class="panel-card"
-                            >
-
-                                <label for="annotationType">
-                                    Annotation type
-                                </label>
-
-                                <select
-                                    id="annotationType"
-                                >
-                                    <option value="2d_box">
-                                        2D Box
-                                    </option>
-
-                                    <option value="polygon">
-                                        Polygon
-                                    </option>
-
-                                    <option value="segmentation">
-                                        Segmentation
-                                    </option>
-                                </select>
-
-                            </div>
-
-
-                            <!-- LABEL -->
-                            <div class="panel-card">
-
-                                <label for="annotationLabel">
-                                    Label
-                                </label>
-
-                                <input
-                                    type="text"
-                                    id="annotationLabel"
-                                    placeholder="Object label"
-                                >
-
-                            </div>
-
-
-                            <!-- CLASSIFICATION -->
-                            <div class="panel-card">
-
-                                <label for="annotationClassification">
-                                    Classification
-                                </label>
-
-                                <select
-                                    id="annotationClassification"
-                                >
-
-                                    <option value="">
-                                        Select classification
-                                    </option>
-
-                                    <option value="vehicle">
-                                        Vehicle
-                                    </option>
-
-                                    <option value="person">
-                                        Person
-                                    </option>
-
-                                    <option value="bicycle">
-                                        Bicycle
-                                    </option>
-
-                                    <option value="motorcycle">
-                                        Motorcycle
-                                    </option>
-
-                                    <option value="traffic_light">
-                                        Traffic light
-                                    </option>
-
-                                    <option value="traffic_sign">
-                                        Traffic sign
-                                    </option>
-
-                                    <option value="other">
-                                        Other
-                                    </option>
-
-                                </select>
-
-                            </div>
-
-
-                            <!-- OCCLUSION -->
-                            <div class="panel-card">
-
-                                <label for="annotationOcclusion">
-                                    Occlusion
-                                </label>
-
-                                <select
-                                    id="annotationOcclusion"
-                                >
-
-                                    <option value="none">
-                                        None
-                                    </option>
-
-                                    <option value="partial">
-                                        Partial
-                                    </option>
-
-                                    <option value="heavy">
-                                        Heavy
-                                    </option>
-
-                                    <option value="unknown">
-                                        Unknown
-                                    </option>
-
-                                </select>
-
-                            </div>
-
-
-                            <!-- TRUNCATION -->
-                            <div class="panel-card">
-
-                                <label for="annotationTruncation">
-                                    Truncation
-                                </label>
-
-                                <select
-                                    id="annotationTruncation"
-                                >
-
-                                    <option value="none">
-                                        None
-                                    </option>
-
-                                    <option value="partial">
-                                        Partial
-                                    </option>
-
-                                    <option value="heavy">
-                                        Heavy
-                                    </option>
-
-                                    <option value="unknown">
-                                        Unknown
-                                    </option>
-
-                                </select>
-
-                            </div>
-
-
-                            <!-- SCORE -->
-                            <div class="panel-card">
-
-                                <label for="annotationScore">
-                                    Confidence
-                                </label>
-
-                                <input
-                                    type="number"
-                                    id="annotationScore"
-                                    min="0"
-                                    max="1"
-                                    step="0.01"
-                                    value="1"
-                                >
-
-                            </div>
-
-
-                            <!-- CURRENT OBJECT -->
-                            <div
-                                id="selectedAnnotationInfo"
-                                class="selected-annotation-info"
-                            >
-
-                                <div class="empty-selection">
-                                    Select an annotation
-                                </div>
-
-                            </div>
-
-
-                            <!-- ANNOTATION LIST -->
-                            <div class="annotation-list-wrapper">
-
-                                <div class="list-heading">
-
-                                    <h4>
-                                        All annotations
-                                    </h4>
-
-                                </div>
-
-                                <div
-                                    id="annotationList"
-                                    class="annotation-list"
-                                >
-                                    <!-- annotation.js -->
-                                </div>
-
-                            </div>
-
-                        </aside>
-
-                    </div>
-
-                </div>
-
-            </section>
-
-
-            <!-- =================================================
-                 APPROVAL / PENDING PAGE
-                 ================================================= -->
-            <section
-                id="approvalPage"
-                class="app-section approval-page hidden"
+            <div
+              id="mediaToolbar"
+              class="media-toolbar"
             >
 
-                <div class="approval-card">
+              <div class="media-navigation">
 
-                    <div class="approval-icon">
-                        ⏳
-                    </div>
+                <button
+                  id="previousFrameButton"
+                  type="button"
+                  class="toolbar-button"
+                  title="Previous frame"
+                >
+                  ◀
+                </button>
 
-                    <h1>
-                        Wait for admin approval
-                    </h1>
 
-                    <p>
-                        Your account has been created successfully,
-                        but access to the workspace has not yet been
-                        approved.
-                    </p>
+                <span
+                  id="frameCounter"
+                  class="frame-counter"
+                >
+                  Frame 1
+                </span>
 
-                    <p>
-                        Please wait for an administrator to activate
-                        your account.
-                    </p>
 
-                    <button
-                        type="button"
-                        id="approvalRefreshButton"
-                        class="primary-button"
-                    >
-                        Check approval
-                    </button>
+                <button
+                  id="nextFrameButton"
+                  type="button"
+                  class="toolbar-button"
+                  title="Next frame"
+                >
+                  ▶
+                </button>
 
-                    <button
-                        type="button"
-                        id="approvalLogoutButton"
-                        class="secondary-button"
-                    >
-                        Sign out
-                    </button>
+              </div>
 
+
+              <div
+                id="mediaTypeLabel"
+                class="media-type-label"
+              >
+                Image
+              </div>
+
+
+              <div class="zoom-controls">
+
+                <button
+                  id="zoomOutButton"
+                  type="button"
+                  class="toolbar-button"
+                  title="Zoom out"
+                >
+                  −
+                </button>
+
+                <span id="zoomLabel">
+                  100%
+                </span>
+
+                <button
+                  id="zoomInButton"
+                  type="button"
+                  class="toolbar-button"
+                  title="Zoom in"
+                >
+                  +
+                </button>
+
+              </div>
+
+            </div>
+
+
+            <!-- CANVAS AREA -->
+
+            <div
+              id="annotationCanvasContainer"
+              class="annotation-canvas-container"
+            >
+
+              <div
+                id="mediaPlaceholder"
+                class="media-placeholder"
+              >
+
+                <div>
+                  🖼️
                 </div>
 
-            </section>
+                <p>
+                  Select a task to load media.
+                </p>
 
-        </main>
+              </div>
+
+
+              <img
+                id="annotationImage"
+                class="annotation-image hidden"
+                alt="Annotation media"
+                draggable="false"
+                hidden
+              >
+
+
+              <video
+                id="annotationVideo"
+                class="annotation-video hidden"
+                playsinline
+                preload="metadata"
+                hidden
+              ></video>
+
+
+              <canvas
+                id="annotationCanvas"
+                class="annotation-canvas"
+              ></canvas>
+
+            </div>
+
+
+            <!-- VIDEO CONTROLS -->
+
+            <div
+              id="videoControls"
+              class="video-controls hidden"
+              hidden
+            >
+
+              <button
+                id="videoPlayButton"
+                type="button"
+                class="toolbar-button"
+              >
+                ▶
+              </button>
+
+
+              <input
+                id="videoTimeline"
+                type="range"
+                min="0"
+                max="100"
+                value="0"
+                step="0.01"
+                aria-label="Video timeline"
+              >
+
+
+              <span id="videoTime">
+                00:00 / 00:00
+              </span>
+
+            </div>
+
+          </section>
+
+
+          <!-- RIGHT ANNOTATION PANEL -->
+
+          <aside
+            id="annotationTypePanel"
+            class="annotation-type-panel"
+          >
+
+            <div class="panel-header">
+
+              <div>
+
+                <h2>
+                  Annotation
+                </h2>
+
+                <p id="annotationPanelSubtitle">
+                  Select an object
+                </p>
+
+              </div>
+
+
+              <strong id="annotationPanelCount">
+                0
+              </strong>
+
+            </div>
+
+
+            <!-- MANUAL TYPE
+                 Hidden for coworker workflows.
+            -->
+
+            <div
+              id="manualAnnotationTypePanel"
+              class="manual-annotation-type-panel"
+            >
+
+              <div class="form-group">
+
+                <label for="annotationType">
+                  Annotation type
+                </label>
+
+                <select
+                  id="annotationType"
+                >
+
+                  <option value="box">
+                    Bounding box
+                  </option>
+
+                  <option value="polygon">
+                    Polygon
+                  </option>
+
+                  <option value="segmentation">
+                    Segmentation
+                  </option>
+
+                </select>
+
+              </div>
+
+            </div>
+
+
+            <!-- LABEL -->
+
+            <div class="annotation-form">
+
+              <div class="form-group">
+
+                <label for="annotationLabel">
+                  Label
+                </label>
+
+                <input
+                  id="annotationLabel"
+                  type="text"
+                  placeholder="Object label"
+                >
+
+              </div>
+
+
+              <div class="form-group">
+
+                <label for="annotationClassification">
+                  Classification
+                </label>
+
+                <select
+                  id="annotationClassification"
+                >
+
+                  <option value="">
+                    Select classification
+                  </option>
+
+                  <option value="vehicle">
+                    Vehicle
+                  </option>
+
+                  <option value="pedestrian">
+                    Pedestrian
+                  </option>
+
+                  <option value="cyclist">
+                    Cyclist
+                  </option>
+
+                  <option value="road">
+                    Road
+                  </option>
+
+                  <option value="sign">
+                    Sign
+                  </option>
+
+                  <option value="other">
+                    Other
+                  </option>
+
+                </select>
+
+              </div>
+
+
+              <div class="form-group">
+
+                <label for="annotationOcclusion">
+                  Occlusion
+                </label>
+
+                <select
+                  id="annotationOcclusion"
+                >
+
+                  <option value="none">
+                    None
+                  </option>
+
+                  <option value="partial">
+                    Partial
+                  </option>
+
+                  <option value="heavy">
+                    Heavy
+                  </option>
+
+                </select>
+
+              </div>
+
+
+              <div class="form-group">
+
+                <label for="annotationTruncation">
+                  Truncation
+                </label>
+
+                <select
+                  id="annotationTruncation"
+                >
+
+                  <option value="none">
+                    None
+                  </option>
+
+                  <option value="partial">
+                    Partial
+                  </option>
+
+                  <option value="heavy">
+                    Heavy
+                  </option>
+
+                </select>
+
+              </div>
+
+
+              <div class="form-group">
+
+                <label for="annotationScore">
+                  Confidence
+                </label>
+
+                <input
+                  id="annotationScore"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  placeholder="0.00 - 1.00"
+                >
+
+              </div>
+
+            </div>
+
+
+            <!-- SELECTED OBJECT -->
+
+            <div
+              id="selectedAnnotationInfo"
+              class="selected-annotation-info"
+            >
+
+              <div class="selected-info-empty">
+                Select an annotation to edit it.
+              </div>
+
+            </div>
+
+
+            <!-- LIST -->
+
+            <div class="annotation-list-section">
+
+              <div class="annotation-list-header">
+
+                <h3>
+                  Objects
+                </h3>
+
+              </div>
+
+
+              <div
+                id="annotationList"
+                class="annotation-list"
+              >
+              </div>
+
+            </div>
+
+          </aside>
+
+        </div>
+
+      </div>
 
     </section>
 
 
-    <!-- =========================================================
-         PROFILE MODAL
-         ========================================================= -->
-    <div
-        id="profileModal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="profileModalTitle"
+    <!-- ===================================================
+         APPROVAL PAGE
+         =================================================== -->
+
+    <section
+      id="approvalPage"
+      class="page approval-page hidden"
+      hidden
     >
 
-        <div class="modal-overlay"></div>
+      <div class="approval-card">
 
-        <div class="modal-content">
+        <div class="approval-icon">
+          ⏳
+        </div>
 
-            <div class="modal-header">
+        <h1>
+          Wait for admin approval
+        </h1>
 
-                <div>
-                    <h2 id="profileModalTitle">
-                        Profile
-                    </h2>
+        <p>
+          Your account has been created successfully,
+          but it is waiting for administrator approval.
+        </p>
 
-                    <p>
-                        Manage your account information
-                    </p>
-                </div>
-
-                <button
-                    type="button"
-                    id="closeProfileModal"
-                    class="modal-close"
-                    aria-label="Close"
-                >
-                    ×
-                </button>
-
-            </div>
+        <p>
+          You will be able to access the workspace once
+          an administrator activates your account.
+        </p>
 
 
-            <div class="profile-body">
+        <div class="approval-actions">
 
-                <div class="profile-avatar-section">
-
-                    <div
-                        id="profileAvatarPreview"
-                        class="profile-avatar-large"
-                    >
-                        👤
-                    </div>
-
-                    <label
-                        for="avatarInput"
-                        class="secondary-button"
-                    >
-                        Change picture
-                    </label>
-
-                    <input
-                        type="file"
-                        id="avatarInput"
-                        accept="image/*"
-                        class="hidden"
-                    >
-
-                </div>
+          <button
+            id="approvalRefreshButton"
+            type="button"
+            class="primary-button"
+          >
+            Check approval
+          </button>
 
 
-                <div class="form-group">
-
-                    <label for="profileFullName">
-                        Full name
-                    </label>
-
-                    <input
-                        type="text"
-                        id="profileFullName"
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="profileEmail">
-                        Email
-                    </label>
-
-                    <input
-                        type="email"
-                        id="profileEmail"
-                        disabled
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label>
-                        Role
-                    </label>
-
-                    <div
-                        id="profileRole"
-                        class="readonly-value"
-                    >
-                        Customer
-                    </div>
-
-                </div>
-
-
-                <div class="profile-actions">
-
-                    <button
-                        type="button"
-                        id="saveProfileButton"
-                        class="primary-button"
-                    >
-                        Save profile
-                    </button>
-
-                </div>
-
-            </div>
+          <button
+            id="approvalLogoutButton"
+            type="button"
+            class="secondary-button"
+          >
+            Sign out
+          </button>
 
         </div>
 
-    </div>
+      </div>
+
+    </section>
+
+  </main>
 
 
-    <!-- =========================================================
-         SETTINGS MODAL
-         ========================================================= -->
-    <div
-        id="settingsModal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settingsModalTitle"
-    >
+  <!-- =====================================================
+       PROFILE MODAL
+       ===================================================== -->
 
-        <div class="modal-overlay"></div>
+  <div
+    id="profileModal"
+    class="modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="profileModalTitle"
+    hidden
+  >
 
-        <div class="modal-content settings-modal">
+    <div class="modal-backdrop"></div>
 
-            <div class="modal-header">
+    <div class="modal-card">
 
-                <div>
-                    <h2 id="settingsModalTitle">
-                        Settings
-                    </h2>
+      <div class="modal-header">
 
-                    <p>
-                        Customize your workspace
-                    </p>
-                </div>
+        <div>
 
-                <button
-                    type="button"
-                    id="closeSettingsModal"
-                    class="modal-close"
-                    aria-label="Close"
-                >
-                    ×
-                </button>
+          <h2 id="profileModalTitle">
+            Profile
+          </h2>
 
-            </div>
-
-
-            <div class="settings-body">
-
-                <div class="settings-item">
-
-                    <div>
-                        <strong>Appearance</strong>
-
-                        <p>
-                            Choose how ANNOTATION AI looks.
-                        </p>
-                    </div>
-
-                    <select id="themeSelect">
-
-                        <option value="system">
-                            System
-                        </option>
-
-                        <option value="light">
-                            Light
-                        </option>
-
-                        <option value="dark">
-                            Dark
-                        </option>
-
-                    </select>
-
-                </div>
-
-
-                <div class="settings-item">
-
-                    <div>
-                        <strong>AI annotation</strong>
-
-                        <p>
-                            Use AI-assisted annotation tools.
-                        </p>
-                    </div>
-
-                    <label class="switch">
-
-                        <input
-                            type="checkbox"
-                            id="aiEnabledToggle"
-                            checked
-                        >
-
-                        <span class="slider"></span>
-
-                    </label>
-
-                </div>
-
-            </div>
+          <p>
+            Manage your profile information.
+          </p>
 
         </div>
 
+
+        <button
+          id="closeProfileModal"
+          type="button"
+          class="icon-button"
+          aria-label="Close profile"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <div class="modal-body">
+
+        <div class="profile-avatar-section">
+
+          <div
+            id="profileAvatarPreview"
+            class="profile-avatar-preview"
+          >
+            👤
+          </div>
+
+
+          <label
+            for="avatarInput"
+            class="secondary-button"
+          >
+            Change picture
+          </label>
+
+          <input
+            id="avatarInput"
+            type="file"
+            accept="image/*"
+            hidden
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="profileFullName">
+            Full name
+          </label>
+
+          <input
+            id="profileFullName"
+            type="text"
+            placeholder="Full name"
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="profileEmail">
+            Email
+          </label>
+
+          <input
+            id="profileEmail"
+            type="email"
+            readonly
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="profileRole">
+            Role
+          </label>
+
+          <input
+            id="profileRole"
+            type="text"
+            readonly
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="modal-footer">
+
+        <button
+          id="saveProfileButton"
+          type="button"
+          class="primary-button"
+        >
+          Save profile
+        </button>
+
+      </div>
+
     </div>
 
+  </div>
 
-    <!-- =========================================================
-         WORK HISTORY MODAL
-         ========================================================= -->
-    <div
-        id="workHistoryModal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="workHistoryModalTitle"
-    >
 
-        <div class="modal-overlay"></div>
+  <!-- =====================================================
+       SETTINGS MODAL
+       ===================================================== -->
 
-        <div class="modal-content large-modal">
+  <div
+    id="settingsModal"
+    class="modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="settingsModalTitle"
+    hidden
+  >
 
-            <div class="modal-header">
+    <div class="modal-backdrop"></div>
 
-                <div>
-                    <h2 id="workHistoryModalTitle">
-                        Work history
-                    </h2>
+    <div class="modal-card">
 
-                    <p>
-                        Your completed and submitted work
-                    </p>
-                </div>
+      <div class="modal-header">
 
-                <button
-                    type="button"
-                    id="closeWorkHistoryModal"
-                    class="modal-close"
-                    aria-label="Close"
-                >
-                    ×
-                </button>
+        <div>
 
-            </div>
+          <h2 id="settingsModalTitle">
+            Settings
+          </h2>
 
+          <p>
+            Customize your workspace.
+          </p>
+
+        </div>
+
+
+        <button
+          id="closeSettingsModal"
+          type="button"
+          class="icon-button"
+          aria-label="Close settings"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <div class="modal-body">
+
+        <div class="settings-row">
+
+          <div>
+
+            <h3>
+              Appearance
+            </h3>
+
+            <p>
+              Choose light or dark workspace appearance.
+            </p>
+
+          </div>
+
+
+          <select
+            id="themeSelect"
+          >
+
+            <option value="system">
+              System
+            </option>
+
+            <option value="light">
+              Light
+            </option>
+
+            <option value="dark">
+              Dark
+            </option>
+
+          </select>
+
+        </div>
+
+
+        <div class="settings-row">
+
+          <div>
+
+            <h3>
+              Annotation AI
+            </h3>
+
+            <p>
+              Allow automatic AI annotation tools.
+            </p>
+
+          </div>
+
+
+          <label class="toggle-switch">
+
+            <input
+              id="aiEnabledToggle"
+              type="checkbox"
+              checked
+            >
+
+            <span class="toggle-slider"></span>
+
+          </label>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================================
+       WORK HISTORY MODAL
+       ===================================================== -->
+
+  <div
+    id="workHistoryModal"
+    class="modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="workHistoryTitle"
+    hidden
+  >
+
+    <div class="modal-backdrop"></div>
+
+    <div class="modal-card modal-large">
+
+      <div class="modal-header">
+
+        <div>
+
+          <h2 id="workHistoryTitle">
+            Work history
+          </h2>
+
+          <p>
+            Your completed work and payment history.
+          </p>
+
+        </div>
+
+
+        <button
+          id="closeWorkHistoryModal"
+          type="button"
+          class="icon-button"
+          aria-label="Close work history"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <div class="modal-body">
+
+        <div
+          id="workHistorySummary"
+          class="history-summary"
+        >
+        </div>
+
+
+        <div
+          id="workHistoryList"
+          class="work-history-list"
+        >
+
+          <div class="empty-state">
+            Loading work history...
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================================
+       SKIP TASK MODAL
+       ===================================================== -->
+
+  <div
+    id="skipModal"
+    class="modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="skipModalTitle"
+    hidden
+  >
+
+    <div class="modal-backdrop"></div>
+
+    <div class="modal-card">
+
+      <div class="modal-header">
+
+        <div>
+
+          <h2 id="skipModalTitle">
+            Skip task
+          </h2>
+
+          <p>
+            Tell us why this task cannot be completed.
+          </p>
+
+        </div>
+
+
+        <button
+          id="closeSkipModal"
+          type="button"
+          class="icon-button"
+          aria-label="Close skip dialog"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <div class="modal-body">
+
+        <div class="form-group">
+
+          <label for="skipReason">
+            Reason
+          </label>
+
+          <select id="skipReason">
+
+            <option value="">
+              Select a reason
+            </option>
+
+            <option value="bad_media">
+              Bad or unusable media
+            </option>
+
+            <option value="missing_data">
+              Missing data
+            </option>
+
+            <option value="wrong_task_type">
+              Wrong task type
+            </option>
+
+            <option value="technical_issue">
+              Technical issue
+            </option>
+
+            <option value="cannot_annotate">
+              Cannot annotate
+            </option>
+
+            <option value="other">
+              Other
+            </option>
+
+          </select>
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="skipReasonDetails">
+            Additional details
+          </label>
+
+          <textarea
+            id="skipReasonDetails"
+            rows="4"
+            placeholder="Add more details if needed"
+          ></textarea>
+
+        </div>
+
+      </div>
+
+
+      <div class="modal-footer">
+
+        <button
+          id="cancelSkipTask"
+          type="button"
+          class="secondary-button"
+        >
+          Cancel
+        </button>
+
+
+        <button
+          id="confirmSkipTask"
+          type="button"
+          class="danger-button"
+        >
+          Skip task
+        </button>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================================
+       CUSTOMER UPLOAD PANEL
+       ===================================================== -->
+
+  <div
+    id="customerUploadPanel"
+    class="modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="customerUploadTitle"
+    hidden
+  >
+
+    <div class="modal-backdrop"></div>
+
+    <div class="modal-card">
+
+      <div class="modal-header">
+
+        <div>
+
+          <h2 id="customerUploadTitle">
+            Upload customer media
+          </h2>
+
+          <p>
+            Upload an image or video to create a task.
+          </p>
+
+        </div>
+
+
+        <button
+          id="closeUploadPanel"
+          type="button"
+          class="icon-button"
+          aria-label="Close upload panel"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <div class="modal-body">
+
+        <label
+          for="customerMediaInput"
+          class="upload-drop-zone"
+        >
+
+          <div class="upload-icon">
+            ⬆️
+          </div>
+
+          <h3>
+            Select image or video
+          </h3>
+
+          <p>
+            Supported image and video files
+          </p>
+
+          <span class="secondary-button">
+            Choose file
+          </span>
+
+        </label>
+
+
+        <input
+          id="customerMediaInput"
+          type="file"
+          accept="image/*,video/*"
+          hidden
+        >
+
+
+        <div
+          id="uploadProgress"
+          class="upload-progress hidden"
+          hidden
+        >
+
+          <div
+            class="progress-track"
+          >
 
             <div
-                id="workHistoryList"
-                class="work-history-list"
-            >
-                <!-- history.js -->
-            </div>
+              id="uploadProgressBar"
+              class="progress-bar"
+            ></div>
+
+          </div>
+
+
+          <span id="uploadProgressText">
+            Preparing upload...
+          </span>
 
         </div>
 
+      </div>
+
     </div>
 
-
-    <!-- =========================================================
-         SKIP TASK MODAL
-         ========================================================= -->
-    <div
-        id="skipModal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="skipModalTitle"
-    >
-
-        <div class="modal-overlay"></div>
-
-        <div class="modal-content small-modal">
-
-            <div class="modal-header">
-
-                <div>
-                    <h2 id="skipModalTitle">
-                        Skip task
-                    </h2>
-
-                    <p>
-                        Tell us why this task cannot be completed.
-                    </p>
-                </div>
-
-                <button
-                    type="button"
-                    id="closeSkipModal"
-                    class="modal-close"
-                    aria-label="Close"
-                >
-                    ×
-                </button>
-
-            </div>
+  </div>
 
 
-            <div class="form-group">
+  <!-- =====================================================
+       ADMIN CENTER
+       ===================================================== -->
 
-                <label for="skipReason">
-                    Reason
-                </label>
+  <div
+    id="adminModal"
+    class="modal admin-modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="adminCenterTitle"
+    hidden
+  >
 
-                <select id="skipReason">
+    <div class="admin-fullscreen-modal">
 
-                    <option value="">
-                        Select a reason
-                    </option>
+      <!-- ADMIN HEADER -->
 
-                    <option value="bad_media">
-                        Bad or unusable media
-                    </option>
+      <header class="admin-header">
 
-                    <option value="wrong_task">
-                        Wrong task type
-                    </option>
+        <div class="admin-header-left">
 
-                    <option value="not_annotatable">
-                        Cannot be annotated
-                    </option>
+          <div class="admin-brand-icon">
+            🛡️
+          </div>
 
-                    <option value="technical_issue">
-                        Technical issue
-                    </option>
+          <div>
 
-                    <option value="other">
-                        Other
-                    </option>
+            <h1 id="adminCenterTitle">
+              Admin Center
+            </h1>
 
-                </select>
+            <p>
+              Manage users, work, roles and payments.
+            </p>
 
-            </div>
-
-
-            <div class="form-group">
-
-                <label for="skipReasonDetails">
-                    Details
-                </label>
-
-                <textarea
-                    id="skipReasonDetails"
-                    rows="4"
-                    placeholder="Explain the problem..."
-                ></textarea>
-
-            </div>
-
-
-            <div class="modal-actions">
-
-                <button
-                    type="button"
-                    id="cancelSkipTask"
-                    class="secondary-button"
-                >
-                    Cancel
-                </button>
-
-                <button
-                    type="button"
-                    id="confirmSkipTask"
-                    class="danger-button"
-                >
-                    Skip task
-                </button>
-
-            </div>
+          </div>
 
         </div>
 
-    </div>
 
+        <button
+          id="closeAdminModal"
+          type="button"
+          class="icon-button admin-close-button"
+          aria-label="Close admin center"
+        >
+          ×
+        </button>
+
+      </header>
+
+
+      <!-- ADMIN BODY -->
+
+      <div class="admin-layout">
+
+
+        <!-- SIDEBAR -->
+
+        <aside
+          id="adminSidebar"
+          class="admin-sidebar"
+        >
+
+          <button
+            type="button"
+            class="admin-tab active"
+            data-admin-tab="overview"
+            data-admin-page="overview"
+          >
+            <span>
+              📊
+            </span>
+
+            <span>
+              Overview
+            </span>
+          </button>
+
+
+          <button
+            type="button"
+            class="admin-tab"
+            data-admin-tab="users"
+            data-admin-page="users"
+          >
+            <span>
+              👥
+            </span>
+
+            <span>
+              Users
+            </span>
+          </button>
+
+
+          <button
+            type="button"
+            class="admin-tab"
+            data-admin-tab="coworkers"
+            data-admin-page="coworkers"
+          >
+            <span>
+              🧑‍💻
+            </span>
+
+            <span>
+              Coworkers
+            </span>
+          </button>
+
+
+          <button
+            type="button"
+            class="admin-tab"
+            data-admin-tab="tasks"
+            data-admin-page="tasks"
+          >
+            <span>
+              📋
+            </span>
+
+            <span>
+              Tasks
+            </span>
+          </button>
+
+
+          <button
+            type="button"
+            class="admin-tab"
+            data-admin-tab="payments"
+            data-admin-page="payments"
+          >
+            <span>
+              💰
+            </span>
+
+            <span>
+              Payments
+            </span>
+          </button>
 
-    <!-- =========================================================
-         ADMIN CENTER
-         ========================================================= -->
-    <div
-        id="adminModal"
-        class="admin-fullscreen-modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="adminCenterTitle"
-    >
-
-        <div class="admin-fullscreen">
-
-            <!-- ADMIN HEADER -->
-            <header class="admin-header">
-
-                <div class="admin-header-brand">
-
-                    <div class="admin-brand-icon">
-                        🛡️
-                    </div>
-
-                    <div>
-
-                        <h1 id="adminCenterTitle">
-                            Admin Center
-                        </h1>
-
-                        <p>
-                            Manage users, tasks, payments and workflow
-                        </p>
-
-                    </div>
-
-                </div>
-
-
-                <button
-                    type="button"
-                    id="closeAdminModal"
-                    class="admin-close-button"
-                    aria-label="Close admin center"
-                >
-                    ×
-                </button>
-
-            </header>
-
-
-            <!-- ADMIN BODY -->
-            <div class="admin-layout">
-
-                <!-- ADMIN SIDEBAR -->
-                <aside
-                    id="adminSidebar"
-                    class="admin-sidebar"
-                >
-
-                    <button
-                        type="button"
-                        class="admin-tab active"
-                        data-admin-tab="dashboard"
-                    >
-                        <span>📊</span>
-                        Dashboard
-                    </button>
-
-
-                    <button
-                        type="button"
-                        class="admin-tab"
-                        data-admin-tab="users"
-                    >
-                        <span>👥</span>
-                        Users
-                    </button>
-
-
-                    <button
-                        type="button"
-                        class="admin-tab"
-                        data-admin-tab="coworkers"
-                    >
-                        <span>🧑‍💻</span>
-                        Coworkers
-                    </button>
-
-
-                    <button
-                        type="button"
-                        class="admin-tab"
-                        data-admin-tab="tasks"
-                    >
-                        <span>📋</span>
-                        Tasks
-                    </button>
 
+          <button
+            type="button"
+            class="admin-tab"
+            data-admin-tab="activity"
+            data-admin-page="activity"
+          >
+            <span>
+              📝
+            </span>
 
-                    <button
-                        type="button"
-                        class="admin-tab"
-                        data-admin-tab="payments"
-                    >
-                        <span>💰</span>
-                        Payments
-                    </button>
+            <span>
+              Activity
+            </span>
+          </button>
 
 
-                    <button
-                        type="button"
-                        class="admin-tab"
-                        data-admin-tab="activity"
-                    >
-                        <span>🕘</span>
-                        Activity
-                    </button>
+          <button
+            type="button"
+            class="admin-tab"
+            data-admin-tab="exports"
+            data-admin-page="exports"
+          >
+            <span>
+              📤
+            </span>
 
+            <span>
+              Export
+            </span>
+          </button>
 
-                    <button
-                        type="button"
-                        class="admin-tab"
-                        data-admin-tab="export"
-                    >
-                        <span>📤</span>
-                        Export
-                    </button>
+        </aside>
 
 
-                    <button
-                        type="button"
-                        class="admin-tab"
-                        data-admin-tab="settings"
-                    >
-                        <span>⚙️</span>
-                        Admin settings
-                    </button>
+        <!-- ADMIN CONTENT -->
 
-                </aside>
+        <section
+          id="adminContent"
+          class="admin-content"
+        >
 
 
-                <!-- ADMIN CONTENT -->
-                <section
-                    id="adminContent"
-                    class="admin-content"
-                >
+          <!-- =============================================
+               OVERVIEW
+               ============================================= -->
 
+          <div
+            class="admin-page"
+            data-admin-page="overview"
+          >
 
-                    <!-- =========================================
-                         ADMIN DASHBOARD
-                         ========================================= -->
-                    <div
-                        class="admin-page active"
-                        data-admin-page="dashboard"
-                    >
+            <div class="admin-page-header">
 
-                        <div class="admin-page-header">
+              <div>
 
-                            <div>
-                                <h2>
-                                    Dashboard
-                                </h2>
-
-                                <p>
-                                    Overview of the annotation
-                                    workspace.
-                                </p>
-                            </div>
-
-                        </div>
-
-
-                        <div
-                            id="adminStats"
-                            class="admin-stats"
-                        >
-
-                            <div class="admin-stat-card">
-
-                                <span>
-                                    Users
-                                </span>
-
-                                <strong id="adminUserCount">
-                                    0
-                                </strong>
-
-                            </div>
-
-
-                            <div class="admin-stat-card">
-
-                                <span>
-                                    Active users
-                                </span>
-
-                                <strong id="adminActiveUserCount">
-                                    0
-                                </strong>
-
-                            </div>
-
-
-                            <div class="admin-stat-card">
-
-                                <span>
-                                    Available tasks
-                                </span>
-
-                                <strong id="adminAvailableTaskCount">
-                                    0
-                                </strong>
-
-                            </div>
-
-
-                            <div class="admin-stat-card">
-
-                                <span>
-                                    Completed tasks
-                                </span>
-
-                                <strong id="adminCompletedTaskCount">
-                                    0
-                                </strong>
-
-                            </div>
-
-
-                            <div class="admin-stat-card">
-
-                                <span>
-                                    Pending payments
-                                </span>
-
-                                <strong id="adminPendingPaymentCount">
-                                    0
-                                </strong>
-
-                            </div>
-
-
-                            <div class="admin-stat-card">
-
-                                <span>
-                                    Total pay
-                                </span>
-
-                                <strong id="adminTotalPay">
-                                    0
-                                </strong>
-
-                            </div>
-
-                        </div>
-
-
-                        <div class="admin-dashboard-grid">
-
-                            <div class="admin-panel">
-
-                                <div class="admin-panel-header">
-
-                                    <h3>
-                                        Recent activity
-                                    </h3>
-
-                                </div>
-
-                                <div
-                                    id="adminRecentActivity"
-                                    class="admin-list"
-                                >
-                                </div>
-
-                            </div>
-
-
-                            <div class="admin-panel">
-
-                                <div class="admin-panel-header">
-
-                                    <h3>
-                                        Task progress
-                                    </h3>
-
-                                </div>
-
-                                <div
-                                    id="adminTaskProgress"
-                                    class="admin-list"
-                                >
-                                </div>
-
-                            </div>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         USERS
-                         ========================================= -->
-                    <div
-                        class="admin-page"
-                        data-admin-page="users"
-                    >
-
-                        <div class="admin-page-header">
-
-                            <div>
-                                <h2>
-                                    All users
-                                </h2>
-
-                                <p>
-                                    View roles, account status,
-                                    joined time and login/logout
-                                    activity.
-                                </p>
-                            </div>
-
-
-                            <button
-                                type="button"
-                                id="refreshUsersButton"
-                                class="secondary-button"
-                            >
-                                ↻ Refresh
-                            </button>
-
-                        </div>
-
-
-                        <div class="admin-table-wrapper">
-
-                            <table class="admin-table">
-
-                                <thead>
-
-                                    <tr>
-                                        <th>User</th>
-                                        <th>Role</th>
-                                        <th>Status</th>
-                                        <th>Joined</th>
-                                        <th>Last login</th>
-                                        <th>Last seen</th>
-                                        <th>Actions</th>
-                                    </tr>
-
-                                </thead>
-
-                                <tbody id="usersList">
-                                </tbody>
-
-                            </table>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         COWORKERS
-                         ========================================= -->
-                    <div
-                        class="admin-page"
-                        data-admin-page="coworkers"
-                    >
-
-                        <div class="admin-page-header">
-
-                            <div>
-                                <h2>
-                                    Coworkers & staff
-                                </h2>
-
-                                <p>
-                                    Create accounts, change roles
-                                    and manage annotation access.
-                                </p>
-                            </div>
-
-
-                            <button
-                                type="button"
-                                id="createCoworkerButton"
-                                class="primary-button"
-                            >
-                                + Create account
-                            </button>
-
-                        </div>
-
-
-                        <div class="admin-panel">
-
-                            <div class="admin-panel-header">
-
-                                <h3>
-                                    Coworker accounts
-                                </h3>
-
-                            </div>
-
-
-                            <div
-                                id="coworkersList"
-                                class="admin-list"
-                            >
-                            </div>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         TASKS
-                         ========================================= -->
-                    <div
-                        class="admin-page"
-                        data-admin-page="tasks"
-                    >
-
-                        <div class="admin-page-header">
-
-                            <div>
-                                <h2>
-                                    Tasks
-                                </h2>
-
-                                <p>
-                                    Create, assign, reassign and
-                                    monitor annotation work.
-                                </p>
-                            </div>
-
-
-                            <button
-                                type="button"
-                                id="createTaskButton"
-                                class="primary-button"
-                            >
-                                + Create task
-                            </button>
-
-                        </div>
-
-
-                        <div class="admin-table-wrapper">
-
-                            <table class="admin-table">
-
-                                <thead>
-
-                                    <tr>
-                                        <th>Task</th>
-                                        <th>Work type</th>
-                                        <th>Role</th>
-                                        <th>Status</th>
-                                        <th>Assigned to</th>
-                                        <th>Duration</th>
-                                        <th>Pay</th>
-                                        <th>Actions</th>
-                                    </tr>
-
-                                </thead>
-
-                                <tbody id="adminTasksList">
-                                </tbody>
-
-                            </table>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         PAYMENTS
-                         ========================================= -->
-                    <div
-                        class="admin-page"
-                        data-admin-page="payments"
-                    >
-
-                        <div class="admin-page-header">
-
-                            <div>
-                                <h2>
-                                    Payments
-                                </h2>
-
-                                <p>
-                                    Set rates, approve work and
-                                    release payments.
-                                </p>
-                            </div>
-
-                        </div>
-
-
-                        <div class="admin-dashboard-grid">
-
-                            <div class="admin-panel">
-
-                                <div class="admin-panel-header">
-
-                                    <h3>
-                                        Pay rates
-                                    </h3>
-
-                                </div>
-
-                                <div
-                                    id="payRatesList"
-                                    class="admin-list"
-                                >
-                                </div>
-
-                            </div>
-
-
-                            <div class="admin-panel">
-
-                                <div class="admin-panel-header">
-
-                                    <h3>
-                                        Payment records
-                                    </h3>
-
-                                </div>
-
-                                <div
-                                    id="paymentsList"
-                                    class="admin-list"
-                                >
-                                </div>
-
-                            </div>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         ACTIVITY
-                         ========================================= -->
-                    <div
-                        class="admin-page"
-                        data-admin-page="activity"
-                    >
-
-                        <div class="admin-page-header">
-
-                            <div>
-                                <h2>
-                                    Activity
-                                </h2>
-
-                                <p>
-                                    Account, task and workflow events.
-                                </p>
-                            </div>
-
-                        </div>
-
-
-                        <div
-                            id="activityList"
-                            class="admin-activity-list"
-                        >
-                        </div>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         EXPORT
-                         ========================================= -->
-                    <div
-                        class="admin-page"
-                        data-admin-page="export"
-                    >
-
-                        <div class="admin-page-header">
-
-                            <div>
-                                <h2>
-                                    Export work
-                                </h2>
-
-                                <p>
-                                    Export completed annotation
-                                    work for customers or import
-                                    into Google Sheets.
-                                </p>
-                            </div>
-
-                        </div>
-
-
-                        <div class="admin-export-grid">
-
-                            <div class="admin-export-card">
-
-                                <div class="admin-export-icon">
-                                    📋
-                                </div>
-
-                                <h3>
-                                    CSV / Google Sheets
-                                </h3>
-
-                                <p>
-                                    Copy or export annotation data
-                                    in CSV format. CSV files can be
-                                    opened directly in Google Sheets.
-                                </p>
-
-                                <button
-                                    type="button"
-                                    id="copyAdminCSV"
-                                    class="primary-button"
-                                >
-                                    Copy CSV
-                                </button>
-
-                            </div>
-
-
-                            <div class="admin-export-card">
-
-                                <div class="admin-export-icon">
-                                    🌐
-                                </div>
-
-                                <h3>
-                                    HTML export
-                                </h3>
-
-                                <p>
-                                    Generate a customer-friendly
-                                    HTML export of completed work.
-                                </p>
-
-                                <button
-                                    type="button"
-                                    id="downloadAdminHTML"
-                                    class="primary-button"
-                                >
-                                    Download HTML
-                                </button>
-
-                            </div>
-
-                        </div>
-
-
-                        <textarea
-                            id="adminExportOutput"
-                            class="admin-export-output"
-                            readonly
-                            placeholder="Export data will appear here..."
-                        ></textarea>
-
-                    </div>
-
-
-                    <!-- =========================================
-                         ADMIN SETTINGS
-                         ========================================= -->
-                    <div
-                        class="admin-page"
-                        data-admin-page="settings"
-                    >
-
-                        <div class="admin-page-header">
-
-                            <div>
-                                <h2>
-                                    Admin settings
-                                </h2>
-
-                                <p>
-                                    Workspace administration settings.
-                                </p>
-                            </div>
-
-                        </div>
-
-
-                        <div class="admin-panel">
-
-                            <div class="admin-setting-row">
-
-                                <div>
-
-                                    <strong>
-                                        Default customer access
-                                    </strong>
-
-                                    <p>
-                                        New customer accounts remain
-                                        inactive until approved.
-                                    </p>
-
-                                </div>
-
-                                <span class="status-pill">
-                                    Admin controlled
-                                </span>
-
-                            </div>
-
-
-                            <div class="admin-setting-row">
-
-                                <div>
-
-                                    <strong>
-                                        Worker role routing
-                                    </strong>
-
-                                    <p>
-                                        2D Box → coworker_2d_box,
-                                        Polygon → coworker_polygon,
-                                        Segmentation →
-                                        coworker_segmentation.
-                                    </p>
-
-                                </div>
-
-                                <span class="status-pill">
-                                    Enabled
-                                </span>
-
-                            </div>
-
-
-                            <div class="admin-setting-row">
-
-                                <div>
-
-                                    <strong>
-                                        Annotation persistence
-                                    </strong>
-
-                                    <p>
-                                        Annotation progress is saved
-                                        against the task so reviewers
-                                        can continue previous work.
-                                    </p>
-
-                                </div>
-
-                                <span class="status-pill">
-                                    Enabled
-                                </span>
-
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                </section>
-
-            </div>
-
-        </div>
-
-    </div>
-
-
-    <!-- =========================================================
-         CREATE TASK MODAL
-         ========================================================= -->
-    <div
-        id="createTaskModal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="createTaskModalTitle"
-    >
-
-        <div class="modal-overlay"></div>
-
-        <div class="modal-content large-modal">
-
-            <div class="modal-header">
-
-                <div>
-                    <h2 id="createTaskModalTitle">
-                        Create task
-                    </h2>
-
-                    <p>
-                        Upload media and create annotation work.
-                    </p>
-                </div>
-
-                <button
-                    type="button"
-                    id="closeCreateTaskModal"
-                    class="modal-close"
-                    aria-label="Close"
-                >
-                    ×
-                </button>
-
-            </div>
-
-
-            <form id="createTaskForm">
-
-                <div class="form-grid">
-
-                    <div class="form-group">
-
-                        <label for="taskTitle">
-                            Task title
-                        </label>
-
-                        <input
-                            type="text"
-                            id="taskTitle"
-                            required
-                        >
-
-                    </div>
-
-
-                    <div class="form-group">
-
-                        <label for="taskShape">
-                            Work type
-                        </label>
-
-                        <select
-                            id="taskShape"
-                            required
-                        >
-
-                            <option value="2d_box">
-                                2D Box
-                            </option>
-
-                            <option value="polygon">
-                                Polygon
-                            </option>
-
-                            <option value="segmentation">
-                                Segmentation
-                            </option>
-
-                        </select>
-
-                    </div>
-
-
-                    <div class="form-group">
-
-                        <label for="taskDuration">
-                            Expected duration
-                        </label>
-
-                        <input
-                            type="number"
-                            id="taskDuration"
-                            min="1"
-                            value="30"
-                            required
-                        >
-
-                    </div>
-
-
-                    <div class="form-group">
-
-                        <label for="taskPay">
-                            Pay amount
-                        </label>
-
-                        <input
-                            type="number"
-                            id="taskPay"
-                            min="0"
-                            step="0.01"
-                            value="0"
-                            required
-                        >
-
-                    </div>
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="taskMediaInput">
-                        Media
-                    </label>
-
-                    <input
-                        type="file"
-                        id="taskMediaInput"
-                        accept="image/*,video/*"
-                        required
-                    >
-
-                    <small>
-                        Upload an image or video for the task.
-                    </small>
-
-                </div>
-
-
-                <div class="modal-actions">
-
-                    <button
-                        type="button"
-                        id="cancelCreateTask"
-                        class="secondary-button"
-                    >
-                        Cancel
-                    </button>
-
-                    <button
-                        type="submit"
-                        class="primary-button"
-                    >
-                        Create task
-                    </button>
-
-                </div>
-
-            </form>
-
-        </div>
-
-    </div>
-
-
-    <!-- =========================================================
-         CREATE COWORKER / STAFF MODAL
-         ========================================================= -->
-    <div
-        id="createCoworkerModal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="createCoworkerModalTitle"
-    >
-
-        <div class="modal-overlay"></div>
-
-        <div class="modal-content">
-
-            <div class="modal-header">
-
-                <div>
-                    <h2 id="createCoworkerModalTitle">
-                        Create account
-                    </h2>
-
-                    <p>
-                        Create coworker, reviewer, staff or admin
-                        accounts.
-                    </p>
-                </div>
-
-                <button
-                    type="button"
-                    id="closeCreateCoworkerModal"
-                    class="modal-close"
-                    aria-label="Close"
-                >
-                    ×
-                </button>
-
-            </div>
-
-
-            <form id="createCoworkerForm">
-
-                <div class="form-group">
-
-                    <label for="newWorkerName">
-                        Full name
-                    </label>
-
-                    <input
-                        type="text"
-                        id="newWorkerName"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="newWorkerEmail">
-                        Email
-                    </label>
-
-                    <input
-                        type="email"
-                        id="newWorkerEmail"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="newWorkerPassword">
-                        Temporary password
-                    </label>
-
-                    <input
-                        type="password"
-                        id="newWorkerPassword"
-                        minlength="6"
-                        required
-                    >
-
-                </div>
-
-
-                <div class="form-group">
-
-                    <label for="newWorkerRole">
-                        Role
-                    </label>
-
-                    <select id="newWorkerRole">
-
-                        <option value="coworker_2d_box">
-                            Coworker — 2D Box
-                        </option>
-
-                        <option value="coworker_polygon">
-                            Coworker — Polygon
-                        </option>
-
-                        <option value="coworker_segmentation">
-                            Coworker — Segmentation
-                        </option>
-
-                        <option value="reviewer">
-                            Reviewer
-                        </option>
-
-                        <option value="staff">
-                            Staff
-                        </option>
-
-                        <option value="admin">
-                            Admin
-                        </option>
-
-                    </select>
-
-                </div>
-
-
-                <div class="modal-actions">
-
-                    <button
-                        type="button"
-                        id="cancelCreateCoworker"
-                        class="secondary-button"
-                    >
-                        Cancel
-                    </button>
-
-                    <button
-                        type="submit"
-                        class="primary-button"
-                    >
-                        Create account
-                    </button>
-
-                </div>
-
-            </form>
-
-        </div>
-
-    </div>
-
-
-    <!-- =========================================================
-         CUSTOMER UPLOAD PANEL
-         ========================================================= -->
-    <div
-        id="customerUploadPanel"
-        class="upload-panel hidden"
-    >
-
-        <div class="upload-panel-content">
-
-            <div class="upload-panel-header">
-
-                <div>
-                    <h2>
-                        Upload media
-                    </h2>
-
-                    <p>
-                        Add customer annotation work.
-                    </p>
-                </div>
-
-                <button
-                    type="button"
-                    id="closeUploadPanel"
-                    class="modal-close"
-                    aria-label="Close"
-                >
-                    ×
-                </button>
-
-            </div>
-
-
-            <div class="upload-dropzone">
-
-                <div class="upload-icon">
-                    ☁️
-                </div>
-
-                <h3>
-                    Choose image or video
-                </h3>
+                <h2>
+                  Dashboard overview
+                </h2>
 
                 <p>
-                    Upload media to create a new task.
+                  Monitor the workspace.
                 </p>
 
-                <label
-                    for="customerMediaInput"
-                    class="primary-button"
-                >
-                    Choose file
-                </label>
+              </div>
 
-                <input
-                    type="file"
-                    id="customerMediaInput"
-                    accept="image/*,video/*"
-                    class="hidden"
-                >
+            </div>
+
+
+            <div class="admin-stats-grid">
+
+              <div class="admin-stat-card">
+
+                <span class="admin-stat-icon">
+                  👥
+                </span>
+
+                <div>
+
+                  <span>
+                    Total users
+                  </span>
+
+                  <strong id="adminTotalUsers">
+                    0
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div class="admin-stat-card">
+
+                <span class="admin-stat-icon">
+                  🟢
+                </span>
+
+                <div>
+
+                  <span>
+                    Active users
+                  </span>
+
+                  <strong id="adminActiveUsers">
+                    0
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div class="admin-stat-card">
+
+                <span class="admin-stat-icon">
+                  📋
+                </span>
+
+                <div>
+
+                  <span>
+                    Total tasks
+                  </span>
+
+                  <strong id="adminTotalTasks">
+                    0
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div class="admin-stat-card">
+
+                <span class="admin-stat-icon">
+                  ⏳
+                </span>
+
+                <div>
+
+                  <span>
+                    Pending tasks
+                  </span>
+
+                  <strong id="adminPendingTasks">
+                    0
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div class="admin-stat-card">
+
+                <span class="admin-stat-icon">
+                  💰
+                </span>
+
+                <div>
+
+                  <span>
+                    Unpaid
+                  </span>
+
+                  <strong id="adminUnpaidAmount">
+                    0
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div class="admin-stat-card">
+
+                <span class="admin-stat-icon">
+                  ✅
+                </span>
+
+                <div>
+
+                  <span>
+                    Completed
+                  </span>
+
+                  <strong id="adminCompletedTasks">
+                    0
+                  </strong>
+
+                </div>
+
+              </div>
+
+            </div>
+
+
+            <div class="admin-dashboard-grid">
+
+              <div class="admin-panel">
+
+                <div class="admin-panel-header">
+
+                  <h3>
+                    Recent activity
+                  </h3>
+
+                </div>
+
+                <div id="adminRecentActivity">
+                </div>
+
+              </div>
+
+
+              <div class="admin-panel">
+
+                <div class="admin-panel-header">
+
+                  <h3>
+                    Task progress
+                  </h3>
+
+                </div>
+
+                <div id="adminTaskProgress">
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <!-- =============================================
+               USERS
+               ============================================= -->
+
+          <div
+            class="admin-page hidden"
+            data-admin-page="users"
+            hidden
+          >
+
+            <div class="admin-page-header">
+
+              <div>
+
+                <h2>
+                  Users
+                </h2>
+
+                <p>
+                  Manage accounts, roles and access.
+                </p>
+
+              </div>
+
+
+              <button
+                id="refreshUsersButton"
+                type="button"
+                class="secondary-button"
+              >
+                ↻ Refresh
+              </button>
 
             </div>
 
 
             <div
-                id="uploadProgress"
-                class="upload-progress hidden"
+              id="usersList"
+              class="admin-table-container"
             >
+            </div>
 
-                <div
-                    id="uploadProgressBar"
-                    class="upload-progress-bar"
-                ></div>
+          </div>
 
-                <span id="uploadProgressText">
-                    Uploading...
-                </span>
+
+          <!-- =============================================
+               COWORKERS
+               ============================================= -->
+
+          <div
+            class="admin-page hidden"
+            data-admin-page="coworkers"
+            hidden
+          >
+
+            <div class="admin-page-header">
+
+              <div>
+
+                <h2>
+                  Coworkers
+                </h2>
+
+                <p>
+                  Create and manage annotation workers.
+                </p>
+
+              </div>
+
+
+              <button
+                id="createCoworkerButton"
+                type="button"
+                class="primary-button"
+              >
+                + Create coworker
+              </button>
 
             </div>
 
-        </div>
+
+            <div
+              id="coworkersList"
+              class="admin-table-container"
+            >
+            </div>
+
+          </div>
+
+
+          <!-- =============================================
+               TASKS
+               ============================================= -->
+
+          <div
+            class="admin-page hidden"
+            data-admin-page="tasks"
+            hidden
+          >
+
+            <div class="admin-page-header">
+
+              <div>
+
+                <h2>
+                  Tasks
+                </h2>
+
+                <p>
+                  Create, assign and monitor annotation tasks.
+                </p>
+
+              </div>
+
+
+              <button
+                id="createTaskButton"
+                type="button"
+                class="primary-button"
+              >
+                + Create task
+              </button>
+
+            </div>
+
+
+            <div
+              id="adminTasksList"
+              class="admin-table-container"
+            >
+            </div>
+
+          </div>
+
+
+          <!-- =============================================
+               PAYMENTS
+               ============================================= -->
+
+          <div
+            class="admin-page hidden"
+            data-admin-page="payments"
+            hidden
+          >
+
+            <div class="admin-page-header">
+
+              <div>
+
+                <h2>
+                  Payments
+                </h2>
+
+                <p>
+                  Manage pay rates and payment status.
+                </p>
+
+              </div>
+
+            </div>
+
+
+            <div class="admin-section">
+
+              <div class="admin-panel-header">
+
+                <h3>
+                  Pay rates
+                </h3>
+
+              </div>
+
+
+              <div
+                id="payRatesList"
+                class="admin-table-container"
+              >
+              </div>
+
+            </div>
+
+
+            <div class="admin-section">
+
+              <div class="admin-panel-header">
+
+                <h3>
+                  Payments
+                </h3>
+
+              </div>
+
+
+              <div
+                id="paymentsList"
+                class="admin-table-container"
+              >
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <!-- =============================================
+               ACTIVITY
+               ============================================= -->
+
+          <div
+            class="admin-page hidden"
+            data-admin-page="activity"
+            hidden
+          >
+
+            <div class="admin-page-header">
+
+              <div>
+
+                <h2>
+                  Activity log
+                </h2>
+
+                <p>
+                  Review workspace activity.
+                </p>
+
+              </div>
+
+            </div>
+
+
+            <div
+              id="activityList"
+              class="admin-table-container"
+            >
+            </div>
+
+          </div>
+
+
+          <!-- =============================================
+               EXPORT
+               ============================================= -->
+
+          <div
+            class="admin-page hidden"
+            data-admin-page="exports"
+            hidden
+          >
+
+            <div class="admin-page-header">
+
+              <div>
+
+                <h2>
+                  Export work
+                </h2>
+
+                <p>
+                  Export task and payment information.
+                </p>
+
+              </div>
+
+            </div>
+
+
+            <div class="export-actions">
+
+              <button
+                id="copyAdminCSV"
+                type="button"
+                class="secondary-button"
+              >
+                📋 Copy CSV
+              </button>
+
+
+              <button
+                id="downloadAdminHTML"
+                type="button"
+                class="primary-button"
+              >
+                ⬇ Download HTML
+              </button>
+
+            </div>
+
+
+            <div class="export-output-wrapper">
+
+              <label>
+                Export preview
+              </label>
+
+              <textarea
+                id="adminExportOutput"
+                class="admin-export-output"
+                rows="20"
+                readonly
+                placeholder="Export data will appear here..."
+              ></textarea>
+
+            </div>
+
+          </div>
+
+        </section>
+
+      </div>
 
     </div>
 
-
-    <!-- =========================================================
-         TOAST
-         ========================================================= -->
-    <div
-        id="toastContainer"
-        class="toast-container"
-        aria-live="polite"
-        aria-atomic="true"
-    ></div>
+  </div>
 
 
-    <!-- =========================================================
-         HIDDEN APPLICATION DATA / COMPATIBILITY ELEMENTS
-         ========================================================= -->
+  <!-- =====================================================
+       CREATE TASK MODAL
+       ===================================================== -->
 
-    <input
-        type="file"
-        id="profilePictureInput"
-        class="hidden"
-        accept="image/*"
-    >
+  <div
+    id="createTaskModal"
+    class="modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="createTaskTitle"
+    hidden
+  >
+
+    <div class="modal-backdrop"></div>
+
+    <div class="modal-card modal-large">
+
+      <div class="modal-header">
+
+        <div>
+
+          <h2 id="createTaskTitle">
+            Create task
+          </h2>
+
+          <p>
+            Create a new annotation task.
+          </p>
+
+        </div>
 
 
-    <!-- =========================================================
-         APPLICATION ENTRY
-         IMPORTANT: KEEP THIS AS A MODULE
-         ========================================================= -->
-    <script
-        type="module"
-        src="./app.js"
-    ></script>
+        <button
+          id="closeCreateTaskModal"
+          type="button"
+          class="icon-button"
+          aria-label="Close create task"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <form
+        id="createTaskForm"
+        class="modal-body"
+      >
+
+        <div class="form-grid">
+
+          <div class="form-group">
+
+            <label for="taskTitle">
+              Task title
+            </label>
+
+            <input
+              id="taskTitle"
+              name="title"
+              type="text"
+              placeholder="Task title"
+              required
+            >
+
+          </div>
+
+
+          <div class="form-group">
+
+            <label for="taskShape">
+              Work type
+            </label>
+
+            <select
+              id="taskShape"
+              name="work_type"
+              required
+            >
+
+              <option value="2d_box">
+                2D Box
+              </option>
+
+              <option value="polygon">
+                Polygon
+              </option>
+
+              <option value="segmentation">
+                Segmentation
+              </option>
+
+            </select>
+
+          </div>
+
+
+          <div class="form-group">
+
+            <label for="taskDuration">
+              Expected duration
+            </label>
+
+            <input
+              id="taskDuration"
+              name="duration"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="Minutes"
+            >
+
+          </div>
+
+
+          <div class="form-group">
+
+            <label for="taskPay">
+              Pay
+            </label>
+
+            <input
+              id="taskPay"
+              name="pay"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Pay amount"
+            >
+
+          </div>
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="taskMediaInput">
+            Task media
+          </label>
+
+          <input
+            id="taskMediaInput"
+            name="media"
+            type="file"
+            accept="image/*,video/*"
+            required
+          >
+
+        </div>
+
+
+        <div class="modal-footer">
+
+          <button
+            id="cancelCreateTask"
+            type="button"
+            class="secondary-button"
+          >
+            Cancel
+          </button>
+
+
+          <button
+            type="submit"
+            class="primary-button"
+          >
+            Create task
+          </button>
+
+        </div>
+
+      </form>
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================================
+       CREATE COWORKER MODAL
+       ===================================================== -->
+
+  <div
+    id="createCoworkerModal"
+    class="modal hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="createCoworkerTitle"
+    hidden
+  >
+
+    <div class="modal-backdrop"></div>
+
+    <div class="modal-card">
+
+      <div class="modal-header">
+
+        <div>
+
+          <h2 id="createCoworkerTitle">
+            Create coworker account
+          </h2>
+
+          <p>
+            Create a staff or annotation worker account.
+          </p>
+
+        </div>
+
+
+        <button
+          id="closeCreateCoworkerModal"
+          type="button"
+          class="icon-button"
+          aria-label="Close create coworker"
+        >
+          ×
+        </button>
+
+      </div>
+
+
+      <form
+        id="createCoworkerForm"
+        class="modal-body"
+      >
+
+        <div class="form-group">
+
+          <label for="newWorkerName">
+            Full name
+          </label>
+
+          <input
+            id="newWorkerName"
+            type="text"
+            placeholder="Full name"
+            required
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="newWorkerEmail">
+            Email
+          </label>
+
+          <input
+            id="newWorkerEmail"
+            type="email"
+            placeholder="Email"
+            required
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="newWorkerPassword">
+            Temporary password
+          </label>
+
+          <input
+            id="newWorkerPassword"
+            type="password"
+            placeholder="Temporary password"
+            minlength="6"
+            required
+          >
+
+        </div>
+
+
+        <div class="form-group">
+
+          <label for="newWorkerRole">
+            Role
+          </label>
+
+          <select id="newWorkerRole">
+
+            <option value="coworker_2d_box">
+              2D Box Coworker
+            </option>
+
+            <option value="coworker_polygon">
+              Polygon Coworker
+            </option>
+
+            <option value="coworker_segmentation">
+              Segmentation Coworker
+            </option>
+
+            <option value="reviewer">
+              Reviewer
+            </option>
+
+            <option value="staff">
+              Staff
+            </option>
+
+            <option value="admin">
+              Admin
+            </option>
+
+          </select>
+
+        </div>
+
+
+        <div class="modal-footer">
+
+          <button
+            id="cancelCreateCoworker"
+            type="button"
+            class="secondary-button"
+          >
+            Cancel
+          </button>
+
+
+          <button
+            type="submit"
+            class="primary-button"
+          >
+            Create account
+          </button>
+
+        </div>
+
+      </form>
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================================
+       HIDDEN PROFILE PICTURE INPUT
+       Compatibility with older code
+       ===================================================== -->
+
+  <input
+    id="profilePictureInput"
+    type="file"
+    accept="image/*"
+    hidden
+  >
+
+
+  <!-- =====================================================
+       TOAST CONTAINER
+       ===================================================== -->
+
+  <div
+    id="toastContainer"
+    class="toast-container"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
+
+
+  <!-- =====================================================
+       APPLICATION ENTRY
+       ===================================================== -->
+
+  <script
+    type="module"
+    src="./app.js"
+  ></script>
 
 </body>
 </html>
