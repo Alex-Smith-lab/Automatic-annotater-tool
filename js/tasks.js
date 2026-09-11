@@ -1,2624 +1,1998 @@
 // ============================================================
-// ANNOTATION AI
-// PART 5 — js/tasks.js
-// TASKS / TASK ACTIONS / SUBMIT / SKIP / WORK HISTORY
+// ANNOTATION AI - TASKS / WORKFLOW MODULE
 // ============================================================
 
-import * as Annotation from "./annotation.js";
+import {
+    APP_CONFIG,
+    normalizeRole,
+    roleForWorkType,
+    workTypeLabel
+} from "./config.js";
 
 import {
     getSupabase,
     getCurrentUser,
-    getCurrentSession
+    logActivity,
+    logWorkflowEvent
 } from "./supabase.js";
 
+import {
+    getRole,
+    isAdmin,
+    isStaff,
+    isReviewer,
+    isCoworker,
+    isPendingApproval
+} from "./auth.js";
 
-// ============================================================
-// ANNOTATION COMPATIBILITY
-// ============================================================
+import * as Annotation from "./annotation.js";
 
-const state =
-    Annotation.state || {};
+const taskState = {
+    initialized: false,
+    loading: false,
 
-const saveFrame =
-    typeof Annotation.saveFrame === "function"
-        ? Annotation.saveFrame
-        : () => {};
+    currentTask: null,
+    tasks: [],
+    frameAnnotations: new Map(),
 
+    saving: false,
+    saveTimer: null,
 
-// ============================================================
-// LOCAL DOM HELPER
-// IMPORTANT:
-// DO NOT IMPORT $ FROM annotation.js
-// ============================================================
+    lastError: null
+};
+
+// ------------------------------------------------------------
+// HELPERS
+// ------------------------------------------------------------
 
 function $(id) {
     return document.getElementById(id);
 }
 
-
-// ============================================================
-// LOCAL EVENT HELPER
-// ============================================================
-
-function emit(
-    name,
-    detail = {}
-) {
-    try {
-        window.dispatchEvent(
-            new CustomEvent(
-                String(name),
-                {
-                    detail
-                }
-            )
-        );
-    } catch (error) {
-        console.warn(
-            "Task event error:",
-            error
-        );
-    }
-}
-
-
-// ============================================================
-// TASK STATE
-// ============================================================
-
-let currentTask = null;
-
-let availableTasks = [];
-
-let taskHistory = [];
-
-let taskLoading = false;
-
-let taskSubmitting = false;
-
-let taskSkipping = false;
-
-let taskListenersBound = false;
-
-
-// ============================================================
-// DOM HELPERS
-// ============================================================
-
-function setText(
-    element,
-    text
-) {
-    if (!element) return;
-
-    element.textContent =
-        String(text ?? "");
-}
-
-
-function show(
-    element,
-    visible = true
-) {
-    if (!element) return;
-
-    element.style.display =
-        visible ? "" : "none";
-}
-
-
-function escapeHTML(
-    value
-) {
-    return String(
-        value ?? ""
-    )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
-}
-
-
-// ============================================================
-// SAFE SUPABASE
-// ============================================================
-
-function getClient() {
-    try {
-        return getSupabase();
-    } catch (error) {
-        console.warn(
-            "Supabase client unavailable:",
-            error
-        );
-
-        return null;
-    }
-}
-
-
-function canUseSupabase() {
-    const client =
-        getClient();
-
-    return Boolean(
-        client &&
-        typeof client.from ===
-            "function"
+function emit(name, detail = {}) {
+    window.dispatchEvent(
+        new CustomEvent(name, { detail })
     );
 }
 
-
-// ============================================================
-// TASK TABLE
-// ============================================================
-
-function getTaskTable() {
-    return (
-        window.APP_TASK_TABLE ||
-        "tasks"
-    );
+function escapeHTML(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
+function normalizeTask(task) {
+    if (!task) return null;
 
-function getResultTable() {
-    return (
-        window.APP_RESULT_TABLE ||
-        "task_results"
-    );
-}
+    const workType =
+        task.work_type ||
+        task.task_type ||
+        task.type ||
+        "";
 
+    let workRole =
+        task.work_role ||
+        task.role ||
+        roleForWorkType(workType) ||
+        "";
 
-// ============================================================
-// USER
-// ============================================================
-
-async function requireUser() {
-    try {
-        const user =
-            await getCurrentUser();
-
-        if (user) {
-            return user;
-        }
-    } catch (error) {
-        console.warn(
-            "getCurrentUser failed:",
-            error
-        );
-    }
-
-    try {
-        const session =
-            await getCurrentSession();
-
-        return (
-            session?.user ||
-            null
-        );
-    } catch (error) {
-        console.warn(
-            "getCurrentSession failed:",
-            error
-        );
-
-        return null;
-    }
-}
-
-
-// ============================================================
-// NORMALIZE TASK
-// ============================================================
-
-export function normalizeTask(
-    task
-) {
-    if (!task) {
-        return null;
-    }
+    workRole = normalizeRole(workRole);
 
     return {
         ...task,
 
-        id:
-            task.id ??
-            task.task_id ??
-            task.taskId ??
-            null,
+        id: task.id || task.task_id || null,
 
         title:
-            task.title ??
-            task.name ??
-            "Untitled task",
+            task.title ||
+            task.name ||
+            "Annotation task",
 
-        description:
-            task.description ??
-            task.instructions ??
-            "",
+        work_type: workType,
 
-        shape:
-            task.shape ??
-            task.task_shape ??
-            task.task_type ??
-            task.type ??
-            "box",
+        work_role: workRole,
 
-        duration:
-            task.duration ??
-            task.duration_minutes ??
-            task.estimated_minutes ??
-            null,
-
-        pay:
-            task.pay ??
-            task.payment ??
-            task.reward ??
-            null,
-
-        status:
-            task.status ??
-            "available",
-
-        media_url:
-            task.media_url ??
-            task.mediaUrl ??
-            task.source_url ??
-            task.sourceUrl ??
-            task.file_url ??
-            task.fileUrl ??
-            task.url ??
+        media_path:
+            task.media_path ||
+            task.file_path ||
+            task.storage_path ||
             null,
 
         media_type:
-            task.media_type ??
-            task.mediaType ??
+            task.media_type ||
+            task.file_type ||
             null,
 
-        created_at:
-            task.created_at ??
+        source_name:
+            task.source_name ||
+            task.filename ||
+            task.file_name ||
+            "media",
+
+        expected_minutes:
+            task.expected_minutes ??
+            task.duration_minutes ??
+            task.duration ??
             null,
+
+        pay_amount:
+            task.pay_amount ??
+            task.pay ??
+            task.amount ??
+            null,
+
+        status:
+            task.status ||
+            "available",
 
         assigned_to:
-            task.assigned_to ??
-            task.assignedTo ??
-            task.assignee_id ??
-            task.assigneeId ??
-            task.worker_id ??
-            task.workerId ??
+            task.assigned_to ||
+            null,
+
+        claimed_by:
+            task.claimed_by ||
             null
     };
 }
 
+// ------------------------------------------------------------
+// CURRENT TASK
+// ------------------------------------------------------------
 
-// ============================================================
-// TASK ACTION BAR
-// ============================================================
-
-function getTaskActionBar() {
-    return $(
-        "taskActionBar"
-    );
+function getCurrentTask() {
+    return taskState.currentTask;
 }
 
-
-function getTaskActionTitle() {
-    return $(
-        "taskActionTitle"
-    );
+function getCurrentTaskId() {
+    return taskState.currentTask?.id || null;
 }
 
+function setCurrentTask(task) {
+    taskState.currentTask =
+        normalizeTask(task);
 
-function getTaskActionMeta() {
-    return $(
-        "taskActionMeta"
-    );
+    return taskState.currentTask;
 }
 
+// ------------------------------------------------------------
+// ANNOTATION STATE ACCESS
+// ------------------------------------------------------------
 
-function getSkipButton() {
-    return (
-        $("skipTaskButton") ||
-        $("skipTaskBtn") ||
-        $("skipTask")
-    );
+function getAnnotationState() {
+    return Annotation.state || {};
 }
 
+function getAnnotations() {
+    const state = getAnnotationState();
 
-function getSubmitButton() {
-    return (
-        $("submitTaskButton") ||
-        $("submitTaskBtn") ||
-        $("submitTask")
-    );
+    if (Array.isArray(state.annotations)) {
+        return state.annotations;
+    }
+
+    return [];
 }
 
+function setAnnotations(annotations) {
+    const state = getAnnotationState();
 
-function getApproveButton() {
-    return (
-        $("approveTaskButton") ||
-        $("approveTaskBtn") ||
-        $("approveTask")
-    );
-}
+    if (Array.isArray(state.annotations)) {
+        state.annotations.length = 0;
 
-
-// ============================================================
-// TASK ACTION BAR UPDATE
-// ============================================================
-
-export function updateTaskActionBar() {
-    const bar =
-        getTaskActionBar();
-
-    if (!bar) {
-        updateTaskButtons();
-        return;
-    }
-
-    if (!currentTask) {
-        show(
-            bar,
-            false
-        );
-
-        updateTaskButtons();
-
-        return;
-    }
-
-    show(
-        bar,
-        true
-    );
-
-    const title =
-        getTaskActionTitle();
-
-    const meta =
-        getTaskActionMeta();
-
-    setText(
-        title,
-        currentTask.title ||
-        currentTask.name ||
-        "Current task"
-    );
-
-    const shape =
-        currentTask.shape ||
-        currentTask.task_type ||
-        currentTask.type ||
-        "";
-
-    const duration =
-        currentTask.duration ??
-        currentTask.duration_minutes ??
-        "";
-
-    const pay =
-        currentTask.pay ??
-        currentTask.payment ??
-        currentTask.reward ??
-        "";
-
-    const pieces = [];
-
-    if (shape) {
-        pieces.push(
-            String(shape)
-        );
-    }
-
-    if (
-        duration !== "" &&
-        duration !== null &&
-        duration !== undefined
-    ) {
-        pieces.push(
-            `${duration} min`
-        );
-    }
-
-    if (
-        pay !== "" &&
-        pay !== null &&
-        pay !== undefined
-    ) {
-        pieces.push(
-            `${pay}`
-        );
-    }
-
-    setText(
-        meta,
-        pieces.join(" • ")
-    );
-
-    updateTaskButtons();
-}
-
-
-// ============================================================
-// TASK BUTTON STATE
-// ============================================================
-
-function updateTaskButtons() {
-    const skip =
-        getSkipButton();
-
-    const submit =
-        getSubmitButton();
-
-    const approve =
-        getApproveButton();
-
-    const disabled =
-        taskLoading ||
-        taskSubmitting ||
-        taskSkipping ||
-        !currentTask;
-
-    if (skip) {
-        skip.disabled =
-            disabled;
-    }
-
-    if (submit) {
-        submit.disabled =
-            disabled;
-    }
-
-    if (approve) {
-        approve.disabled =
-            disabled;
-    }
-}
-
-
-// ============================================================
-// TASK STATUS
-// ============================================================
-
-function getTaskStatusElement() {
-    return (
-        $("taskStatus") ||
-        $("taskActionStatus") ||
-        $("taskMessage") ||
-        $("adminTaskStatus")
-    );
-}
-
-
-function setTaskStatus(
-    message,
-    type = "info"
-) {
-    const element =
-        getTaskStatusElement();
-
-    if (!element) {
-        return;
-    }
-
-    setText(
-        element,
-        message
-    );
-
-    element.dataset.status =
-        type;
-
-    element.classList.remove(
-        "success",
-        "error",
-        "warning",
-        "info",
-        "loading"
-    );
-
-    element.classList.add(
-        type
-    );
-}
-
-
-// ============================================================
-// FETCH AVAILABLE TASKS
-// ============================================================
-
-export async function fetchAvailableTasks(
-    options = {}
-) {
-    const limit =
-        Number(
-            options.limit ?? 50
-        );
-
-    const client =
-        getClient();
-
-    if (!client) {
-        availableTasks = [];
-
-        renderAvailableTasks(
-            availableTasks
-        );
-
-        return [];
-    }
-
-    const user =
-        await requireUser();
-
-    if (!user) {
-        availableTasks = [];
-
-        renderAvailableTasks(
-            availableTasks
-        );
-
-        return [];
-    }
-
-    taskLoading = true;
-
-    updateTaskButtons();
-
-    try {
-        const table =
-            getTaskTable();
-
-        /*
-         * First try status = available.
-         */
-
-        let result =
-            await client
-                .from(table)
-                .select("*")
-                .eq(
-                    "status",
-                    "available"
-                )
-                .limit(
-                    limit
-                );
-
-        /*
-         * If the database schema does not
-         * support the status query, load
-         * the table and filter locally.
-         */
-
-        if (result.error) {
-            result =
-                await client
-                    .from(table)
-                    .select("*")
-                    .limit(
-                        limit
-                    );
+        if (Array.isArray(annotations)) {
+            state.annotations.push(
+                ...annotations
+            );
         }
 
-        if (result.error) {
-            console.error(
-                "Unable to load tasks:",
-                result.error
-            );
-
-            availableTasks = [];
-
-            renderAvailableTasks(
-                availableTasks
-            );
-
-            setTaskStatus(
-                "Unable to load tasks.",
-                "error"
-            );
-
-            return [];
-        }
-
-        availableTasks =
-            (result.data || [])
-                .map(
-                    normalizeTask
-                )
-                .filter(
-                    Boolean
-                );
-
-        /*
-         * Keep only tasks that are actually
-         * available or assigned to this user.
-         */
-
-        availableTasks =
-            availableTasks.filter(
-                task => {
-                    const status =
-                        String(
-                            task.status ||
-                            "available"
-                        )
-                            .toLowerCase();
-
-                    const assigned =
-                        task.assigned_to;
-
-                    const assignedToCurrentUser =
-                        assigned &&
-                        String(assigned) ===
-                            String(user.id);
-
-                    const availableStatus =
-                        [
-                            "",
-                            "available",
-                            "open",
-                            "ready",
-                            "queued",
-                            "pending",
-                            "created",
-                            "in_progress"
-                        ].includes(
-                            status
-                        );
-
-                    return (
-                        availableStatus &&
-                        (
-                            !assigned ||
-                            assignedToCurrentUser
-                        )
-                    );
-                }
-            );
-
-        renderAvailableTasks(
-            availableTasks
-        );
-
-        emit(
-            "tasksLoaded",
-            {
-                tasks:
-                    availableTasks
-            }
-        );
-
-        return availableTasks;
-    } catch (error) {
-        console.error(
-            "Task loading error:",
-            error
-        );
-
-        setTaskStatus(
-            "Unable to load tasks.",
-            "error"
-        );
-
-        return [];
-    } finally {
-        taskLoading = false;
-
-        updateTaskButtons();
-    }
-}
-
-
-// ============================================================
-// AVAILABLE TASKS UI
-// ============================================================
-
-function getAvailableTasksContainer() {
-    return (
-        $("availableJobs") ||
-        $("availableTasks") ||
-        $("tasksList")
-    );
-}
-
-
-function renderAvailableTasks(
-    tasks
-) {
-    const container =
-        getAvailableTasksContainer();
-
-    if (!container) {
         return;
     }
 
-    if (!tasks.length) {
-        container.innerHTML = `
-            <div class="empty-state">
-                No available tasks right now.
-            </div>
-        `;
-
-        return;
-    }
-
-    container.innerHTML =
-        tasks
-            .map(
-                task => {
-                    const id =
-                        task.id ??
-                        "";
-
-                    return `
-                        <button
-                            type="button"
-                            class="task-card"
-                            data-task-id="${escapeHTML(id)}"
-                        >
-                            <div class="task-card-title">
-                                ${escapeHTML(
-                                    task.title
-                                )}
-                            </div>
-
-                            <div class="task-card-meta">
-                                ${escapeHTML(
-                                    task.shape || ""
-                                )}
-
-                                ${
-                                    task.duration !==
-                                        null &&
-                                    task.duration !==
-                                        undefined &&
-                                    task.duration !==
-                                        ""
-                                        ? ` • ${escapeHTML(
-                                              task.duration
-                                          )} min`
-                                        : ""
-                                }
-
-                                ${
-                                    task.pay !==
-                                        null &&
-                                    task.pay !==
-                                        undefined &&
-                                    task.pay !==
-                                        ""
-                                        ? ` • ${escapeHTML(
-                                              task.pay
-                                          )}`
-                                        : ""
-                                }
-                            </div>
-
-                            ${
-                                task.description
-                                    ? `
-                                        <div class="task-card-description">
-                                            ${escapeHTML(
-                                                task.description
-                                            )}
-                                        </div>
-                                    `
-                                    : ""
-                            }
-                        </button>
-                    `;
-                }
-            )
-            .join("");
-
-    container
-        .querySelectorAll(
-            "[data-task-id]"
-        )
-        .forEach(
-            element => {
-                element.addEventListener(
-                    "click",
-                    async () => {
-                        const taskId =
-                            element.dataset.taskId;
-
-                        await selectTask(
-                            taskId
-                        );
-                    }
-                );
-            }
-        );
+    state.annotations =
+        Array.isArray(annotations)
+            ? annotations
+            : [];
 }
 
+// ------------------------------------------------------------
+// FRAME ANNOTATIONS
+// ------------------------------------------------------------
 
-// ============================================================
-// FIND TASK
-// ============================================================
-
-function findTask(
-    taskId
-) {
-    return availableTasks.find(
-        task =>
-            String(task.id) ===
-            String(taskId)
-    );
-}
-
-
-// ============================================================
-// SELECT TASK
-// ============================================================
-
-export async function selectTask(
-    taskOrId
-) {
-    let task = null;
-
+function normalizeFrameNumber(value) {
     if (
-        taskOrId &&
-        typeof taskOrId ===
-            "object"
+        value === null ||
+        value === undefined ||
+        value === ""
     ) {
-        task =
-            normalizeTask(
-                taskOrId
-            );
-    } else {
-        task =
-            findTask(
-                taskOrId
-            );
+        return 0;
     }
 
-    if (!task) {
-        setTaskStatus(
-            "Task could not be found.",
-            "error"
-        );
+    const number = Number(value);
 
+    return Number.isFinite(number)
+        ? Math.max(0, Math.floor(number))
+        : 0;
+}
+
+function getCurrentFrameNumber() {
+    const state = getAnnotationState();
+
+    return normalizeFrameNumber(
+        state.currentFrame ??
+        state.frameNumber ??
+        window.currentFrame ??
+        0
+    );
+}
+
+function annotationKey(annotation, index = 0) {
+    return (
+        annotation.annotation_key ||
+        annotation.id ||
+        annotation.key ||
+        `annotation-${index}`
+    );
+}
+
+// ------------------------------------------------------------
+// CONVERT LOCAL ANNOTATIONS TO DB ROWS
+// ------------------------------------------------------------
+
+function annotationRowsForTask(taskId) {
+    if (!taskId) {
+        return [];
+    }
+
+    const annotations =
+        getAnnotations();
+
+    return annotations.map(
+        (annotation, index) => {
+            const frameNumber =
+                normalizeFrameNumber(
+                    annotation.frame_number ??
+                    annotation.frameNumber ??
+                    annotation.frame ??
+                    getCurrentFrameNumber()
+                );
+
+            const type =
+                annotation.annotation_type ||
+                annotation.type ||
+                annotation.shape ||
+                "box";
+
+            const label =
+                annotation.label ||
+                annotation.class_name ||
+                annotation.className ||
+                "";
+
+            const score =
+                Number.isFinite(
+                    Number(annotation.score)
+                )
+                    ? Number(annotation.score)
+                    : null;
+
+            const geometry =
+                annotation.geometry ||
+                annotation.coordinates ||
+                annotation.points ||
+                annotation;
+
+            return {
+                task_id: taskId,
+
+                annotation_key:
+                    String(
+                        annotationKey(
+                            annotation,
+                            index
+                        )
+                    ),
+
+                frame_number:
+                    frameNumber,
+
+                annotation_type:
+                    type,
+
+                label,
+
+                score,
+
+                occlusion:
+                    annotation.occlusion ??
+                    false,
+
+                truncation:
+                    annotation.truncation ??
+                    false,
+
+                geometry,
+
+                ai_generated:
+                    annotation.ai_generated === true ||
+                    annotation.aiGenerated === true,
+
+                corrected:
+                    annotation.corrected === true,
+
+                export_flag:
+                    annotation.export_flag !== false,
+
+                updated_by:
+                    getCurrentUser()?.id ||
+                    null,
+
+                updated_at:
+                    new Date().toISOString()
+            };
+        }
+    );
+}
+
+// ------------------------------------------------------------
+// SAVE TASK ANNOTATIONS
+// ------------------------------------------------------------
+
+async function saveTaskAnnotations(
+    taskId = getCurrentTaskId()
+) {
+    const client = getSupabase();
+
+    if (!client || !taskId) {
         return false;
     }
 
-    currentTask =
-        task;
+    const user =
+        getCurrentUser();
 
-    updateTaskActionBar();
+    if (!user?.id) {
+        return false;
+    }
 
-    setTaskStatus(
-        `Task selected: ${task.title}`,
-        "info"
-    );
+    taskState.saving = true;
 
-    emit(
-        "taskSelected",
-        {
-            task
+    try {
+        const rows =
+            annotationRowsForTask(taskId);
+
+        // Save a complete current snapshot.
+        // This guarantees that a reviewer or the next worker
+        // can continue from the latest state.
+        const {
+            error: deleteError
+        } = await client
+            .from(APP_CONFIG.tables.annotations)
+            .delete()
+            .eq("task_id", taskId);
+
+        if (deleteError) {
+            throw deleteError;
         }
+
+        if (rows.length) {
+            const {
+                error: insertError
+            } = await client
+                .from(APP_CONFIG.tables.annotations)
+                .insert(rows);
+
+            if (insertError) {
+                throw insertError;
+            }
+        }
+
+        try {
+            await logWorkflowEvent(
+                taskId,
+                "annotations_saved",
+                {
+                    annotation_count:
+                        rows.length
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Workflow event could not be saved."
+            );
+        }
+
+        emit(
+            "annotationsSaved",
+            {
+                taskId,
+                count: rows.length
+            }
+        );
+
+        return true;
+    } catch (error) {
+        console.error(
+            "Could not save annotations:",
+            error
+        );
+
+        taskState.lastError =
+            error;
+
+        return false;
+    } finally {
+        taskState.saving = false;
+    }
+}
+
+// ------------------------------------------------------------
+// SCHEDULE ANNOTATION SAVE
+// ------------------------------------------------------------
+
+function scheduleAnnotationSave() {
+    const taskId =
+        getCurrentTaskId();
+
+    if (!taskId) {
+        return;
+    }
+
+    clearTimeout(
+        taskState.saveTimer
     );
 
-    /*
-     * Ask media.js to load task media.
-     * This avoids circular imports.
-     */
+    taskState.saveTimer =
+        setTimeout(
+            () => {
+                saveTaskAnnotations(
+                    taskId
+                );
+            },
+            900
+        );
+}
 
-    if (
-        task.media_url
-    ) {
-        window.dispatchEvent(
-            new CustomEvent(
-                "annotation:loadTaskMedia",
+// ------------------------------------------------------------
+// LOAD CLOUD ANNOTATIONS
+// ------------------------------------------------------------
+
+async function loadTaskAnnotations(
+    taskId = getCurrentTaskId()
+) {
+    const client = getSupabase();
+
+    if (!client || !taskId) {
+        return [];
+    }
+
+    try {
+        const {
+            data,
+            error
+        } = await client
+            .from(APP_CONFIG.tables.annotations)
+            .select("*")
+            .eq("task_id", taskId)
+            .order(
+                "frame_number",
                 {
-                    detail: {
-                        task
-                    }
+                    ascending: true
                 }
             )
+            .order(
+                "updated_at",
+                {
+                    ascending: true
+                }
+            );
+
+        if (error) {
+            throw error;
+        }
+
+        const rows =
+            Array.isArray(data)
+                ? data
+                : [];
+
+        taskState.frameAnnotations =
+            new Map();
+
+        const annotations =
+            rows.map(row => {
+                const frame =
+                    normalizeFrameNumber(
+                        row.frame_number
+                    );
+
+                if (
+                    !taskState.frameAnnotations.has(
+                        frame
+                    )
+                ) {
+                    taskState.frameAnnotations.set(
+                        frame,
+                        []
+                    );
+                }
+
+                const annotation = {
+                    id:
+                        row.annotation_key ||
+                        row.id,
+
+                    annotation_key:
+                        row.annotation_key,
+
+                    annotation_type:
+                        row.annotation_type,
+
+                    type:
+                        row.annotation_type,
+
+                    label:
+                        row.label,
+
+                    score:
+                        row.score,
+
+                    occlusion:
+                        row.occlusion,
+
+                    truncation:
+                        row.truncation,
+
+                    geometry:
+                        row.geometry,
+
+                    ai_generated:
+                        row.ai_generated,
+
+                    corrected:
+                        row.corrected,
+
+                    export_flag:
+                        row.export_flag,
+
+                    frame_number:
+                        frame,
+
+                    frameNumber:
+                        frame
+                };
+
+                taskState.frameAnnotations
+                    .get(frame)
+                    .push(annotation);
+
+                return annotation;
+            });
+
+        setAnnotations(
+            annotations
+        );
+
+        emit(
+            "annotationsLoaded",
+            {
+                taskId,
+                annotations,
+                count: annotations.length
+            }
+        );
+
+        return annotations;
+    } catch (error) {
+        console.error(
+            "Could not load task annotations:",
+            error
+        );
+
+        taskState.lastError =
+            error;
+
+        return [];
+    }
+}
+
+// ------------------------------------------------------------
+// LOAD TASK MEDIA
+// ------------------------------------------------------------
+
+async function loadTaskMedia(task) {
+    const client =
+        getSupabase();
+
+    if (
+        !client ||
+        !task?.media_path
+    ) {
+        return null;
+    }
+
+    try {
+        const bucket =
+            APP_CONFIG.buckets.taskMedia;
+
+        const {
+            data,
+            error
+        } = await client.storage
+            .from(bucket)
+            .createSignedUrl(
+                task.media_path,
+                60 * 60
+            );
+
+        if (error) {
+            throw error;
+        }
+
+        const url =
+            data?.signedUrl ||
+            null;
+
+        if (!url) {
+            return null;
+        }
+
+        const mediaType =
+            String(
+                task.media_type ||
+                ""
+            ).toLowerCase();
+
+        const isVideo =
+            mediaType.includes("video") ||
+            /\.(mp4|webm|mov|avi|mkv)$/i.test(
+                task.source_name ||
+                task.media_path
+            );
+
+        const image =
+            $("annotationImage") ||
+            $("imageCanvas") ||
+            $("sourceImage") ||
+            $("mainImage");
+
+        const video =
+            $("annotationVideo") ||
+            $("videoPlayer") ||
+            $("sourceVideo") ||
+            $("mainVideo");
+
+        if (isVideo) {
+            if (video) {
+                video.src = url;
+                video.dataset.taskId =
+                    task.id;
+
+                video.classList.remove(
+                    "hidden"
+                );
+
+                video.load();
+
+                video.onloadedmetadata =
+                    () => {
+                        emit(
+                            "taskMediaLoaded",
+                            {
+                                task,
+                                url,
+                                type: "video"
+                            }
+                        );
+                    };
+            }
+
+            image?.classList.add(
+                "hidden"
+            );
+
+            // Allow annotation.js/media.js to use
+            // the currently loaded video.
+            window.currentTaskVideoUrl =
+                url;
+
+            return {
+                url,
+                type: "video"
+            };
+        }
+
+        if (image) {
+            image.src = url;
+            image.dataset.taskId =
+                task.id;
+
+            image.classList.remove(
+                "hidden"
+            );
+
+            image.onload = () => {
+                emit(
+                    "taskMediaLoaded",
+                    {
+                        task,
+                        url,
+                        type: "image"
+                    }
+                );
+            };
+        }
+
+        video?.classList.add(
+            "hidden"
+        );
+
+        return {
+            url,
+            type: "image"
+        };
+    } catch (error) {
+        console.error(
+            "Could not load task media:",
+            error
+        );
+
+        taskState.lastError =
+            error;
+
+        emit(
+            "taskMediaError",
+            {
+                task,
+                error
+            }
+        );
+
+        return null;
+    }
+}
+
+// ------------------------------------------------------------
+// CLAIM TASK
+// ------------------------------------------------------------
+
+async function claimTask(taskId) {
+    const client =
+        getSupabase();
+
+    const user =
+        getCurrentUser();
+
+    if (!client) {
+        throw new Error(
+            "Supabase is not configured."
         );
     }
 
-    return true;
+    if (!user?.id) {
+        throw new Error(
+            "Please sign in first."
+        );
+    }
+
+    if (isPendingApproval()) {
+        throw new Error(
+            "Your account is waiting for admin approval."
+        );
+    }
+
+    if (!taskId) {
+        throw new Error(
+            "No task was selected."
+        );
+    }
+
+    // Staff/admin/reviewer can inspect tasks,
+    // but coworkers must claim their own work.
+    try {
+        const {
+            data,
+            error
+        } = await client.rpc(
+            "claim_task",
+            {
+                p_task_id: taskId,
+                p_user_id: user.id
+            }
+        );
+
+        if (!error) {
+            const claimed =
+                Array.isArray(data)
+                    ? data[0]
+                    : data;
+
+            if (claimed) {
+                return normalizeTask(
+                    claimed
+                );
+            }
+
+            return true;
+        }
+
+        // If the RPC is unavailable, use a guarded
+        // update so two users cannot simply overwrite
+        // one another.
+        console.warn(
+            "claim_task RPC failed. Using guarded update:",
+            error
+        );
+    } catch (error) {
+        console.warn(
+            "claim_task RPC unavailable:",
+            error
+        );
+    }
+
+    const {
+        data: existing,
+        error: existingError
+    } = await client
+        .from(APP_CONFIG.tables.tasks)
+        .select("*")
+        .eq("id", taskId)
+        .maybeSingle();
+
+    if (existingError) {
+        throw existingError;
+    }
+
+    if (!existing) {
+        throw new Error(
+            "Task no longer exists."
+        );
+    }
+
+    const normalized =
+        normalizeTask(existing);
+
+    if (
+        normalized.claimed_by &&
+        normalized.claimed_by !== user.id
+    ) {
+        throw new Error(
+            "This task has already been claimed by another user."
+        );
+    }
+
+    if (
+        normalized.assigned_to &&
+        normalized.assigned_to !== user.id &&
+        isCoworker()
+    ) {
+        throw new Error(
+            "This task is assigned to another user."
+        );
+    }
+
+    const {
+        data: updated,
+        error: updateError
+    } = await client
+        .from(APP_CONFIG.tables.tasks)
+        .update({
+            claimed_by: user.id,
+            claimed_at:
+                new Date().toISOString(),
+            status: "in_progress"
+        })
+        .eq("id", taskId)
+        .is("claimed_by", null)
+        .select("*")
+        .maybeSingle();
+
+    if (updateError) {
+        throw updateError;
+    }
+
+    if (!updated) {
+        throw new Error(
+            "This task was just claimed by another user."
+        );
+    }
+
+    return normalizeTask(
+        updated
+    );
 }
 
+// ------------------------------------------------------------
+// SELECT TASK
+// ------------------------------------------------------------
 
-// ============================================================
-// GET CURRENT TASK
-// ============================================================
+async function selectTask(taskId) {
+    const client =
+        getSupabase();
 
-export function getCurrentTask() {
-    return currentTask;
+    if (!client) {
+        throw new Error(
+            "Supabase is not configured."
+        );
+    }
+
+    if (!taskId) {
+        throw new Error(
+            "No task ID was supplied."
+        );
+    }
+
+    taskState.loading = true;
+    taskState.lastError = null;
+
+    try {
+        const {
+            data: task,
+            error
+        } = await client
+            .from(APP_CONFIG.tables.tasks)
+            .select("*")
+            .eq("id", taskId)
+            .maybeSingle();
+
+        if (error) {
+            throw error;
+        }
+
+        if (!task) {
+            throw new Error(
+                "Task could not be found."
+            );
+        }
+
+        const normalized =
+            normalizeTask(task);
+
+        // Coworkers can only open work for their role.
+        if (isCoworker()) {
+            const userRole =
+                normalizeRole(
+                    getRole()
+                );
+
+            const taskRole =
+                normalizeRole(
+                    normalized.work_role
+                );
+
+            if (
+                taskRole &&
+                taskRole !== userRole
+            ) {
+                throw new Error(
+                    "This task is not assigned to your annotation role."
+                );
+            }
+        }
+
+        // A claimed task can be resumed by the same user.
+        // A different user cannot take it.
+        const user =
+            getCurrentUser();
+
+        if (
+            normalized.claimed_by &&
+            normalized.claimed_by !== user?.id
+        ) {
+            throw new Error(
+                "This task has already been claimed by another user."
+            );
+        }
+
+        let claimedTask =
+            normalized;
+
+        if (
+            !normalized.claimed_by
+        ) {
+            claimedTask =
+                await claimTask(
+                    taskId
+                );
+        }
+
+        if (
+            claimedTask === true
+        ) {
+            claimedTask =
+                normalizeTask({
+                    ...normalized,
+                    claimed_by:
+                        user?.id,
+                    status:
+                        "in_progress"
+                });
+        }
+
+        setCurrentTask(
+            claimedTask
+        );
+
+        taskState.frameAnnotations =
+            new Map();
+
+        setAnnotations([]);
+
+        emit(
+            "taskSelected",
+            {
+                task:
+                    taskState.currentTask,
+                taskId
+            }
+        );
+
+        await loadTaskMedia(
+            taskState.currentTask
+        );
+
+        await loadTaskAnnotations(
+            taskId
+        );
+
+        try {
+            await logWorkflowEvent(
+                taskId,
+                "task_claimed",
+                {
+                    role:
+                        getRole()
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Task workflow event skipped."
+            );
+        }
+
+        try {
+            await logActivity(
+                "task_claimed",
+                "Task claimed",
+                {
+                    task_id: taskId,
+                    work_type:
+                        claimedTask.work_type,
+                    work_role:
+                        claimedTask.work_role
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Task activity skipped."
+            );
+        }
+
+        return taskState.currentTask;
+    } catch (error) {
+        taskState.lastError =
+            error;
+
+        emit(
+            "taskError",
+            {
+                error
+            }
+        );
+
+        throw error;
+    } finally {
+        taskState.loading = false;
+    }
 }
 
+// ------------------------------------------------------------
+// RELEASE / CLEAR CURRENT TASK
+// ------------------------------------------------------------
 
-// ============================================================
-// CLEAR CURRENT TASK
-// ============================================================
+function clearCurrentTask() {
+    clearTimeout(
+        taskState.saveTimer
+    );
 
-export function clearCurrentTask() {
-    currentTask = null;
+    taskState.currentTask =
+        null;
 
-    updateTaskActionBar();
+    taskState.frameAnnotations =
+        new Map();
+
+    setAnnotations([]);
 
     emit(
         "taskCleared"
     );
 }
 
+// ------------------------------------------------------------
+// SUBMIT TASK
+// ------------------------------------------------------------
 
-// ============================================================
-// START CURRENT TASK
-// ============================================================
-
-export async function startCurrentTask() {
-    if (!currentTask) {
-        setTaskStatus(
-            "No task is selected.",
-            "warning"
-        );
-
-        return false;
-    }
+async function submitCurrentTask() {
+    const client =
+        getSupabase();
 
     const user =
-        await requireUser();
+        getCurrentUser();
 
-    if (!user) {
-        setTaskStatus(
-            "Please sign in first.",
-            "warning"
-        );
-
-        return false;
-    }
-
-    if (!currentTask.id) {
-        return true;
-    }
-
-    const client =
-        getClient();
+    const taskId =
+        getCurrentTaskId();
 
     if (!client) {
-        setTaskStatus(
-            "Database connection is unavailable.",
-            "error"
+        throw new Error(
+            "Supabase is not configured."
         );
-
-        return false;
     }
 
+    if (!user?.id) {
+        throw new Error(
+            "Please sign in first."
+        );
+    }
+
+    if (!taskId) {
+        throw new Error(
+            "There is no active task."
+        );
+    }
+
+    taskState.loading = true;
+
     try {
-        const table =
-            getTaskTable();
-
-        const result =
-            await client
-                .from(table)
-                .update({
-                    status:
-                        "in_progress",
-
-                    assigned_to:
-                        user.id
-                })
-                .eq(
-                    "id",
-                    currentTask.id
-                );
-
-        if (result.error) {
-            console.warn(
-                "Task assignment failed:",
-                result.error
-            );
-
-            setTaskStatus(
-                "Unable to start this task.",
-                "error"
-            );
-
-            return false;
-        }
-
-        currentTask = {
-            ...currentTask,
-
-            status:
-                "in_progress",
-
-            assigned_to:
-                user.id
-        };
-
-        updateTaskActionBar();
-
-        setTaskStatus(
-            "Task started.",
-            "success"
+        await saveTaskAnnotations(
+            taskId
         );
 
-        emit(
-            "taskStarted",
-            {
-                task:
-                    currentTask
+        let submitted = false;
+
+        try {
+            const {
+                data,
+                error
+            } = await client.rpc(
+                "submit_task",
+                {
+                    p_task_id: taskId,
+                    p_user_id: user.id
+                }
+            );
+
+            if (!error) {
+                submitted = true;
+
+                const result =
+                    Array.isArray(data)
+                        ? data[0]
+                        : data;
+
+                if (result) {
+                    setCurrentTask(
+                        result
+                    );
+                }
             }
-        );
-
-        return true;
-    } catch (error) {
-        console.error(
-            "Start task error:",
-            error
-        );
-
-        setTaskStatus(
-            "Unable to start task.",
-            "error"
-        );
-
-        return false;
-    }
-}
-
-
-// ============================================================
-// VALIDATE CURRENT TASK
-// ============================================================
-
-export function validateCurrentTask() {
-    if (!currentTask) {
-        return {
-            valid: false,
-            message:
-                "No task is selected."
-        };
-    }
-
-    if (
-        !Array.isArray(
-            state.annotations
-        )
-    ) {
-        return {
-            valid: false,
-            message:
-                "No annotations were created."
-        };
-    }
-
-    const requiresAnnotation =
-        currentTask.require_annotation ===
-            true ||
-        currentTask.requires_annotation ===
-            true;
-
-    if (
-        requiresAnnotation &&
-        state.annotations.length === 0
-    ) {
-        return {
-            valid: false,
-            message:
-                "Add at least one annotation before submitting."
-        };
-    }
-
-    return {
-        valid: true,
-        message: ""
-    };
-}
-
-
-// ============================================================
-// SERIALIZE ANNOTATIONS
-// ============================================================
-
-export function serializeAnnotations() {
-    if (
-        !Array.isArray(
-            state.annotations
-        )
-    ) {
-        return [];
-    }
-
-    return state.annotations.map(
-        annotation => {
-            const copy = {
-                ...annotation
-            };
-
-            delete copy.selected;
-
-            return copy;
+        } catch (error) {
+            console.warn(
+                "submit_task RPC unavailable:",
+                error
+            );
         }
-    );
-}
 
-
-// ============================================================
-// BUILD SUBMISSION PAYLOAD
-// ============================================================
-
-function buildSubmissionPayload(
-    user
-) {
-    const annotations =
-        serializeAnnotations();
-
-    return {
-        task_id:
-            currentTask?.id ??
-            null,
-
-        user_id:
-            user?.id ??
-            null,
-
-        annotations,
-
-        annotation_count:
-            annotations.length,
-
-        media_type:
-            state.mediaType ||
-            null,
-
-        current_frame:
-            state.mediaType ===
-            "video"
-                ? state.currentFrame
-                : null,
-
-        submitted_at:
-            new Date().toISOString()
-    };
-}
-
-
-// ============================================================
-// SAVE TASK RESULT
-// ============================================================
-
-async function saveTaskResult(
-    payload
-) {
-    const client =
-        getClient();
-
-    if (!client) {
-        return {
-            ok: false,
-            error:
-                new Error(
-                    "Supabase is not configured."
+        // Fallback for installations where the RPC
+        // has not yet been created.
+        if (!submitted) {
+            const {
+                data,
+                error
+            } = await client
+                .from(APP_CONFIG.tables.tasks)
+                .update({
+                    status: "submitted"
+                })
+                .eq("id", taskId)
+                .eq(
+                    "claimed_by",
+                    user.id
                 )
-        };
-    }
-
-    const table =
-        getResultTable();
-
-    try {
-        const result =
-            await client
-                .from(table)
-                .insert(
-                    payload
-                )
-                .select()
+                .select("*")
                 .maybeSingle();
 
-        return {
-            ok:
-                !result.error,
+            if (error) {
+                throw error;
+            }
 
-            data:
-                result.data ||
-                null,
-
-            error:
-                result.error ||
-                null
-        };
-    } catch (error) {
-        return {
-            ok: false,
-            data: null,
-            error
-        };
-    }
-}
-
-
-// ============================================================
-// UPDATE TASK STATUS
-// ============================================================
-
-async function updateTaskStatus(
-    taskId,
-    status
-) {
-    const client =
-        getClient();
-
-    if (
-        !client ||
-        !taskId
-    ) {
-        return {
-            ok: false,
-            error:
-                new Error(
-                    "Task update unavailable."
-                )
-        };
-    }
-
-    const table =
-        getTaskTable();
-
-    try {
-        const result =
-            await client
-                .from(table)
-                .update({
-                    status
-                })
-                .eq(
-                    "id",
-                    taskId
-                );
-
-        return {
-            ok:
-                !result.error,
-
-            error:
-                result.error ||
-                null
-        };
-    } catch (error) {
-        return {
-            ok: false,
-            error
-        };
-    }
-}
-
-
-// ============================================================
-// SUBMIT CURRENT TASK
-// ============================================================
-
-export async function submitCurrentTask() {
-    if (
-        taskSubmitting
-    ) {
-        return false;
-    }
-
-    const validation =
-        validateCurrentTask();
-
-    if (
-        !validation.valid
-    ) {
-        setTaskStatus(
-            validation.message,
-            "warning"
-        );
-
-        return false;
-    }
-
-    const user =
-        await requireUser();
-
-    if (!user) {
-        setTaskStatus(
-            "Please sign in before submitting.",
-            "warning"
-        );
-
-        return false;
-    }
-
-    taskSubmitting = true;
-
-    updateTaskButtons();
-
-    setTaskStatus(
-        "Submitting task…",
-        "loading"
-    );
-
-    try {
-        /*
-         * Save the current video frame before
-         * creating the submission.
-         */
-
-        if (
-            state.mediaType ===
-            "video"
-        ) {
-            try {
-                saveFrame(
-                    state.currentFrame
-                );
-            } catch (error) {
-                console.warn(
-                    "Unable to save video frame:",
-                    error
+            if (!data) {
+                throw new Error(
+                    "The task could not be submitted. It may have been claimed or changed by another user."
                 );
             }
+
+            setCurrentTask(
+                data
+            );
         }
 
-        const payload =
-            buildSubmissionPayload(
-                user
+        try {
+            await logWorkflowEvent(
+                taskId,
+                "task_submitted",
+                {
+                    annotation_count:
+                        getAnnotations().length
+                }
             );
-
-        const result =
-            await saveTaskResult(
-                payload
+        } catch (error) {
+            console.debug(
+                "Submit workflow event skipped."
             );
-
-        if (
-            !result.ok
-        ) {
-            console.error(
-                "Task submission failed:",
-                result.error
-            );
-
-            setTaskStatus(
-                "Task could not be submitted. Check your database setup.",
-                "error"
-            );
-
-            return false;
         }
 
-        /*
-         * Update the task status only when
-         * a task ID exists.
-         */
-
-        if (
-            currentTask?.id
-        ) {
-            const statusResult =
-                await updateTaskStatus(
-                    currentTask.id,
-                    "submitted"
-                );
-
-            if (
-                !statusResult.ok
-            ) {
-                console.warn(
-                    "Result saved but task status could not be updated:",
-                    statusResult.error
-                );
-            }
+        try {
+            await logActivity(
+                "task_submitted",
+                "Task submitted",
+                {
+                    task_id: taskId,
+                    annotation_count:
+                        getAnnotations().length
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Submit activity skipped."
+            );
         }
-
-        const completedTask =
-            currentTask;
-
-        taskHistory.unshift({
-            ...completedTask,
-
-            completed_at:
-                new Date().toISOString(),
-
-            annotation_count:
-                Array.isArray(
-                    state.annotations
-                )
-                    ? state.annotations.length
-                    : 0,
-
-            status:
-                "submitted"
-        });
-
-        /*
-         * Remove completed task from the
-         * local available list.
-         */
-
-        if (
-            completedTask?.id
-        ) {
-            availableTasks =
-                availableTasks.filter(
-                    item =>
-                        String(item.id) !==
-                        String(
-                            completedTask.id
-                        )
-                );
-        }
-
-        currentTask = null;
-
-        renderAvailableTasks(
-            availableTasks
-        );
-
-        updateTaskActionBar();
-
-        setTaskStatus(
-            "Task submitted successfully.",
-            "success"
-        );
 
         emit(
             "taskSubmitted",
             {
                 task:
-                    completedTask,
-
-                result:
-                    result.data
+                    taskState.currentTask,
+                taskId
             }
         );
 
-        /*
-         * Refresh the queue in the background.
-         */
-
-        await fetchAvailableTasks();
-
-        return true;
-    } catch (error) {
-        console.error(
-            "Task submission error:",
-            error
-        );
-
-        setTaskStatus(
-            "Task submission failed.",
-            "error"
-        );
-
-        return false;
+        return taskState.currentTask;
     } finally {
-        taskSubmitting = false;
-
-        updateTaskButtons();
+        taskState.loading = false;
     }
 }
 
+// ------------------------------------------------------------
+// SKIP TASK
+// ------------------------------------------------------------
 
-// ============================================================
-// SKIP CURRENT TASK
-// ============================================================
-
-export async function skipCurrentTask(
+async function skipCurrentTask(
     reason = ""
 ) {
-    if (
-        taskSkipping
-    ) {
-        return false;
-    }
+    const client =
+        getSupabase();
 
-    if (!currentTask) {
-        setTaskStatus(
-            "No task is selected.",
-            "warning"
+    const user =
+        getCurrentUser();
+
+    const taskId =
+        getCurrentTaskId();
+
+    if (!client) {
+        throw new Error(
+            "Supabase is not configured."
         );
-
-        return false;
     }
 
-    const task =
-        currentTask;
+    if (!user?.id) {
+        throw new Error(
+            "Please sign in first."
+        );
+    }
 
-    taskSkipping = true;
+    if (!taskId) {
+        throw new Error(
+            "There is no active task."
+        );
+    }
 
-    updateTaskButtons();
+    const cleanReason =
+        String(reason || "").trim();
 
-    setTaskStatus(
-        "Skipping task…",
-        "loading"
-    );
+    if (!cleanReason) {
+        throw new Error(
+            "Please provide a reason for skipping this task."
+        );
+    }
+
+    taskState.loading = true;
 
     try {
-        let updateSucceeded =
-            false;
+        // Record why the task was skipped.
+        const {
+            error: skipError
+        } = await client
+            .from(APP_CONFIG.tables.taskSkips)
+            .insert({
+                task_id: taskId,
+                user_id: user.id,
+                reason: cleanReason
+            });
 
-        const client =
-            getClient();
-
-        if (
-            client &&
-            task.id
-        ) {
-            const table =
-                getTaskTable();
-
-            const updatePayload = {
-                status:
-                    "skipped"
-            };
-
-            /*
-             * Optional reason column can be
-             * configured by the application.
-             */
-
-            const reasonColumn =
-                window.APP_TASK_SKIP_REASON_COLUMN;
-
-            if (
-                reasonColumn &&
-                reason
-            ) {
-                updatePayload[
-                    reasonColumn
-                ] = reason;
-            }
-
-            try {
-                const result =
-                    await client
-                        .from(table)
-                        .update(
-                            updatePayload
-                        )
-                        .eq(
-                            "id",
-                            task.id
-                        );
-
-                updateSucceeded =
-                    !result.error;
-
-                if (
-                    result.error
-                ) {
-                    console.warn(
-                        "Task skip database update failed:",
-                        result.error
-                    );
-                }
-            } catch (error) {
-                console.warn(
-                    "Task skip error:",
-                    error
-                );
-            }
+        if (skipError) {
+            console.warn(
+                "Could not record skip reason:",
+                skipError
+            );
         }
 
-        availableTasks =
-            availableTasks.filter(
-                item =>
-                    String(item.id) !==
-                    String(task.id)
+        // Make the task available again unless an
+        // administrator has already changed it.
+        const {
+            data,
+            error
+        } = await client
+            .from(APP_CONFIG.tables.tasks)
+            .update({
+                status: "skipped",
+                claimed_by: null,
+                claimed_at: null
+            })
+            .eq("id", taskId)
+            .eq(
+                "claimed_by",
+                user.id
+            )
+            .select("*")
+            .maybeSingle();
+
+        if (error) {
+            throw error;
+        }
+
+        if (!data) {
+            throw new Error(
+                "The task could not be skipped because it has changed."
             );
+        }
 
-        renderAvailableTasks(
-            availableTasks
-        );
+        try {
+            await logWorkflowEvent(
+                taskId,
+                "task_skipped",
+                {
+                    reason: cleanReason
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Skip workflow event skipped."
+            );
+        }
 
-        currentTask = null;
-
-        updateTaskActionBar();
-
-        setTaskStatus(
-            updateSucceeded
-                ? "Task skipped."
-                : "Task removed from your current workspace.",
-            updateSucceeded
-                ? "success"
-                : "info"
-        );
+        try {
+            await logActivity(
+                "task_skipped",
+                "Task skipped",
+                {
+                    task_id: taskId,
+                    reason: cleanReason
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Skip activity skipped."
+            );
+        }
 
         emit(
             "taskSkipped",
             {
-                task,
-
-                reason,
-
-                remote:
-                    updateSucceeded
+                task: data,
+                taskId,
+                reason: cleanReason
             }
         );
 
-        return true;
-    } catch (error) {
-        console.error(
-            "Task skip error:",
-            error
-        );
+        clearCurrentTask();
 
-        setTaskStatus(
-            "Unable to skip task.",
-            "error"
-        );
-
-        return false;
+        return data;
     } finally {
-        taskSkipping = false;
-
-        updateTaskButtons();
+        taskState.loading = false;
     }
 }
 
+// ------------------------------------------------------------
+// APPROVE TASK
+// ------------------------------------------------------------
 
-// ============================================================
-// SKIP MODAL
-// ============================================================
-
-function getSkipModal() {
-    return (
-        $("skipModal") ||
-        $("skipTaskModal")
-    );
-}
-
-
-function getSkipReasonInput() {
-    return (
-        $("skipReason") ||
-        $("skipTaskReason") ||
-        $("skipReasonInput")
-    );
-}
-
-
-function getCloseSkipButton() {
-    return (
-        $("closeSkipModal") ||
-        $("cancelSkipTask") ||
-        $("cancelSkip")
-    );
-}
-
-
-function getConfirmSkipButton() {
-    return (
-        $("confirmSkipTask") ||
-        $("skipTaskConfirm") ||
-        $("confirmSkip")
-    );
-}
-
-
-export function openSkipModal() {
-    const modal =
-        getSkipModal();
-
-    if (!modal) {
-        skipCurrentTask();
-
-        return;
-    }
-
-    show(
-        modal,
-        true
-    );
-
-    const reason =
-        getSkipReasonInput();
-
-    if (reason) {
-        reason.value = "";
-
-        setTimeout(
-            () => {
-                try {
-                    reason.focus();
-                } catch (_) {}
-            },
-            0
-        );
-    }
-}
-
-
-export function closeSkipModal() {
-    const modal =
-        getSkipModal();
-
-    if (modal) {
-        show(
-            modal,
-            false
-        );
-    }
-}
-
-
-async function confirmSkip() {
-    const reason =
-        getSkipReasonInput();
-
-    const value =
-        reason?.value?.trim() ||
-        "";
-
-    closeSkipModal();
-
-    await skipCurrentTask(
-        value
-    );
-}
-
-
-// ============================================================
-// TASK ACTION BUTTONS
-// ============================================================
-
-function bindTaskButtons() {
-    const skip =
-        getSkipButton();
-
-    const submit =
-        getSubmitButton();
-
-    const approve =
-        getApproveButton();
-
-    const closeSkip =
-        getCloseSkipButton();
-
-    const confirm =
-        getConfirmSkipButton();
-
-    if (skip) {
-        skip.addEventListener(
-            "click",
-            openSkipModal
-        );
-    }
-
-    if (submit) {
-        submit.addEventListener(
-            "click",
-            submitCurrentTask
-        );
-    }
-
-    if (approve) {
-        approve.addEventListener(
-            "click",
-            approveCurrentTask
-        );
-    }
-
-    if (closeSkip) {
-        closeSkip.addEventListener(
-            "click",
-            closeSkipModal
-        );
-    }
-
-    if (confirm) {
-        confirm.addEventListener(
-            "click",
-            confirmSkip
-        );
-    }
-
-    const modal =
-        getSkipModal();
-
-    if (modal) {
-        modal.addEventListener(
-            "click",
-            event => {
-                if (
-                    event.target ===
-                    modal
-                ) {
-                    closeSkipModal();
-                }
-            }
-        );
-    }
-}
-
-
-// ============================================================
-// APPROVE CURRENT TASK
-// ============================================================
-
-export async function approveCurrentTask() {
-    if (!currentTask) {
-        setTaskStatus(
-            "No task is selected.",
-            "warning"
-        );
-
-        return false;
-    }
-
+async function approveCurrentTask() {
     const client =
-        getClient();
+        getSupabase();
+
+    const user =
+        getCurrentUser();
+
+    const taskId =
+        getCurrentTaskId();
 
     if (!client) {
-        setTaskStatus(
-            "Database connection is unavailable.",
-            "error"
+        throw new Error(
+            "Supabase is not configured."
         );
-
-        return false;
     }
 
-    if (!currentTask.id) {
-        setTaskStatus(
-            "This task has no valid ID.",
-            "error"
+    if (!user?.id) {
+        throw new Error(
+            "Please sign in first."
         );
-
-        return false;
     }
 
-    const task =
-        currentTask;
+    if (
+        !isAdmin() &&
+        !isStaff() &&
+        !isReviewer()
+    ) {
+        throw new Error(
+            "You do not have permission to approve this task."
+        );
+    }
 
-    const table =
-        getTaskTable();
+    if (!taskId) {
+        throw new Error(
+            "There is no active task."
+        );
+    }
+
+    taskState.loading = true;
 
     try {
-        const result =
-            await client
-                .from(table)
-                .update({
-                    status:
-                        "approved"
-                })
-                .eq(
-                    "id",
-                    task.id
-                );
+        await saveTaskAnnotations(
+            taskId
+        );
 
-        if (
-            result.error
-        ) {
-            console.error(
-                "Approve task error:",
-                result.error
+        let approved = false;
+
+        try {
+            const {
+                data,
+                error
+            } = await client.rpc(
+                "approve_task",
+                {
+                    p_task_id: taskId,
+                    p_user_id: user.id
+                }
             );
 
-            setTaskStatus(
-                "Unable to approve task.",
-                "error"
-            );
+            if (!error) {
+                approved = true;
 
-            return false;
+                const result =
+                    Array.isArray(data)
+                        ? data[0]
+                        : data;
+
+                if (result) {
+                    setCurrentTask(
+                        result
+                    );
+                }
+            }
+        } catch (error) {
+            console.warn(
+                "approve_task RPC unavailable:",
+                error
+            );
         }
 
-        currentTask = {
-            ...task,
+        if (!approved) {
+            const {
+                data,
+                error
+            } = await client
+                .from(APP_CONFIG.tables.tasks)
+                .update({
+                    status: "approved"
+                })
+                .eq("id", taskId)
+                .select("*")
+                .maybeSingle();
 
-            status:
-                "approved"
-        };
+            if (error) {
+                throw error;
+            }
 
-        updateTaskActionBar();
+            if (!data) {
+                throw new Error(
+                    "Task could not be approved."
+                );
+            }
 
-        setTaskStatus(
-            "Task approved.",
-            "success"
-        );
+            setCurrentTask(
+                data
+            );
+        }
+
+        try {
+            await logWorkflowEvent(
+                taskId,
+                "task_approved",
+                {
+                    approved_by: user.id
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Approval workflow event skipped."
+            );
+        }
+
+        try {
+            await logActivity(
+                "task_approved",
+                "Task approved",
+                {
+                    task_id: taskId
+                }
+            );
+        } catch (error) {
+            console.debug(
+                "Approval activity skipped."
+            );
+        }
 
         emit(
             "taskApproved",
             {
                 task:
-                    currentTask
+                    taskState.currentTask,
+                taskId
             }
         );
 
-        return true;
-    } catch (error) {
-        console.error(
-            "Approve task error:",
-            error
-        );
-
-        setTaskStatus(
-            "Unable to approve task.",
-            "error"
-        );
-
-        return false;
+        return taskState.currentTask;
+    } finally {
+        taskState.loading = false;
     }
 }
 
+// ------------------------------------------------------------
+// CHANGE FRAME
+// ------------------------------------------------------------
 
-// ============================================================
-// WORK HISTORY
-// ============================================================
-
-function getWorkHistoryContainer() {
-    return (
-        $("workHistoryList") ||
-        $("workHistory")
-    );
-}
-
-
-export async function fetchWorkHistory(
-    options = {}
+function setCurrentFrame(
+    frameNumber
 ) {
-    const limit =
-        Number(
-            options.limit ?? 50
+    const frame =
+        normalizeFrameNumber(
+            frameNumber
         );
 
-    const client =
-        getClient();
+    const state =
+        getAnnotationState();
 
-    if (!client) {
-        renderWorkHistory(
-            taskHistory
-        );
-
-        return taskHistory;
+    if ("currentFrame" in state) {
+        state.currentFrame =
+            frame;
     }
 
-    const user =
-        await requireUser();
-
-    if (!user) {
-        renderWorkHistory(
-            []
-        );
-
-        return [];
+    if ("frameNumber" in state) {
+        state.frameNumber =
+            frame;
     }
 
-    try {
-        const table =
-            getResultTable();
+    window.currentFrame =
+        frame;
 
-        /*
-         * First try submitted_at ordering.
-         */
+    const annotations =
+        taskState.frameAnnotations
+            .get(frame) || [];
 
-        let result =
-            await client
-                .from(table)
-                .select("*")
-                .eq(
-                    "user_id",
-                    user.id
-                )
-                .order(
-                    "submitted_at",
-                    {
-                        ascending:
-                            false
-                    }
-                )
-                .limit(
-                    limit
-                );
-
-        /*
-         * Fallback for schemas that don't
-         * have submitted_at.
-         */
-
-        if (
-            result.error
-        ) {
-            result =
-                await client
-                    .from(table)
-                    .select("*")
-                    .eq(
-                        "user_id",
-                        user.id
-                    )
-                    .limit(
-                        limit
-                    );
-        }
-
-        if (
-            result.error
-        ) {
-            console.warn(
-                "Unable to load work history:",
-                result.error
-            );
-
-            renderWorkHistory(
-                taskHistory
-            );
-
-            return taskHistory;
-        }
-
-        taskHistory =
-            result.data || [];
-
-        renderWorkHistory(
-            taskHistory
-        );
-
-        emit(
-            "workHistoryLoaded",
-            {
-                history:
-                    taskHistory
-            }
-        );
-
-        return taskHistory;
-    } catch (error) {
-        console.error(
-            "Work history error:",
-            error
-        );
-
-        renderWorkHistory(
-            taskHistory
-        );
-
-        return taskHistory;
-    }
-}
-
-
-// ============================================================
-// RENDER WORK HISTORY
-// ============================================================
-
-function renderWorkHistory(
-    history
-) {
-    const container =
-        getWorkHistoryContainer();
-
-    if (!container) {
-        return;
-    }
-
-    if (
-        !Array.isArray(history) ||
-        !history.length
-    ) {
-        container.innerHTML = `
-            <div class="empty-state">
-                No work history yet.
-            </div>
-        `;
-
-        return;
-    }
-
-    container.innerHTML =
-        history
-            .map(
-                item => {
-                    const title =
-                        item.task_title ||
-                        item.title ||
-                        item.task_name ||
-                        (
-                            item.task_id
-                                ? `Task ${item.task_id}`
-                                : "Task"
-                        );
-
-                    const status =
-                        item.status ||
-                        "submitted";
-
-                    const count =
-                        item.annotation_count ??
-                        (
-                            Array.isArray(
-                                item.annotations
-                            )
-                                ? item.annotations.length
-                                : 0
-                        );
-
-                    const date =
-                        item.submitted_at ||
-                        item.completed_at ||
-                        item.created_at ||
-                        null;
-
-                    return `
-                        <div class="history-item">
-
-                            <div class="history-item-title">
-                                ${escapeHTML(
-                                    title
-                                )}
-                            </div>
-
-                            <div class="history-item-meta">
-
-                                <span>
-                                    ${escapeHTML(
-                                        status
-                                    )}
-                                </span>
-
-                                <span>
-                                    ${escapeHTML(
-                                        count
-                                    )}
-                                    annotation${
-                                        Number(
-                                            count
-                                        ) === 1
-                                            ? ""
-                                            : "s"
-                                    }
-                                </span>
-
-                                ${
-                                    date
-                                        ? `
-                                            <span>
-                                                ${escapeHTML(
-                                                    formatDate(
-                                                        date
-                                                    )
-                                                )}
-                                            </span>
-                                        `
-                                        : ""
-                                }
-
-                            </div>
-
-                        </div>
-                    `;
-                }
-            )
-            .join("");
-}
-
-
-// ============================================================
-// DATE FORMAT
-// ============================================================
-
-function formatDate(
-    value
-) {
-    const date =
-        new Date(value);
-
-    if (
-        Number.isNaN(
-            date.getTime()
-        )
-    ) {
-        return String(
-            value ?? ""
-        );
-    }
-
-    return date.toLocaleString();
-}
-
-
-// ============================================================
-// DASHBOARD REFRESH
-// ============================================================
-
-function bindDashboardRefresh() {
-    const button =
-        $("refreshDashboardJobs");
-
-    if (!button) {
-        return;
-    }
-
-    button.addEventListener(
-        "click",
-        async () => {
-            await fetchAvailableTasks();
-        }
+    setAnnotations(
+        annotations
     );
-}
-
-
-// ============================================================
-// WORK HISTORY BUTTON
-// ============================================================
-
-function bindWorkHistoryButton() {
-    const button =
-        $("workHistoryButton");
-
-    if (!button) {
-        return;
-    }
-
-    button.addEventListener(
-        "click",
-        async () => {
-            await fetchWorkHistory();
-
-            emit(
-                "workHistoryOpened"
-            );
-        }
-    );
-}
-
-
-// ============================================================
-// TASK EVENTS
-// ============================================================
-
-function bindTaskEvents() {
-    window.addEventListener(
-        "annotation:taskSelected",
-        event => {
-            const task =
-                event.detail?.task;
-
-            if (task) {
-                selectTask(
-                    task
-                );
-            }
-        }
-    );
-
-    window.addEventListener(
-        "annotation:submitTask",
-        () => {
-            submitCurrentTask();
-        }
-    );
-
-    window.addEventListener(
-        "annotation:skipTask",
-        () => {
-            openSkipModal();
-        }
-    );
-
-    window.addEventListener(
-        "annotation:startTask",
-        () => {
-            startCurrentTask();
-        }
-    );
-}
-
-
-// ============================================================
-// TASK MEDIA EVENT
-// ============================================================
-
-window.addEventListener(
-    "annotation:loadTaskMedia",
-    event => {
-        const task =
-            event.detail?.task;
-
-        if (!task) {
-            return;
-        }
-
-        const mediaURL =
-            task.media_url;
-
-        if (!mediaURL) {
-            return;
-        }
-
-        /*
-         * media.js owns actual media loading.
-         * This event avoids a circular import.
-         */
-
-        window.dispatchEvent(
-            new CustomEvent(
-                "annotation:loadMediaURL",
-                {
-                    detail: {
-                        url:
-                            mediaURL,
-
-                        mediaType:
-                            task.media_type ||
-                            null,
-
-                        task
-                    }
-                }
-            )
-        );
-    }
-);
-
-
-// ============================================================
-// TASK NAVIGATION
-// ============================================================
-
-export async function loadNextTask() {
-    if (
-        !availableTasks.length
-    ) {
-        await fetchAvailableTasks();
-    }
-
-    if (
-        !availableTasks.length
-    ) {
-        setTaskStatus(
-            "No available tasks.",
-            "info"
-        );
-
-        return null;
-    }
-
-    const task =
-        availableTasks[0];
-
-    await selectTask(
-        task
-    );
-
-    return task;
-}
-
-
-// ============================================================
-// TASK COUNTS
-// ============================================================
-
-export function getAvailableTaskCount() {
-    return availableTasks.length;
-}
-
-
-export function getWorkHistory() {
-    return [
-        ...taskHistory
-    ];
-}
-
-
-// ============================================================
-// SET CURRENT TASK
-// ============================================================
-
-export function setCurrentTask(
-    task
-) {
-    currentTask =
-        normalizeTask(
-            task
-        );
-
-    updateTaskActionBar();
-
-    if (currentTask) {
-        emit(
-            "taskSelected",
-            {
-                task:
-                    currentTask
-            }
-        );
-    }
-
-    return currentTask;
-}
-
-
-// ============================================================
-// REFRESH TASKS
-// ============================================================
-
-export async function refreshTasks() {
-    return fetchAvailableTasks();
-}
-
-
-// ============================================================
-// CAN USE UPLOAD
-// ============================================================
-
-export function canUseUpload() {
-    /*
-     * Upload is controlled by the HTML/UI and
-     * application configuration. Keep this
-     * function available because app.js may call it.
-     */
-
-    const panel =
-        $("customerUploadPanel");
-
-    if (panel) {
-        show(
-            panel,
-            true
-        );
-    }
-
-    return true;
-}
-
-
-// ============================================================
-// INITIALIZATION
-// ============================================================
-
-export async function initializeTasks() {
-    if (
-        taskListenersBound
-    ) {
-        return;
-    }
-
-    taskListenersBound = true;
-
-    bindTaskButtons();
-
-    bindDashboardRefresh();
-
-    bindWorkHistoryButton();
-
-    bindTaskEvents();
-
-    updateTaskActionBar();
-
-    canUseUpload();
 
     emit(
-        "tasksReady"
+        "frameChanged",
+        {
+            taskId:
+                getCurrentTaskId(),
+            frameNumber: frame,
+            annotations
+        }
+    );
+
+    return annotations;
+}
+
+// ------------------------------------------------------------
+// GET FRAME ANNOTATIONS
+// ------------------------------------------------------------
+
+function getFrameAnnotations(
+    frameNumber = getCurrentFrameNumber()
+) {
+    return (
+        taskState.frameAnnotations
+            .get(
+                normalizeFrameNumber(
+                    frameNumber
+                )
+            ) || []
     );
 }
 
+// ------------------------------------------------------------
+// UPDATE FRAME SNAPSHOT
+// ------------------------------------------------------------
 
-// ============================================================
-// ALIASES FOR COMPATIBILITY
-// ============================================================
+function saveCurrentFrameToMemory() {
+    const frame =
+        getCurrentFrameNumber();
 
-export const initTasks =
-    initializeTasks;
+    taskState.frameAnnotations.set(
+        frame,
+        [...getAnnotations()]
+    );
 
-export const loadTasks =
-    fetchAvailableTasks;
+    scheduleAnnotationSave();
+}
 
-export const getCurrentTaskState =
-    getCurrentTask;
+// ------------------------------------------------------------
+// ANNOTATION EVENT BINDING
+// ------------------------------------------------------------
 
-export const submitTask =
-    submitCurrentTask;
+function bindAnnotationEvents() {
+    if (
+        taskState.annotationEventsBound
+    ) {
+        return;
+    }
 
-export const skipTask =
-    skipCurrentTask;
+    taskState.annotationEventsBound =
+        true;
 
-export const approveTask =
-    approveCurrentTask;
+    const events = [
+        "annotationCreated",
+        "annotationUpdated",
+        "annotationDeleted",
+        "annotationChanged",
+        "annotationsChanged",
+        "annotationsUpdated",
+        "annotationSelected",
+        "aiAnnotationCreated"
+    ];
 
+    events.forEach(eventName => {
+        window.addEventListener(
+            eventName,
+            () => {
+                if (
+                    getCurrentTaskId()
+                ) {
+                    saveCurrentFrameToMemory();
+                }
+            }
+        );
+    });
+}
 
-// ============================================================
-// GLOBAL COMPATIBILITY
-// ============================================================
+// ------------------------------------------------------------
+// SUBMIT / SKIP BUTTONS
+// ------------------------------------------------------------
 
-window.fetchAvailableTasks =
-    fetchAvailableTasks;
+function bindWorkflowButtons() {
+    const submitButtons = [
+        $("submitTaskButton"),
+        $("submitTaskBtn")
+    ].filter(Boolean);
 
-window.loadTasks =
-    fetchAvailableTasks;
+    submitButtons.forEach(button => {
+        if (
+            button.dataset.taskBound ===
+            "true"
+        ) {
+            return;
+        }
 
-window.selectTask =
-    selectTask;
+        button.dataset.taskBound =
+            "true";
+
+        button.addEventListener(
+            "click",
+            async event => {
+                event.preventDefault();
+
+                try {
+                    await submitCurrentTask();
+                } catch (error) {
+                    console.error(error);
+
+                    if (
+                        typeof window.showToast ===
+                        "function"
+                    ) {
+                        window.showToast(
+                            error.message ||
+                            "Could not submit task.",
+                            "error"
+                        );
+                    }
+                }
+            }
+        );
+    });
+
+    const skipButtons = [
+        $("skipTaskButton"),
+        $("skipTaskBtn")
+    ].filter(Boolean);
+
+    skipButtons.forEach(button => {
+        if (
+            button.dataset.taskBound ===
+            "true"
+        ) {
+            return;
+        }
+
+        button.dataset.taskBound =
+            "true";
+
+        button.addEventListener(
+            "click",
+            event => {
+                event.preventDefault();
+
+                const modal =
+                    $("skipModal");
+
+                if (modal) {
+                    modal.classList.remove(
+                        "hidden"
+                    );
+                }
+            }
+        );
+    });
+
+    const cancelButtons = [
+        $("closeSkipModal"),
+        $("cancelSkipTask")
+    ].filter(Boolean);
+
+    cancelButtons.forEach(button => {
+        if (
+            button.dataset.taskBound ===
+            "true"
+        ) {
+            return;
+        }
+
+        button.dataset.taskBound =
+            "true";
+
+        button.addEventListener(
+            "click",
+            event => {
+                event.preventDefault();
+
+                const modal =
+                    $("skipModal");
+
+                modal?.classList.add(
+                    "hidden"
+                );
+            }
+        );
+    });
+
+    const confirmSkip =
+        $("confirmSkipTask") ||
+        $("confirmSkip");
+
+    if (
+        confirmSkip &&
+        confirmSkip.dataset.taskBound !==
+            "true"
+    ) {
+        confirmSkip.dataset.taskBound =
+            "true";
+
+        confirmSkip.addEventListener(
+            "click",
+            async event => {
+                event.preventDefault();
+
+                const reason =
+                    $(
+                        "skipReason"
+                    )?.value ||
+                    $(
+                        "skipTaskReason"
+                    )?.value ||
+                    "";
+
+                try {
+                    await skipCurrentTask(
+                        reason
+                    );
+
+                    $("skipModal")
+                        ?.classList.add(
+                            "hidden"
+                        );
+                } catch (error) {
+                    if (
+                        typeof window.showToast ===
+                        "function"
+                    ) {
+                        window.showToast(
+                            error.message ||
+                            "Could not skip task.",
+                            "error"
+                        );
+                    }
+                }
+            }
+        );
+    }
+
+    const approveButtons = [
+        $("approveTaskButton"),
+        $("approveTaskBtn")
+    ].filter(Boolean);
+
+    approveButtons.forEach(button => {
+        if (
+            button.dataset.taskBound ===
+            "true"
+        ) {
+            return;
+        }
+
+        button.dataset.taskBound =
+            "true";
+
+        button.addEventListener(
+            "click",
+            async event => {
+                event.preventDefault();
+
+                try {
+                    await approveCurrentTask();
+                } catch (error) {
+                    if (
+                        typeof window.showToast ===
+                        "function"
+                    ) {
+                        window.showToast(
+                            error.message ||
+                            "Could not approve task.",
+                            "error"
+                        );
+                    }
+                }
+            }
+        );
+    });
+}
+
+// ------------------------------------------------------------
+// INITIALIZE
+// ------------------------------------------------------------
+
+async function initializeTasks() {
+    if (taskState.initialized) {
+        return taskState;
+    }
+
+    taskState.initialized =
+        true;
+
+    bindAnnotationEvents();
+    bindWorkflowButtons();
+
+    return taskState;
+}
+
+// ------------------------------------------------------------
+// GLOBAL API
+// ------------------------------------------------------------
+
+window.taskState =
+    taskState;
 
 window.getCurrentTask =
     getCurrentTask;
 
-window.clearCurrentTask =
-    clearCurrentTask;
+window.getCurrentTaskId =
+    getCurrentTaskId;
 
-window.setCurrentTask =
-    setCurrentTask;
+window.selectTask =
+    selectTask;
+
+window.claimTask =
+    claimTask;
+
+window.claimCurrentTask =
+    claimTask;
 
 window.submitCurrentTask =
-    submitCurrentTask;
-
-window.submitTask =
     submitCurrentTask;
 
 window.skipCurrentTask =
     skipCurrentTask;
 
-window.skipTask =
-    skipCurrentTask;
-
 window.approveCurrentTask =
     approveCurrentTask;
 
-window.approveTask =
-    approveCurrentTask;
+window.saveTaskAnnotations =
+    saveTaskAnnotations;
 
-window.loadNextTask =
-    loadNextTask;
+window.loadTaskAnnotations =
+    loadTaskAnnotations;
 
-window.fetchWorkHistory =
-    fetchWorkHistory;
+window.loadCloudAnnotations =
+    loadTaskAnnotations;
 
-window.startCurrentTask =
-    startCurrentTask;
+window.saveCloudAnnotations =
+    saveTaskAnnotations;
 
-window.validateCurrentTask =
-    validateCurrentTask;
+window.clearCurrentTask =
+    clearCurrentTask;
 
-window.updateTaskActionBar =
-    updateTaskActionBar;
+// ------------------------------------------------------------
+// EXPORTS
+// ------------------------------------------------------------
 
-window.initializeTasks =
-    initializeTasks;
+export {
+    taskState,
 
-window.initTasks =
-    initializeTasks;
+    initializeTasks,
 
-window.canUseUpload =
-    canUseUpload;
+    normalizeTask,
 
+    getCurrentTask,
+    getCurrentTaskId,
+    setCurrentTask,
 
-// ============================================================
-// START
-// ============================================================
+    selectTask,
+    claimTask,
+    claimTask as claimCurrentTask,
 
-if (
-    document.readyState ===
-    "loading"
-) {
+    submitCurrentTask,
+    skipCurrentTask,
+    approveCurrentTask,
+
+    saveTaskAnnotations,
+    loadTaskAnnotations,
+
+    saveTaskAnnotations as saveCloudAnnotations,
+    loadTaskAnnotations as loadCloudAnnotations,
+
+    loadTaskMedia,
+
+    setCurrentFrame,
+    getCurrentFrameNumber,
+    getFrameAnnotations,
+
+    clearCurrentTask
+};
+
+// ------------------------------------------------------------
+// AUTO INITIALIZATION
+// ------------------------------------------------------------
+
+if (document.readyState === "loading") {
     document.addEventListener(
         "DOMContentLoaded",
-        initializeTasks,
-        {
-            once: true
-        }
+        () => {
+            initializeTasks();
+        },
+        { once: true }
     );
 } else {
     initializeTasks();
 }
-
-
-// ============================================================
-// END PART 5
-// ============================================================
