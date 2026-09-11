@@ -127,6 +127,7 @@ export async function checkSupabaseConnection() {
 
         return {
             ok: false,
+
             error:
                 supabaseError ||
                 new Error(
@@ -134,6 +135,7 @@ export async function checkSupabaseConnection() {
                 )
         };
     }
+
 
     try {
 
@@ -148,6 +150,7 @@ export async function checkSupabaseConnection() {
                 .select("id")
                 .limit(1);
 
+
         if (error) {
 
             return {
@@ -155,6 +158,7 @@ export async function checkSupabaseConnection() {
                 error
             };
         }
+
 
         return {
             ok: true,
@@ -180,8 +184,10 @@ export async function getSession() {
     if (
         !isSupabaseReady()
     ) {
+
         return null;
     }
+
 
     try {
 
@@ -189,7 +195,10 @@ export async function getSession() {
             data,
             error
         } =
-            await supabase.auth.getSession();
+            await supabase
+                .auth
+                .getSession();
+
 
         if (error) {
 
@@ -200,6 +209,7 @@ export async function getSession() {
 
             return null;
         }
+
 
         return (
             data?.session ||
@@ -220,7 +230,6 @@ export async function getSession() {
 
 // ============================================================
 // GET CURRENT SESSION
-// Compatibility alias
 // ============================================================
 
 export async function getCurrentSession() {
@@ -238,6 +247,7 @@ export async function getCurrentUser() {
     const session =
         await getSession();
 
+
     return (
         session?.user ||
         null
@@ -247,7 +257,6 @@ export async function getCurrentUser() {
 
 // ============================================================
 // SAVE LOCAL SESSION
-// Compatibility helper
 // ============================================================
 
 export function saveLocalSession(
@@ -255,10 +264,21 @@ export function saveLocalSession(
 ) {
 
     if (!session) {
+
         return;
     }
 
+
     try {
+
+        if (
+            typeof localStorage ===
+            "undefined"
+        ) {
+
+            return;
+        }
+
 
         localStorage.setItem(
             `${APP_CONFIG.auth.storageKey}:session`,
@@ -283,6 +303,15 @@ export function clearLocalSession() {
 
     try {
 
+        if (
+            typeof localStorage ===
+            "undefined"
+        ) {
+
+            return;
+        }
+
+
         localStorage.removeItem(
             `${APP_CONFIG.auth.storageKey}:session`
         );
@@ -300,15 +329,13 @@ export function clearLocalSession() {
 // ============================================================
 // UPDATE CLOUD STATUS
 //
-// IMPORTANT:
-// profiles does NOT contain a last_seen_at column.
-//
-// Available relevant columns include:
+// REAL profiles columns:
 // - last_login_at
 // - last_logout_at
 // - updated_at
 //
-// This function therefore uses the real schema.
+// IMPORTANT:
+// There is NO last_seen_at column.
 // ============================================================
 
 export async function updateCloudStatus(
@@ -316,35 +343,101 @@ export async function updateCloudStatus(
     metadata = {}
 ) {
 
+    /*
+     * Backward compatibility.
+     *
+     * Older code may call:
+     *
+     * updateCloudStatus({
+     *     authenticated: true,
+     *     userId: "...",
+     *     ...
+     * });
+     */
+
+    if (
+        status &&
+        typeof status === "object"
+    ) {
+
+        const legacy =
+            status;
+
+
+        metadata = {
+            ...legacy,
+            ...(metadata || {})
+        };
+
+
+        if (
+            legacy.authenticated === false
+        ) {
+
+            status =
+                "logout";
+
+        } else if (
+            legacy.authenticated === true
+        ) {
+
+            status =
+                "login";
+
+        } else {
+
+            status =
+                legacy.status ||
+                legacy.event ||
+                "";
+        }
+    }
+
+
+    const explicitUserId =
+        metadata?.userId ||
+        metadata?.user_id ||
+        null;
+
+
     const user =
         await getCurrentUser();
 
+
+    const userId =
+        explicitUserId ||
+        user?.id ||
+        null;
+
+
     if (
-        !user ||
+        !userId ||
         !isSupabaseReady()
     ) {
 
         return {
             ok: false,
-            error: new Error(
-                "No authenticated Supabase user."
-            )
+
+            error:
+                new Error(
+                    "No authenticated Supabase user."
+                )
         };
     }
+
 
     try {
 
         const now =
             new Date().toISOString();
 
+
         const updates = {
-            updated_at: now
+
+            updated_at:
+                now
         };
 
-
-        // ----------------------------------------------------
-        // NORMALIZE STATUS
-        // ----------------------------------------------------
 
         const normalizedStatus =
             String(
@@ -355,7 +448,7 @@ export async function updateCloudStatus(
 
 
         // ----------------------------------------------------
-        // LOGIN / ONLINE STATUS
+        // LOGIN
         // ----------------------------------------------------
 
         if (
@@ -372,7 +465,7 @@ export async function updateCloudStatus(
 
 
         // ----------------------------------------------------
-        // LOGOUT / OFFLINE STATUS
+        // LOGOUT
         // ----------------------------------------------------
 
         else if (
@@ -389,10 +482,7 @@ export async function updateCloudStatus(
 
 
         // ----------------------------------------------------
-        // OPTIONAL PROFILE METADATA
-        //
-        // Only columns that actually exist in profiles
-        // are accepted here.
+        // OPTIONAL SAFE PROFILE FIELDS
         // ----------------------------------------------------
 
         if (
@@ -438,7 +528,7 @@ export async function updateCloudStatus(
 
 
         // ----------------------------------------------------
-        // UPDATE PROFILE
+        // DATABASE UPDATE
         // ----------------------------------------------------
 
         const {
@@ -448,10 +538,12 @@ export async function updateCloudStatus(
                 .from(
                     APP_CONFIG.tables.profiles
                 )
-                .update(updates)
+                .update(
+                    updates
+                )
                 .eq(
                     "id",
-                    user.id
+                    userId
                 );
 
 
@@ -462,6 +554,7 @@ export async function updateCloudStatus(
                 error
             );
 
+
             return {
                 ok: false,
                 error
@@ -470,9 +563,12 @@ export async function updateCloudStatus(
 
 
         return {
+
             ok: true,
+
             status:
                 normalizedStatus,
+
             updated:
                 updates
         };
@@ -484,6 +580,7 @@ export async function updateCloudStatus(
             error
         );
 
+
         return {
             ok: false,
             error
@@ -493,7 +590,7 @@ export async function updateCloudStatus(
 
 
 // ============================================================
-// SIGN OUT
+// SIGN OUT USER
 // ============================================================
 
 export async function signOutUser() {
@@ -504,16 +601,17 @@ export async function signOutUser() {
 
         clearLocalSession();
 
+
         return {
             success: true
         };
     }
 
+
     try {
 
         // ----------------------------------------------------
-        // Try to record logout before signing out.
-        // Failure here should NOT prevent logout.
+        // Record logout before signing out.
         // ----------------------------------------------------
 
         try {
@@ -521,42 +619,65 @@ export async function signOutUser() {
             const user =
                 await getCurrentUser();
 
-            if (user) {
 
-                await supabase
-                    .from(
-                        APP_CONFIG.tables.profiles
-                    )
-                    .update({
-                        last_logout_at:
-                            new Date().toISOString(),
+            if (user?.id) {
 
-                        updated_at:
-                            new Date().toISOString()
-                    })
-                    .eq(
-                        "id",
-                        user.id
+                const now =
+                    new Date().toISOString();
+
+
+                const {
+                    error:
+                        logoutError
+                } =
+                    await supabase
+                        .from(
+                            APP_CONFIG.tables.profiles
+                        )
+                        .update({
+
+                            last_logout_at:
+                                now,
+
+                            updated_at:
+                                now
+
+                        })
+                        .eq(
+                            "id",
+                            user.id
+                        );
+
+
+                if (logoutError) {
+
+                    console.warn(
+                        "Unable to update logout timestamp:",
+                        logoutError
                     );
+                }
             }
 
         } catch (logoutUpdateError) {
 
             console.warn(
-                "Unable to update logout timestamp:",
+                "Logout timestamp update failed:",
                 logoutUpdateError
             );
         }
 
 
         // ----------------------------------------------------
-        // Supabase logout
+        // Sign out from Supabase.
         // ----------------------------------------------------
 
         const {
             error
         } =
-            await supabase.auth.signOut();
+            await supabase
+                .auth
+                .signOut();
+
 
         clearLocalSession();
 
@@ -567,6 +688,7 @@ export async function signOutUser() {
                 "Sign out failed:",
                 error
             );
+
 
             return {
                 success: false,
@@ -586,7 +708,9 @@ export async function signOutUser() {
             error
         );
 
+
         clearLocalSession();
+
 
         return {
             success: false,
@@ -597,7 +721,7 @@ export async function signOutUser() {
 
 
 // ============================================================
-// AUTH STATE LISTENER
+// SUPABASE AUTH STATE LISTENER
 // ============================================================
 
 export function onAuthStateChange(
@@ -606,12 +730,16 @@ export function onAuthStateChange(
 
     if (
         !isSupabaseReady() ||
-        typeof callback !== "function"
+        typeof callback !==
+            "function"
     ) {
 
         return {
+
             data: {
+
                 subscription: {
+
                     unsubscribe() {}
                 }
             }
@@ -619,51 +747,72 @@ export function onAuthStateChange(
     }
 
 
-    const {
-        data
-    } =
-        supabase.auth.onAuthStateChange(
-            async (
-                event,
-                session
-            ) => {
+    try {
 
-                try {
-
-                    if (session) {
-
-                        saveLocalSession(
-                            session
-                        );
-
-                    } else {
-
-                        clearLocalSession();
-                    }
-
-
-                    await callback(
+        const {
+            data
+        } =
+            supabase
+                .auth
+                .onAuthStateChange(
+                    async (
                         event,
                         session
-                    );
+                    ) => {
 
-                } catch (error) {
+                        try {
 
-                    console.error(
-                        "Auth state callback error:",
-                        error
-                    );
-                }
-            }
+                            if (session) {
+
+                                saveLocalSession(
+                                    session
+                                );
+
+                            } else {
+
+                                clearLocalSession();
+                            }
+
+
+                            await callback(
+                                event,
+                                session
+                            );
+
+                        } catch (error) {
+
+                            console.error(
+                                "Auth state callback error:",
+                                error
+                            );
+                        }
+                    }
+                );
+
+
+        return data;
+
+    } catch (error) {
+
+        console.error(
+            "Unable to register auth listener:",
+            error
         );
 
 
-    return data;
+        return {
+
+            subscription: {
+
+                unsubscribe() {}
+            }
+        };
+    }
 }
 
 
 // ============================================================
-// AUTH EVENT HELPERS
+// AUTH EVENT NAME
 // ============================================================
 
 export function getAuthEventName(
@@ -701,7 +850,7 @@ export function getAuthEventName(
 
 
 // ============================================================
-// DATABASE HELPERS
+// GET PROFILE
 // ============================================================
 
 export async function getProfileByUserId(
@@ -742,6 +891,7 @@ export async function getProfileByUserId(
                 error
             );
 
+
             return null;
         }
 
@@ -758,6 +908,7 @@ export async function getProfileByUserId(
             error
         );
 
+
         return null;
     }
 }
@@ -772,9 +923,12 @@ export async function getCurrentProfile() {
     const user =
         await getCurrentUser();
 
+
     if (!user) {
+
         return null;
     }
+
 
     return await getProfileByUserId(
         user.id
@@ -802,7 +956,9 @@ export async function logActivity(
     const user =
         await getCurrentUser();
 
+
     if (!user) {
+
         return null;
     }
 
@@ -815,13 +971,17 @@ export async function logActivity(
                 user.id,
 
             event_type:
-                eventType,
+                String(
+                    eventType ||
+                    "unknown"
+                ),
 
             metadata:
                 metadata || {},
 
             created_at:
-                new Date().toISOString()
+                new Date()
+                    .toISOString()
         };
 
 
@@ -833,7 +993,9 @@ export async function logActivity(
                 .from(
                     APP_CONFIG.tables.activityLogs
                 )
-                .insert(row)
+                .insert(
+                    row
+                )
                 .select()
                 .maybeSingle();
 
@@ -844,6 +1006,7 @@ export async function logActivity(
                 "Activity log failed:",
                 error
             );
+
 
             return null;
         }
@@ -861,6 +1024,7 @@ export async function logActivity(
             error
         );
 
+
         return null;
     }
 }
@@ -868,6 +1032,10 @@ export async function logActivity(
 
 // ============================================================
 // WORKFLOW EVENT LOGGER
+//
+// IMPORTANT:
+// workflow_events.task_id is NOT NULL.
+// Therefore this function always requires taskId.
 // ============================================================
 
 export async function logWorkflowEvent(
@@ -897,7 +1065,10 @@ export async function logWorkflowEvent(
                 taskId,
 
             event_type:
-                eventType,
+                String(
+                    eventType ||
+                    "unknown"
+                ),
 
             user_id:
                 user?.id ||
@@ -907,7 +1078,8 @@ export async function logWorkflowEvent(
                 metadata || {},
 
             created_at:
-                new Date().toISOString()
+                new Date()
+                    .toISOString()
         };
 
 
@@ -919,7 +1091,9 @@ export async function logWorkflowEvent(
                 .from(
                     APP_CONFIG.tables.workflowEvents
                 )
-                .insert(row)
+                .insert(
+                    row
+                )
                 .select()
                 .maybeSingle();
 
@@ -930,6 +1104,7 @@ export async function logWorkflowEvent(
                 "Workflow event failed:",
                 error
             );
+
 
             return null;
         }
@@ -947,6 +1122,7 @@ export async function logWorkflowEvent(
             error
         );
 
+
         return null;
     }
 }
@@ -956,7 +1132,10 @@ export async function logWorkflowEvent(
 // GLOBAL COMPATIBILITY
 // ============================================================
 
-if (typeof window !== "undefined") {
+if (
+    typeof window !==
+    "undefined"
+) {
 
     window.supabase =
         supabase;
