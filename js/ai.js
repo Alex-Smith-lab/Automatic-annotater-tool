@@ -1,2402 +1,2430 @@
-// ============================================================
-// ANNOTATION AI
-// PART 4 — js/ai.js
-// AI / HUGGING FACE / AUTO ANNOTATION
-// ============================================================
+/* =========================================================
+   AI ANNOTATION
+   File: js/ai.js
+   ========================================================= */
 
 import {
-    pipeline,
-    env
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
-
-import * as Annotation from "./annotation.js";
-
-import {
-    APP_CONFIG
+  APP_CONFIG
 } from "./config.js";
 
+import {
+  getCurrentUser,
+  getCurrentProfile,
+  getRole,
+  canAnnotate
+} from "./auth.js";
 
-// ============================================================
-// HUGGING FACE CONFIGURATION
-// ============================================================
-
-env.allowLocalModels = false;
-env.allowRemoteModels = true;
-
-
-// ============================================================
-// SHARED ANNOTATION API
-// ============================================================
-
-const state = Annotation.state;
-
-const render =
-    typeof Annotation.render === "function"
-        ? Annotation.render
-        : () => {};
-
-const updateCounts =
-    typeof Annotation.updateCounts === "function"
-        ? Annotation.updateCounts
-        : () => {};
-
-const updateAnnotationsList =
-    typeof Annotation.updateAnnotationsList === "function"
-        ? Annotation.updateAnnotationsList
-        : () => {};
-
-const pushHistory =
-    typeof Annotation.pushHistory === "function"
-        ? Annotation.pushHistory
-        : () => {};
+import {
+  getSupabase,
+  logActivity,
+  logWorkflowEvent
+} from "./supabase.js";
 
 
-// ============================================================
-// LOCAL APPLICATION EVENT HELPER
-// ============================================================
+/* =========================================================
+   TRANSFORMERS.JS
+   ========================================================= */
 
-function emit(
-    name,
-    detail = {}
-) {
-    try {
-        window.dispatchEvent(
-            new CustomEvent(
-                String(name),
-                {
-                    detail
-                }
-            )
-        );
-    } catch (error) {
-        console.warn(
-            "Unable to emit application event:",
-            name,
-            error
-        );
-    }
-}
+const TRANSFORMERS_URL =
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.0.1";
+
+let transformersModule = null;
+let transformersLoadingPromise = null;
 
 
-// ============================================================
-// HUGGING FACE MODEL CONFIGURATION
-// ============================================================
+/* =========================================================
+   STATE
+   ========================================================= */
 
-const AI_MODELS = {
-    detr:
-        APP_CONFIG?.aiModels?.detr ||
-        "Xenova/detr-resnet-50",
+const state = {
+  initialized: false,
 
-    yolo:
-        APP_CONFIG?.aiModels?.yolo ||
-        "Xenova/yolov9-c",
+  enabled: true,
+  loading: false,
+  running: false,
 
-    panoptic:
-        APP_CONFIG?.aiModels?.panoptic ||
-        "Xenova/detr-resnet-50-panoptic"
+  currentModel: null,
+  currentModelType: null,
+
+  detector: null,
+
+  lastResult: null,
+  lastError: null,
+
+  progress: 0,
+
+  settings: {
+    confidenceThreshold: 0.35,
+    maxDetections: 100,
+    modelType: "detr"
+  }
 };
 
 
-// ============================================================
-// MODEL CACHE
-// ============================================================
+/* =========================================================
+   MODEL CONFIGURATION
+   ========================================================= */
 
-const modelCache = {
-    detr: null,
-    yolo: null,
-    panoptic: null
+const MODELS = {
+  detr:
+    APP_CONFIG.aiModels?.detr ||
+    "Xenova/detr-resnet-50",
+
+  yolo:
+    APP_CONFIG.aiModels?.yolo ||
+    "Xenova/yolov9-c",
+
+  panoptic:
+    APP_CONFIG.aiModels?.panoptic ||
+    "Xenova/detr-resnet-50-panoptic"
 };
 
 
-const modelPromises = {
-    detr: null,
-    yolo: null,
-    panoptic: null
-};
-
-
-// ============================================================
-// AI RUNTIME STATE
-// ============================================================
-
-let aiRunning = false;
-
-let aiCancelled = false;
-
-let currentAIModel = null;
-
-let lastAIError = null;
-
-let aiRunId = 0;
-
-
-// ============================================================
-// LABEL ALIASES
-// ============================================================
+/* =========================================================
+   LABELS
+   ========================================================= */
 
 const LABEL_ALIASES = {
-    automobile: "car",
-    automobiles: "car",
+  person: "person",
+  people: "person",
 
-    vehicle: "car",
-    vehicles: "car",
+  car: "car",
+  automobile: "car",
 
-    "motor vehicle": "car",
-    "motor vehicles": "car",
+  truck: "truck",
+  bus: "bus",
 
-    human: "person",
-    humans: "person",
+  motorcycle: "motorcycle",
+  motorbike: "motorcycle",
 
-    pedestrian: "person",
-    pedestrians: "person",
+  bicycle: "bicycle",
+  bike: "bicycle",
 
-    cyclist: "bicycle",
-    cyclists: "bicycle",
+  traffic_light: "traffic light",
+  "traffic light": "traffic light",
 
-    bike: "bicycle",
-    bikes: "bicycle",
+  stop_sign: "stop sign",
+  "stop sign": "stop sign",
 
-    motorcycle: "motorcycle",
-    motorcycles: "motorcycle",
+  fire_hydrant: "fire hydrant",
+  "fire hydrant": "fire hydrant",
 
-    auto: "car"
+  dog: "dog",
+  cat: "cat",
+  bird: "bird",
+
+  backpack: "backpack",
+  handbag: "handbag",
+  suitcase: "suitcase",
+
+  chair: "chair",
+  table: "table",
+
+  "potted plant": "potted plant",
+  potted_plant: "potted plant",
+
+  tv: "tv",
+  laptop: "laptop",
+  keyboard: "keyboard",
+  mouse: "mouse",
+
+  phone: "cell phone",
+  cell_phone: "cell phone",
+
+  bottle: "bottle",
+  cup: "cup",
+
+  food: "food",
+  banana: "banana",
+  apple: "apple",
+
+  boat: "boat",
+  train: "train",
+  airplane: "airplane",
+
+  traffic_sign: "traffic sign",
+  traffic_signs: "traffic sign"
 };
 
 
-// ============================================================
-// DEFAULT LABELS
-// ============================================================
+/* =========================================================
+   BASIC HELPERS
+   ========================================================= */
 
-const DEFAULT_LABELS = [
-    "person",
-    "car",
-    "truck",
-    "bus",
-    "motorcycle",
-    "bicycle",
-    "traffic light",
-    "stop sign",
-    "dog",
-    "cat",
-    "bird"
-];
-
-
-// ============================================================
-// DOM HELPER
-// ============================================================
-
-function $(id) {
-    return document.getElementById(id);
+function qs(selector, root = document) {
+  return root.querySelector(selector);
 }
 
-
-function setText(
-    id,
-    text
-) {
-    const element =
-        typeof id === "string"
-            ? $(id)
-            : id;
-
-    if (!element) {
-        return;
-    }
-
-    element.textContent =
-        String(text ?? "");
+function byId(id) {
+  return document.getElementById(id);
 }
 
-
-function setDisplay(
-    id,
-    visible
-) {
-    const element =
-        typeof id === "string"
-            ? $(id)
-            : id;
-
-    if (!element) {
-        return;
-    }
-
-    element.style.display =
-        visible ? "" : "none";
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
+function clamp(value, min, max) {
+  return Math.max(
+    min,
+    Math.min(max, value)
+  );
+}
 
-// ============================================================
-// AI STATUS ELEMENT
-// ============================================================
+function numberOr(value, fallback = 0) {
+  const number = Number(value);
 
-function getAIStatusElement() {
-    return (
-        $("aiStatus") ||
-        $("aiStatusText") ||
-        $("autoAnnotateStatus") ||
-        $("cloudStatus")
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+function normalizeLabel(label) {
+  if (!label) {
+    return "object";
+  }
+
+  const raw =
+    String(label)
+      .trim()
+      .toLowerCase();
+
+  return (
+    LABEL_ALIASES[raw] ||
+    raw.replaceAll("_", " ")
+  );
+}
+
+function showToast(message, type = "info") {
+  if (
+    typeof window.showToast ===
+    "function"
+  ) {
+    window.showToast(
+      message,
+      type
     );
+    return;
+  }
+
+  const container =
+    byId("toastContainer");
+
+  if (!container) {
+    console.log(message);
+    return;
+  }
+
+  const toast =
+    document.createElement("div");
+
+  toast.className =
+    `toast toast-${type}`;
+
+  toast.textContent =
+    message;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 4000);
 }
 
-
-function getAIProgressElement() {
-    return (
-        $("aiProgress") ||
-        $("aiProgressBar") ||
-        $("autoAnnotateProgress")
-    );
-}
-
-
-// ============================================================
-// AI STATUS
-// ============================================================
-
-export function setAIStatus(
-    message,
-    type = "info"
+function dispatchAIEvent(
+  name,
+  detail = {}
 ) {
-    const element =
-        getAIStatusElement();
-
-    if (!element) {
-        return;
-    }
-
-    element.textContent =
-        String(message || "");
-
-    element.dataset.status =
-        type;
-
-    element.classList.remove(
-        "success",
-        "error",
-        "warning",
-        "loading",
-        "info"
-    );
-
-    element.classList.add(
-        type
-    );
+  document.dispatchEvent(
+    new CustomEvent(
+      name,
+      {
+        detail
+      }
+    )
+  );
 }
 
 
-export function updateAIStatus(
-    message,
-    type = "info"
-) {
-    setAIStatus(
-        message,
-        type
-    );
+/* =========================================================
+   SUPABASE
+   ========================================================= */
+
+function supabaseClient() {
+  return (
+    getSupabase?.() ||
+    window.supabaseClient ||
+    null
+  );
 }
 
 
-// ============================================================
-// AI PROGRESS
-// ============================================================
+/* =========================================================
+   AUTHORIZATION
+   ========================================================= */
 
-function setAIProgress(
-    value
-) {
-    const progress =
-        getAIProgressElement();
+function canUseAI() {
+  const user =
+    getCurrentUser();
 
-    if (!progress) {
-        return;
-    }
-
-    const numeric =
-        Math.max(
-            0,
-            Math.min(
-                100,
-                Number(value) || 0
-            )
-        );
-
-    if (
-        progress.tagName ===
-        "PROGRESS"
-    ) {
-        progress.value =
-            numeric;
-
-        progress.max =
-            100;
-
-        return;
-    }
-
-    progress.style.width =
-        `${numeric}%`;
-
-    progress.dataset.progress =
-        String(numeric);
-}
-
-
-// ============================================================
-// AI BUTTON STATE
-// ============================================================
-
-function setAIButtonState(
-    running
-) {
-    const buttons = [
-        $("autoAnnotate"),
-        $("runAI"),
-        $("runAi"),
-        $("aiAnnotateButton")
-    ].filter(Boolean);
-
-    const uniqueButtons =
-        [...new Set(buttons)];
-
-    for (
-        const button of uniqueButtons
-    ) {
-        button.disabled =
-            Boolean(running);
-
-        button.classList.toggle(
-            "loading",
-            Boolean(running)
-        );
-
-        if (
-            button.dataset.originalText ===
-            undefined
-        ) {
-            button.dataset.originalText =
-                button.textContent;
-        }
-
-        if (running) {
-            button.textContent =
-                "AI Running…";
-        } else if (
-            button.dataset.originalText
-        ) {
-            button.textContent =
-                button.dataset.originalText;
-        }
-    }
-}
-
-
-// ============================================================
-// AI PERMISSION
-// ============================================================
-
-export async function checkAIPermission() {
-    if (
-        typeof window.canUseAI ===
-        "function"
-    ) {
-        try {
-            return Boolean(
-                await window.canUseAI()
-            );
-        } catch (error) {
-            console.warn(
-                "canUseAI failed:",
-                error
-            );
-        }
-    }
-
-    if (
-        typeof window.checkAIPermission ===
-        "function" &&
-        window.checkAIPermission !==
-            checkAIPermission
-    ) {
-        try {
-            return Boolean(
-                await window.checkAIPermission()
-            );
-        } catch (error) {
-            console.warn(
-                "External AI permission check failed:",
-                error
-            );
-        }
-    }
-
-    if (
-        window.APP_CONFIG &&
-        window.APP_CONFIG.aiEnabled === false
-    ) {
-        return false;
-    }
-
-    if (
-        APP_CONFIG &&
-        APP_CONFIG.aiEnabled === false
-    ) {
-        return false;
-    }
-
-    return true;
-}
-
-
-// ============================================================
-// CURRENT MEDIA
-// ============================================================
-
-function getCurrentMedia() {
-    if (
-        state.mediaType === "image" &&
-        state.image
-    ) {
-        return state.image;
-    }
-
-    if (
-        state.mediaType === "video"
-    ) {
-        return (
-            $("sourceVideo") ||
-            null
-        );
-    }
-
-    return null;
-}
-
-
-// ============================================================
-// MEDIA CHECK
-// ============================================================
-
-function hasUsableMedia() {
-    const media =
-        getCurrentMedia();
-
-    if (!media) {
-        return false;
-    }
-
-    if (
-        state.mediaType === "image"
-    ) {
-        return Boolean(
-            media.naturalWidth ||
-            media.width
-        );
-    }
-
-    if (
-        state.mediaType === "video"
-    ) {
-        return Boolean(
-            media.videoWidth &&
-            media.videoHeight
-        );
-    }
-
+  if (!user) {
     return false;
+  }
+
+  try {
+    if (
+      typeof canAnnotate ===
+      "function"
+    ) {
+      return canAnnotate();
+    }
+  } catch {
+    // Continue with role fallback.
+  }
+
+  const profile =
+    getCurrentProfile?.();
+
+  const role =
+    profile?.role ||
+    getRole?.() ||
+    "";
+
+  const normalized =
+    String(role)
+      .toLowerCase()
+      .replaceAll("-", "_")
+      .replaceAll(" ", "_");
+
+  return [
+    "coworker_2d_box",
+    "coworker_polygon",
+    "coworker_segmentation",
+    "reviewer",
+    "staff",
+    "admin"
+  ].includes(normalized);
 }
 
 
-// ============================================================
-// MODEL NAME
-// ============================================================
+/* =========================================================
+   SETTINGS
+   ========================================================= */
 
-function normalizeModelName(
-    model
-) {
-    const value =
-        String(
-            model || "detr"
-        )
-            .trim()
-            .toLowerCase();
+function loadAISettings() {
+  try {
+    const stored =
+      localStorage.getItem(
+        "annotation_ai_settings"
+      );
+
+    if (!stored) {
+      return;
+    }
+
+    const parsed =
+      JSON.parse(stored);
 
     if (
-        value === "yolo" ||
-        value === "yolov9"
+      typeof parsed.enabled ===
+      "boolean"
     ) {
-        return "yolo";
+      state.enabled =
+        parsed.enabled;
     }
 
     if (
-        value === "panoptic"
+      parsed.confidenceThreshold !==
+      undefined
     ) {
-        return "panoptic";
-    }
-
-    return "detr";
-}
-
-
-// ============================================================
-// MODEL TASK
-// ============================================================
-
-function getModelTask(
-    modelName
-) {
-    if (
-        modelName === "panoptic"
-    ) {
-        return "image-segmentation";
-    }
-
-    return "object-detection";
-}
-
-
-// ============================================================
-// LOAD AI MODEL
-// ============================================================
-
-export async function loadAIModel(
-    model = "detr"
-) {
-    const modelName =
-        normalizeModelName(
-            model
-        );
-
-    if (
-        modelCache[modelName]
-    ) {
-        currentAIModel =
-            modelName;
-
-        return modelCache[
-            modelName
-        ];
-    }
-
-    if (
-        modelPromises[modelName]
-    ) {
-        return modelPromises[
-            modelName
-        ];
-    }
-
-    const modelId =
-        AI_MODELS[
-            modelName
-        ];
-
-    if (!modelId) {
-        throw new Error(
-            `Unknown AI model: ${modelName}`
+      state.settings.confidenceThreshold =
+        clamp(
+          numberOr(
+            parsed.confidenceThreshold,
+            0.35
+          ),
+          0,
+          1
         );
     }
 
-    setAIStatus(
-        `Loading AI model: ${modelId}`,
-        "loading"
-    );
-
-    setAIProgress(
-        5
-    );
-
-    modelPromises[modelName] =
-        (async () => {
-            try {
-                const task =
-                    getModelTask(
-                        modelName
-                    );
-
-                const loaded =
-                    await pipeline(
-                        task,
-                        modelId
-                    );
-
-                modelCache[
-                    modelName
-                ] = loaded;
-
-                currentAIModel =
-                    modelName;
-
-                setAIProgress(
-                    20
-                );
-
-                setAIStatus(
-                    `AI model ready: ${modelName}`,
-                    "success"
-                );
-
-                return loaded;
-            } catch (error) {
-                lastAIError =
-                    error;
-
-                modelPromises[
-                    modelName
-                ] = null;
-
-                setAIStatus(
-                    `AI model failed to load: ${
-                        error?.message ||
-                        error ||
-                        "Unknown error"
-                    }`,
-                    "error"
-                );
-
-                throw error;
-            }
-        })();
-
-    return modelPromises[
-        modelName
-    ];
-}
-
-
-// ============================================================
-// PRELOAD MODEL
-// ============================================================
-
-export async function preloadAIModel(
-    model = "detr"
-) {
-    try {
-        return await loadAIModel(
-            model
-        );
-    } catch (error) {
-        console.warn(
-            "AI preload failed:",
-            error
-        );
-
-        return null;
-    }
-}
-
-
-// ============================================================
-// NORMALIZE LABEL
-// ============================================================
-
-export function normalizeLabel(
-    label
-) {
-    const original =
-        String(
-            label ||
-            "object"
-        )
-            .trim()
-            .toLowerCase();
-
-    return (
-        LABEL_ALIASES[
-            original
-        ] ||
-        original
-    );
-}
-
-
-// ============================================================
-// NORMALIZE SCORE
-// ============================================================
-
-function normalizeScore(
-    score
-) {
-    const value =
-        Number(score);
-
     if (
-        !Number.isFinite(value)
+      parsed.maxDetections !==
+      undefined
     ) {
-        return 0;
-    }
-
-    if (
-        value > 1
-    ) {
-        return Math.max(
-            0,
-            Math.min(
-                1,
-                value / 100
+      state.settings.maxDetections =
+        Math.max(
+          1,
+          Math.floor(
+            numberOr(
+              parsed.maxDetections,
+              100
             )
+          )
         );
     }
 
-    return Math.max(
-        0,
-        Math.min(
-            1,
-            value
-        )
+    if (
+      parsed.modelType &&
+      MODELS[parsed.modelType]
+    ) {
+      state.settings.modelType =
+        parsed.modelType;
+    }
+  } catch (error) {
+    console.warn(
+      "Unable to load AI settings:",
+      error
     );
+  }
+}
+
+function saveAISettings() {
+  try {
+    localStorage.setItem(
+      "annotation_ai_settings",
+      JSON.stringify({
+        enabled:
+          state.enabled,
+
+        confidenceThreshold:
+          state.settings
+            .confidenceThreshold,
+
+        maxDetections:
+          state.settings
+            .maxDetections,
+
+        modelType:
+          state.settings
+            .modelType
+      })
+    );
+  } catch (error) {
+    console.warn(
+      "Unable to save AI settings:",
+      error
+    );
+  }
+}
+
+function setAIEnabled(enabled) {
+  state.enabled =
+    Boolean(enabled);
+
+  saveAISettings();
+
+  updateAIButtonState();
+
+  dispatchAIEvent(
+    "aiEnabledChanged",
+    {
+      enabled:
+        state.enabled
+    }
+  );
+
+  return state.enabled;
+}
+
+function setConfidenceThreshold(
+  threshold
+) {
+  state.settings.confidenceThreshold =
+    clamp(
+      numberOr(
+        threshold,
+        0.35
+      ),
+      0,
+      1
+    );
+
+  saveAISettings();
+
+  return (
+    state.settings
+      .confidenceThreshold
+  );
+}
+
+function setMaxDetections(
+  maximum
+) {
+  state.settings.maxDetections =
+    Math.max(
+      1,
+      Math.floor(
+        numberOr(
+          maximum,
+          100
+        )
+      )
+    );
+
+  saveAISettings();
+
+  return (
+    state.settings
+      .maxDetections
+  );
+}
+
+function setModelType(
+  modelType
+) {
+  if (
+    !MODELS[modelType]
+  ) {
+    throw new Error(
+      `Unknown AI model: ${modelType}`
+    );
+  }
+
+  state.settings.modelType =
+    modelType;
+
+  /*
+   * Force model reload next time
+   * auto annotation is requested.
+   */
+  if (
+    state.currentModelType !==
+    modelType
+  ) {
+    state.detector = null;
+    state.currentModel = null;
+    state.currentModelType = null;
+  }
+
+  saveAISettings();
+
+  return modelType;
 }
 
 
-// ============================================================
-// NORMALIZE BOX
-// ============================================================
+/* =========================================================
+   LOAD TRANSFORMERS.JS
+   ========================================================= */
 
-function normalizeBox(
-    box
-) {
-    if (!box) {
-        return null;
-    }
+async function loadTransformers() {
+  if (
+    transformersModule
+  ) {
+    return transformersModule;
+  }
 
-    let xmin;
-    let ymin;
-    let xmax;
-    let ymax;
+  if (
+    transformersLoadingPromise
+  ) {
+    return transformersLoadingPromise;
+  }
 
-    if (
-        Array.isArray(box)
-    ) {
-        [
-            xmin,
-            ymin,
-            xmax,
-            ymax
-        ] = box;
-    } else {
-        xmin =
-            box.xmin ??
-            box.x0 ??
-            box.left ??
-            box.x;
-
-        ymin =
-            box.ymin ??
-            box.y0 ??
-            box.top ??
-            box.y;
-
-        xmax =
-            box.xmax ??
-            box.x1 ??
-            box.right;
-
-        ymax =
-            box.ymax ??
-            box.y1 ??
-            box.bottom;
-    }
-
-    xmin =
-        Number(xmin);
-
-    ymin =
-        Number(ymin);
-
-    xmax =
-        Number(xmax);
-
-    ymax =
-        Number(ymax);
-
-    if (
-        !Number.isFinite(xmin) ||
-        !Number.isFinite(ymin) ||
-        !Number.isFinite(xmax) ||
-        !Number.isFinite(ymax)
-    ) {
-        return null;
-    }
-
-    return {
-        xmin:
-            Math.min(
-                xmin,
-                xmax
-            ),
-
-        ymin:
-            Math.min(
-                ymin,
-                ymax
-            ),
-
-        xmax:
-            Math.max(
-                xmin,
-                xmax
-            ),
-
-        ymax:
-            Math.max(
-                ymin,
-                ymax
-            )
-    };
-}
-
-
-// ============================================================
-// NORMALIZE AI PREDICTIONS
-// ============================================================
-
-export function normalizeAIPredictions(
-    predictions,
-    imageWidth,
-    imageHeight
-) {
-    if (!predictions) {
-        return [];
-    }
-
-    let results;
-
-    if (
-        Array.isArray(
-            predictions
-        )
-    ) {
-        results =
-            predictions;
-    } else {
-        results =
-            predictions.detections ||
-            predictions.predictions ||
-            predictions.objects ||
-            predictions.results ||
-            [];
-    }
-
-    if (
-        !Array.isArray(
-            results
-        )
-    ) {
-        return [];
-    }
-
-    const width =
-        Number(imageWidth) || 1;
-
-    const height =
-        Number(imageHeight) || 1;
-
-    const normalized = [];
-
-    for (
-        const prediction of results
-    ) {
-        if (!prediction) {
-            continue;
-        }
-
-        const label =
-            normalizeLabel(
-                prediction.label ??
-                prediction.class ??
-                prediction.name ??
-                prediction.category ??
-                prediction.class_name
-            );
-
-        const score =
-            normalizeScore(
-                prediction.score ??
-                prediction.confidence ??
-                prediction.probability ??
-                prediction.confidence_score
-            );
-
-        const box =
-            normalizeBox(
-                prediction.box ??
-                prediction.bbox ??
-                prediction.boundingBox ??
-                prediction.bounding_box
-            );
-
-        if (!box) {
-            continue;
-        }
-
-        let {
-            xmin,
-            ymin,
-            xmax,
-            ymax
-        } = box;
+  transformersLoadingPromise =
+    import(
+      /* @vite-ignore */
+      TRANSFORMERS_URL
+    )
+      .then(module => {
+        transformersModule =
+          module;
 
         /*
-         * Coordinates between 0 and 1
-         * are interpreted as normalized
-         * coordinates.
+         * Match the original application behavior:
+         * remote models are allowed and local models
+         * are disabled.
          */
-
         if (
-            xmin >= 0 &&
-            ymin >= 0 &&
-            xmax <= 1 &&
-            ymax <= 1
+          transformersModule.env
         ) {
-            xmin *= width;
-            xmax *= width;
+          transformersModule.env
+            .allowLocalModels = false;
 
-            ymin *= height;
-            ymax *= height;
+          transformersModule.env
+            .allowRemoteModels = true;
         }
 
-        xmin =
-            Math.max(
-                0,
-                Math.min(
-                    width,
-                    xmin
-                )
-            );
+        return transformersModule;
+      })
+      .catch(error => {
+        transformersLoadingPromise =
+          null;
 
-        xmax =
-            Math.max(
-                0,
-                Math.min(
-                    width,
-                    xmax
-                )
-            );
+        throw error;
+      });
 
-        ymin =
-            Math.max(
-                0,
-                Math.min(
-                    height,
-                    ymin
-                )
-            );
-
-        ymax =
-            Math.max(
-                0,
-                Math.min(
-                    height,
-                    ymax
-                )
-            );
-
-        const boxWidth =
-            xmax -
-            xmin;
-
-        const boxHeight =
-            ymax -
-            ymin;
-
-        if (
-            boxWidth <= 1 ||
-            boxHeight <= 1
-        ) {
-            continue;
-        }
-
-        normalized.push({
-            label,
-            score,
-
-            box: {
-                xmin,
-                ymin,
-                xmax,
-                ymax
-            },
-
-            width:
-                boxWidth,
-
-            height:
-                boxHeight,
-
-            raw:
-                prediction
-        });
-    }
-
-    return normalized;
+  return transformersLoadingPromise;
 }
 
 
-// ============================================================
-// MEDIA DIMENSIONS
-// ============================================================
+/* =========================================================
+   LOAD DETECTOR
+   ========================================================= */
 
-function getMediaDimensions() {
-    const media =
-        getCurrentMedia();
-
-    if (!media) {
-        return {
-            width: 1,
-            height: 1
-        };
-    }
-
-    if (
-        state.mediaType === "image"
-    ) {
-        return {
-            width:
-                media.naturalWidth ||
-                media.width ||
-                1,
-
-            height:
-                media.naturalHeight ||
-                media.height ||
-                1
-        };
-    }
-
-    return {
-        width:
-            media.videoWidth ||
-            1,
-
-        height:
-            media.videoHeight ||
-            1
-    };
-}
-
-
-// ============================================================
-// GET AI INPUT MEDIA
-// ============================================================
-
-function getAIInputMedia() {
-    const media =
-        getCurrentMedia();
-
-    if (!media) {
-        return null;
-    }
-
-    /*
-     * Images can be passed directly.
-     */
-
-    if (
-        state.mediaType === "image"
-    ) {
-        return media;
-    }
-
-    /*
-     * For videos, use an offscreen canvas
-     * containing the current video frame.
-     */
-
-    if (
-        state.mediaType === "video"
-    ) {
-        if (
-            !media.videoWidth ||
-            !media.videoHeight
-        ) {
-            return null;
-        }
-
-        const offscreen =
-            document.createElement(
-                "canvas"
-            );
-
-        offscreen.width =
-            media.videoWidth;
-
-        offscreen.height =
-            media.videoHeight;
-
-        const context =
-            offscreen.getContext(
-                "2d",
-                {
-                    willReadFrequently:
-                        false
-                }
-            );
-
-        if (!context) {
-            return null;
-        }
-
-        try {
-            context.drawImage(
-                media,
-                0,
-                0,
-                media.videoWidth,
-                media.videoHeight
-            );
-
-            return offscreen;
-        } catch (error) {
-            console.error(
-                "Unable to capture video frame for AI:",
-                error
-            );
-
-            return null;
-        }
-    }
-
-    return null;
-}
-
-
-// ============================================================
-// CREATE AI ANNOTATION
-// ============================================================
-
-export function createAIAnnotation(
-    prediction,
-    options = {}
+async function loadDetector(
+  modelType =
+    state.settings.modelType
 ) {
-    if (!prediction) {
-        return null;
+  if (
+    !MODELS[modelType]
+  ) {
+    throw new Error(
+      `AI model "${modelType}" is not configured.`
+    );
+  }
+
+  if (
+    state.detector &&
+    state.currentModelType ===
+      modelType
+  ) {
+    return state.detector;
+  }
+
+  state.loading = true;
+  state.progress = 0;
+  state.lastError = null;
+
+  updateAIButtonState();
+
+  dispatchAIEvent(
+    "aiModelLoading",
+    {
+      modelType,
+      model:
+        MODELS[modelType]
+    }
+  );
+
+  try {
+    const {
+      pipeline
+    } = await loadTransformers();
+
+    if (
+      typeof pipeline !==
+      "function"
+    ) {
+      throw new Error(
+        "Transformers.js pipeline() is unavailable."
+      );
+    }
+
+    state.progress = 15;
+    updateAIProgress();
+
+    /*
+     * DETR is the default object detector.
+     */
+    const task =
+      modelType === "panoptic"
+        ? "image-segmentation"
+        : "object-detection";
+
+    const detector =
+      await pipeline(
+        task,
+        MODELS[modelType],
+        {
+          progress_callback:
+            progress => {
+              let value =
+                20;
+
+              if (
+                typeof progress
+                  ?.progress ===
+                "number"
+              ) {
+                value =
+                  20 +
+                  (
+                    progress.progress *
+                    0.65
+                  );
+              }
+
+              state.progress =
+                clamp(
+                  Math.round(value),
+                  20,
+                  85
+                );
+
+              updateAIProgress();
+            }
+        }
+      );
+
+    state.detector =
+      detector;
+
+    state.currentModel =
+      MODELS[modelType];
+
+    state.currentModelType =
+      modelType;
+
+    state.progress = 90;
+
+    updateAIProgress();
+
+    dispatchAIEvent(
+      "aiModelLoaded",
+      {
+        modelType,
+        model:
+          MODELS[modelType]
+      }
+    );
+
+    return detector;
+  } catch (error) {
+    state.lastError =
+      error;
+
+    dispatchAIEvent(
+      "aiModelError",
+      {
+        error,
+        modelType
+      }
+    );
+
+    throw error;
+  } finally {
+    state.loading = false;
+
+    updateAIButtonState();
+  }
+}
+
+
+/* =========================================================
+   IMAGE / VIDEO SOURCE
+   ========================================================= */
+
+function getAnnotationImage() {
+  const image =
+    byId("annotationImage");
+
+  if (
+    image &&
+    image.complete &&
+    image.naturalWidth > 0
+  ) {
+    return image;
+  }
+
+  return null;
+}
+
+function getAnnotationVideo() {
+  const video =
+    byId("annotationVideo");
+
+  if (
+    video &&
+    video.readyState >= 2 &&
+    video.videoWidth > 0
+  ) {
+    return video;
+  }
+
+  return null;
+}
+
+function getMediaElement() {
+  return (
+    getAnnotationImage() ||
+    getAnnotationVideo()
+  );
+}
+
+function getCanvasDimensions(
+  element
+) {
+  if (!element) {
+    return {
+      width: 0,
+      height: 0
+    };
+  }
+
+  if (
+    element.tagName ===
+    "VIDEO"
+  ) {
+    return {
+      width:
+        element.videoWidth ||
+        element.clientWidth ||
+        0,
+
+      height:
+        element.videoHeight ||
+        element.clientHeight ||
+        0
+    };
+  }
+
+  return {
+    width:
+      element.naturalWidth ||
+      element.width ||
+      element.clientWidth ||
+      0,
+
+    height:
+      element.naturalHeight ||
+      element.height ||
+      element.clientHeight ||
+      0
+  };
+}
+
+
+/* =========================================================
+   IMAGE DATA
+   ========================================================= */
+
+function createCanvasFromElement(
+  element
+) {
+  const {
+    width,
+    height
+  } =
+    getCanvasDimensions(
+      element
+    );
+
+  if (
+    width <= 0 ||
+    height <= 0
+  ) {
+    throw new Error(
+      "Media has no usable dimensions."
+    );
+  }
+
+  const canvas =
+    document.createElement(
+      "canvas"
+    );
+
+  canvas.width =
+    width;
+
+  canvas.height =
+    height;
+
+  const context =
+    canvas.getContext(
+      "2d",
+      {
+        willReadFrequently:
+          false
+      }
+    );
+
+  if (!context) {
+    throw new Error(
+      "Unable to create drawing context."
+    );
+  }
+
+  context.drawImage(
+    element,
+    0,
+    0,
+    width,
+    height
+  );
+
+  return canvas;
+}
+
+function canvasToDataURL(
+  canvas
+) {
+  return canvas.toDataURL(
+    "image/jpeg",
+    0.9
+  );
+}
+
+
+/* =========================================================
+   AI OUTPUT NORMALIZATION
+   ========================================================= */
+
+function normalizeBox(
+  box,
+  sourceWidth,
+  sourceHeight
+) {
+  if (!box) {
+    return null;
+  }
+
+  /*
+   * Transformers.js DETR normally returns:
+   * { xmin, ymin, xmax, ymax }
+   */
+  let xmin =
+    numberOr(
+      box.xmin ??
+      box.x0 ??
+      box.left,
+      0
+    );
+
+  let ymin =
+    numberOr(
+      box.ymin ??
+      box.y0 ??
+      box.top,
+      0
+    );
+
+  let xmax =
+    numberOr(
+      box.xmax ??
+      box.x1 ??
+      box.right,
+      0
+    );
+
+  let ymax =
+    numberOr(
+      box.ymax ??
+      box.y1 ??
+      box.bottom,
+      0
+    );
+
+  /*
+   * Some models return normalized
+   * 0–1 coordinates.
+   */
+  if (
+    xmin >= 0 &&
+    xmin <= 1 &&
+    xmax >= 0 &&
+    xmax <= 1 &&
+    ymin >= 0 &&
+    ymin <= 1 &&
+    ymax >= 0 &&
+    ymax <= 1 &&
+    sourceWidth > 2 &&
+    sourceHeight > 2
+  ) {
+    xmin *= sourceWidth;
+    xmax *= sourceWidth;
+    ymin *= sourceHeight;
+    ymax *= sourceHeight;
+  }
+
+  xmin =
+    clamp(
+      xmin,
+      0,
+      sourceWidth
+    );
+
+  xmax =
+    clamp(
+      xmax,
+      0,
+      sourceWidth
+    );
+
+  ymin =
+    clamp(
+      ymin,
+      0,
+      sourceHeight
+    );
+
+  ymax =
+    clamp(
+      ymax,
+      0,
+      sourceHeight
+    );
+
+  if (
+    xmax <= xmin ||
+    ymax <= ymin
+  ) {
+    return null;
+  }
+
+  return {
+    xmin,
+    ymin,
+    xmax,
+    ymax
+  };
+}
+
+function normalizeDetection(
+  detection,
+  sourceWidth,
+  sourceHeight,
+  index
+) {
+  if (!detection) {
+    return null;
+  }
+
+  const score =
+    numberOr(
+      detection.score ??
+      detection.confidence ??
+      detection.probability,
+      0
+    );
+
+  if (
+    score <
+    state.settings
+      .confidenceThreshold
+  ) {
+    return null;
+  }
+
+  const box =
+    normalizeBox(
+      detection.box ||
+      detection.bbox ||
+      detection,
+      sourceWidth,
+      sourceHeight
+    );
+
+  if (!box) {
+    return null;
+  }
+
+  const rawLabel =
+    detection.label ||
+    detection.class ||
+    detection.name ||
+    `object-${index + 1}`;
+
+  const label =
+    normalizeLabel(
+      rawLabel
+    );
+
+  return {
+    id:
+      `ai-${Date.now()}-${index}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`,
+
+    label,
+
+    originalLabel:
+      String(rawLabel),
+
+    classification:
+      label,
+
+    confidence:
+      clamp(
+        score,
+        0,
+        1
+      ),
+
+    score:
+      clamp(
+        score,
+        0,
+        1
+      ),
+
+    occlusion:
+      "unknown",
+
+    truncation:
+      "unknown",
+
+    type:
+      "box",
+
+    source:
+      "ai",
+
+    aiGenerated:
+      true,
+
+    box
+  };
+}
+
+
+/* =========================================================
+   DETECTION PARSING
+   ========================================================= */
+
+function parseObjectDetectionOutput(
+  output,
+  sourceWidth,
+  sourceHeight
+) {
+  if (!Array.isArray(output)) {
+    return [];
+  }
+
+  const annotations = [];
+
+  for (
+    let index = 0;
+    index < output.length;
+    index++
+  ) {
+    const normalized =
+      normalizeDetection(
+        output[index],
+        sourceWidth,
+        sourceHeight,
+        index
+      );
+
+    if (normalized) {
+      annotations.push(
+        normalized
+      );
+    }
+
+    if (
+      annotations.length >=
+      state.settings
+        .maxDetections
+    ) {
+      break;
+    }
+  }
+
+  return annotations;
+}
+
+
+/* =========================================================
+   SEGMENTATION OUTPUT
+   ========================================================= */
+
+function maskToPolygon(
+  mask,
+  sourceWidth,
+  sourceHeight
+) {
+  /*
+   * Segmentation output formats vary by
+   * Transformers.js/model version. This function
+   * supports common tensor-like mask objects.
+   */
+  if (!mask) {
+    return null;
+  }
+
+  let data =
+    mask.data ||
+    mask;
+
+  let width =
+    numberOr(
+      mask.width ??
+      mask.shape?.[mask.shape.length - 1],
+      0
+    );
+
+  let height =
+    numberOr(
+      mask.height ??
+      mask.shape?.[mask.shape.length - 2],
+      0
+    );
+
+  if (
+    !data ||
+    !width ||
+    !height
+  ) {
+    return null;
+  }
+
+  try {
+    /*
+     * Convert a binary mask to a simple polygon
+     * using its occupied bounding region.
+     *
+     * This keeps the AI output compatible with the
+     * annotation editor without requiring a heavy
+     * polygon tracing library.
+     */
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    const length =
+      Math.min(
+        data.length ||
+        0,
+        width * height
+      );
+
+    for (
+      let i = 0;
+      i < length;
+      i++
+    ) {
+      const value =
+        numberOr(
+          data[i],
+          0
+        );
+
+      if (
+        value <= 0.5
+      ) {
+        continue;
+      }
+
+      const x =
+        i % width;
+
+      const y =
+        Math.floor(
+          i / width
+        );
+
+      minX =
+        Math.min(
+          minX,
+          x
+        );
+
+      minY =
+        Math.min(
+          minY,
+          y
+        );
+
+      maxX =
+        Math.max(
+          maxX,
+          x
+        );
+
+      maxY =
+        Math.max(
+          maxY,
+          y
+        );
+    }
+
+    if (
+      maxX < minX ||
+      maxY < minY
+    ) {
+      return null;
+    }
+
+    const scaleX =
+      sourceWidth /
+      width;
+
+    const scaleY =
+      sourceHeight /
+      height;
+
+    return [
+      {
+        x:
+          minX *
+          scaleX,
+
+        y:
+          minY *
+          scaleY
+      },
+      {
+        x:
+          (maxX + 1) *
+          scaleX,
+
+        y:
+          minY *
+          scaleY
+      },
+      {
+        x:
+          (maxX + 1) *
+          scaleX,
+
+        y:
+          (maxY + 1) *
+          scaleY
+      },
+      {
+        x:
+          minX *
+          scaleX,
+
+        y:
+          (maxY + 1) *
+          scaleY
+      }
+    ];
+  } catch {
+    return null;
+  }
+}
+
+function parseSegmentationOutput(
+  output,
+  sourceWidth,
+  sourceHeight
+) {
+  if (!Array.isArray(output)) {
+    return [];
+  }
+
+  const annotations = [];
+
+  for (
+    let index = 0;
+    index < output.length;
+    index++
+  ) {
+    const item =
+      output[index];
+
+    if (!item) {
+      continue;
+    }
+
+    const score =
+      numberOr(
+        item.score ??
+        item.confidence,
+        0
+      );
+
+    if (
+      score <
+      state.settings
+        .confidenceThreshold
+    ) {
+      continue;
     }
 
     const label =
-        prediction.label ||
-        "object";
+      normalizeLabel(
+        item.label ||
+        item.class ||
+        `object-${index + 1}`
+      );
 
-    const score =
-        prediction.score ??
-        prediction.confidence ??
-        0;
-
-    const box =
-        prediction.box;
-
-    if (!box) {
-        return null;
-    }
-
-    const normalizedBox =
-        normalizeBox(
-            box
-        );
-
-    if (!normalizedBox) {
-        return null;
-    }
+    const polygon =
+      maskToPolygon(
+        item.mask ||
+        item.segmentation,
+        sourceWidth,
+        sourceHeight
+      );
 
     if (
-        !state ||
-        !Array.isArray(
-            state.annotations
-        )
+      !polygon ||
+      polygon.length < 3
     ) {
-        return null;
+      continue;
     }
 
-    const nextId =
-        Number(
-            state.nextId
-        ) || 1;
+    annotations.push({
+      id:
+        `ai-seg-${Date.now()}-${index}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
 
-    state.nextId =
-        nextId + 1;
+      label,
 
-    const annotation = {
-        id:
-            nextId,
+      classification:
+        label,
 
-        type:
-            options.type ||
-            "box",
+      confidence:
+        clamp(
+          score,
+          0,
+          1
+        ),
 
-        label:
-            normalizeLabel(
-                label
-            ),
+      score:
+        clamp(
+          score,
+          0,
+          1
+        ),
 
-        confidence:
-            normalizeScore(
-                score
-            ),
+      occlusion:
+        "unknown",
 
-        x:
-            normalizedBox.xmin,
+      truncation:
+        "unknown",
 
-        y:
-            normalizedBox.ymin,
+      type:
+        "segmentation",
 
-        width:
-            normalizedBox.xmax -
-            normalizedBox.xmin,
+      source:
+        "ai",
 
-        height:
-            normalizedBox.ymax -
-            normalizedBox.ymin,
+      aiGenerated:
+        true,
 
-        selected:
-            false,
+      polygon
+    });
 
-        occluded:
-            false,
+    if (
+      annotations.length >=
+      state.settings
+        .maxDetections
+    ) {
+      break;
+    }
+  }
 
-        truncated:
-            false,
+  return annotations;
+}
 
-        source:
-            "ai",
 
-        aiGenerated:
-            true,
+/* =========================================================
+   RUN MODEL
+   ========================================================= */
 
-        frame:
-            state.mediaType ===
-            "video"
-                ? Number(
-                    state.currentFrame
-                ) || 0
-                : 0,
+async function runDetection(
+  element,
+  modelType =
+    state.settings.modelType
+) {
+  if (!element) {
+    throw new Error(
+      "No media is loaded."
+    );
+  }
 
-        createdAt:
-            Date.now()
+  const {
+    width,
+    height
+  } =
+    getCanvasDimensions(
+      element
+    );
+
+  if (
+    width <= 0 ||
+    height <= 0
+  ) {
+    throw new Error(
+      "Media is not ready for AI annotation."
+    );
+  }
+
+  const detector =
+    await loadDetector(
+      modelType
+    );
+
+  state.running = true;
+  state.progress = 92;
+
+  updateAIButtonState();
+  updateAIProgress();
+
+  try {
+    let input =
+      element;
+
+    /*
+     * Some environments/models handle an image/video
+     * element directly. If that fails, retry using a
+     * canvas-generated image.
+     */
+    let output;
+
+    try {
+      output =
+        await detector(
+          input,
+          {
+            threshold:
+              state.settings
+                .confidenceThreshold,
+
+            percentage:
+              true
+          }
+        );
+    } catch (
+      directError
+    ) {
+      console.warn(
+        "Direct AI input failed; retrying through canvas:",
+        directError
+      );
+
+      const canvas =
+        createCanvasFromElement(
+          element
+        );
+
+      input =
+        canvasToDataURL(
+          canvas
+        );
+
+      output =
+        await detector(
+          input,
+          {
+            threshold:
+              state.settings
+                .confidenceThreshold,
+
+            percentage:
+              true
+          }
+        );
+    }
+
+    state.progress = 100;
+
+    updateAIProgress();
+
+    return {
+      output,
+      width,
+      height,
+      modelType
+    };
+  } finally {
+    state.running = false;
+
+    updateAIButtonState();
+  }
+}
+
+
+/* =========================================================
+   CONVERT AI RESULT TO APP ANNOTATIONS
+   ========================================================= */
+
+function convertAIResult(
+  result
+) {
+  if (!result) {
+    return [];
+  }
+
+  const {
+    output,
+    width,
+    height,
+    modelType
+  } = result;
+
+  if (
+    modelType ===
+    "panoptic"
+  ) {
+    return parseSegmentationOutput(
+      output,
+      width,
+      height
+    );
+  }
+
+  return parseObjectDetectionOutput(
+    output,
+    width,
+    height
+  );
+}
+
+
+/* =========================================================
+   SEND ANNOTATIONS TO ANNOTATION MODULE
+   ========================================================= */
+
+function addToAnnotationWorkspace(
+  annotations
+) {
+  if (
+    !Array.isArray(
+      annotations
+    ) ||
+    !annotations.length
+  ) {
+    return [];
+  }
+
+  /*
+   * Preferred modular API.
+   */
+  if (
+    window.annotation &&
+    typeof window.annotation
+      .addAnnotations ===
+      "function"
+  ) {
+    return window.annotation
+      .addAnnotations(
+        annotations
+      );
+  }
+
+  if (
+    window.annotation &&
+    typeof window.annotation
+      .addAnnotation ===
+      "function"
+  ) {
+    const added = [];
+
+    for (
+      const annotation of
+      annotations
+    ) {
+      const result =
+        window.annotation
+          .addAnnotation(
+            annotation
+          );
+
+      if (result) {
+        added.push(
+          result
+        );
+      }
+    }
+
+    return added;
+  }
+
+  /*
+   * Event-based fallback.
+   */
+  dispatchAIEvent(
+    "aiAnnotationsReady",
+    {
+      annotations
+    }
+  );
+
+  /*
+   * Legacy compatibility.
+   */
+  if (
+    typeof window.applyAIAnnotations ===
+    "function"
+  ) {
+    return window.applyAIAnnotations(
+      annotations
+    );
+  }
+
+  return annotations;
+}
+
+
+/* =========================================================
+   MAIN AUTO ANNOTATION
+   ========================================================= */
+
+async function autoAnnotate(
+  options = {}
+) {
+  if (
+    state.running
+  ) {
+    showToast(
+      "AI annotation is already running.",
+      "info"
+    );
+
+    return [];
+  }
+
+  if (
+    !state.enabled &&
+    options.ignoreDisabled !==
+      true
+  ) {
+    showToast(
+      "AI annotation is disabled in settings.",
+      "error"
+    );
+
+    return [];
+  }
+
+  if (!canUseAI()) {
+    showToast(
+      "Your current role cannot use AI annotation.",
+      "error"
+    );
+
+    return [];
+  }
+
+  const element =
+    options.element ||
+    getMediaElement();
+
+  if (!element) {
+    showToast(
+      "Load an image or video frame first.",
+      "error"
+    );
+
+    return [];
+  }
+
+  const modelType =
+    options.modelType ||
+    state.settings.modelType;
+
+  state.lastError =
+    null;
+
+  state.lastResult =
+    null;
+
+  dispatchAIEvent(
+    "aiStarted",
+    {
+      modelType
+    }
+  );
+
+  showToast(
+    "AI is analyzing the media...",
+    "info"
+  );
+
+  try {
+    const result =
+      await runDetection(
+        element,
+        modelType
+      );
+
+    const annotations =
+      convertAIResult(
+        result
+      );
+
+    state.lastResult = {
+      ...result,
+      annotations
     };
 
     if (
-        Array.isArray(
-            options.polygon
-        )
+      !annotations.length
     ) {
-        annotation.points =
-            options.polygon;
+      showToast(
+        "AI did not find objects above the confidence threshold.",
+        "info"
+      );
 
-        annotation.type =
-            "polygon";
-    }
-
-    return annotation;
-}
-
-
-// ============================================================
-// IOU
-// ============================================================
-
-function intersectionOverUnion(
-    a,
-    b
-) {
-    if (
-        !a?.box ||
-        !b?.box
-    ) {
-        return 0;
-    }
-
-    const ax1 =
-        a.box.xmin;
-
-    const ay1 =
-        a.box.ymin;
-
-    const ax2 =
-        a.box.xmax;
-
-    const ay2 =
-        a.box.ymax;
-
-    const bx1 =
-        b.box.xmin;
-
-    const by1 =
-        b.box.ymin;
-
-    const bx2 =
-        b.box.xmax;
-
-    const by2 =
-        b.box.ymax;
-
-    const ix1 =
-        Math.max(
-            ax1,
-            bx1
-        );
-
-    const iy1 =
-        Math.max(
-            ay1,
-            by1
-        );
-
-    const ix2 =
-        Math.min(
-            ax2,
-            bx2
-        );
-
-    const iy2 =
-        Math.min(
-            ay2,
-            by2
-        );
-
-    const intersectionWidth =
-        Math.max(
-            0,
-            ix2 - ix1
-        );
-
-    const intersectionHeight =
-        Math.max(
-            0,
-            iy2 - iy1
-        );
-
-    const intersection =
-        intersectionWidth *
-        intersectionHeight;
-
-    const areaA =
-        Math.max(
-            0,
-            ax2 - ax1
-        ) *
-        Math.max(
-            0,
-            ay2 - ay1
-        );
-
-    const areaB =
-        Math.max(
-            0,
-            bx2 - bx1
-        ) *
-        Math.max(
-            0,
-            by2 - by1
-        );
-
-    const union =
-        areaA +
-        areaB -
-        intersection;
-
-    if (
-        union <= 0
-    ) {
-        return 0;
-    }
-
-    return (
-        intersection /
-        union
-    );
-}
-
-
-// ============================================================
-// REMOVE DUPLICATES
-// ============================================================
-
-function removeDuplicatePredictions(
-    predictions,
-    iouThreshold = 0.85
-) {
-    if (
-        !Array.isArray(
-            predictions
-        )
-    ) {
-        return [];
-    }
-
-    const sorted =
-        [...predictions]
-            .sort(
-                (a, b) =>
-                    normalizeScore(
-                        b.score
-                    ) -
-                    normalizeScore(
-                        a.score
-                    )
-            );
-
-    const output = [];
-
-    for (
-        const prediction of sorted
-    ) {
-        const duplicate =
-            output.some(
-                existing =>
-                    existing.label ===
-                        prediction.label &&
-                    intersectionOverUnion(
-                        existing,
-                        prediction
-                    ) >=
-                        iouThreshold
-            );
-
-        if (!duplicate) {
-            output.push(
-                prediction
-            );
-        }
-    }
-
-    return output;
-}
-
-
-// ============================================================
-// ADD AI PREDICTIONS
-// ============================================================
-
-export function addAIPredictions(
-    predictions,
-    options = {}
-) {
-    if (
-        !Array.isArray(
-            predictions
-        )
-    ) {
-        return [];
-    }
-
-    if (
-        !state ||
-        !Array.isArray(
-            state.annotations
-        )
-    ) {
-        return [];
-    }
-
-    const {
-        replace = false,
-        deduplicate = true
-    } = options;
-
-    let items =
-        deduplicate
-            ? removeDuplicatePredictions(
-                predictions
-            )
-            : predictions;
-
-    if (replace) {
-        state.annotations =
-            [];
-
-        state.selectedId =
-            null;
-    }
-
-    const created = [];
-
-    for (
-        const prediction of items
-    ) {
-        const annotation =
-            createAIAnnotation(
-                prediction,
-                options
-            );
-
-        if (!annotation) {
-            continue;
-        }
-
-        state.annotations.push(
-            annotation
-        );
-
-        created.push(
-            annotation
-        );
-    }
-
-    if (
-        created.length
-    ) {
-        try {
-            pushHistory(
-                "AI annotations"
-            );
-        } catch (error) {
-            console.warn(
-                "Unable to save AI annotation history:",
-                error
-            );
-        }
-    }
-
-    try {
-        updateCounts();
-    } catch (_) {}
-
-    try {
-        updateAnnotationsList();
-    } catch (_) {}
-
-    try {
-        render();
-    } catch (_) {}
-
-    emit(
-        "aiAnnotationsCreated",
+      dispatchAIEvent(
+        "aiCompleted",
         {
-            count:
-                created.length,
-
-            annotations:
-                created
+          annotations: [],
+          result:
+            state.lastResult
         }
+      );
+
+      return [];
+    }
+
+    const added =
+      addToAnnotationWorkspace(
+        annotations
+      );
+
+    const finalAnnotations =
+      Array.isArray(added)
+        ? added
+        : annotations;
+
+    /*
+     * Notify tasks.js / annotation.js so the
+     * current task can be persisted.
+     */
+    dispatchAIEvent(
+      "aiAnnotationsAdded",
+      {
+        annotations:
+          finalAnnotations,
+
+        count:
+          finalAnnotations.length,
+
+        model:
+          MODELS[modelType]
+      }
     );
 
-    return created;
+    await recordAIActivity(
+      finalAnnotations,
+      modelType
+    );
+
+    showToast(
+      `${finalAnnotations.length} AI annotation${
+        finalAnnotations.length === 1
+          ? ""
+          : "s"
+      } added.`,
+      "success"
+    );
+
+    dispatchAIEvent(
+      "aiCompleted",
+      {
+        annotations:
+          finalAnnotations,
+
+        result:
+          state.lastResult
+      }
+    );
+
+    return finalAnnotations;
+  } catch (error) {
+    state.lastError =
+      error;
+
+    console.error(
+      "AI annotation failed:",
+      error
+    );
+
+    showToast(
+      error?.message ||
+      "AI annotation failed.",
+      "error"
+    );
+
+    dispatchAIEvent(
+      "aiError",
+      {
+        error
+      }
+    );
+
+    return [];
+  } finally {
+    state.progress = 0;
+
+    updateAIProgress();
+
+    state.running = false;
+
+    updateAIButtonState();
+  }
 }
 
 
-// ============================================================
-// FALLBACK DETECTION
-// ============================================================
+/* =========================================================
+   VIDEO FRAME AI
+   ========================================================= */
 
-export async function fallbackDetection(
-    options = {}
+async function autoAnnotateCurrentFrame(
+  options = {}
 ) {
-    const {
-        threshold = 0.5
-    } = options;
+  const video =
+    getAnnotationVideo();
 
-    try {
-        const model =
-            await loadAIModel(
-                "detr"
-            );
+  if (!video) {
+    showToast(
+      "No video frame is loaded.",
+      "error"
+    );
 
-        const media =
-            getAIInputMedia();
+    return [];
+  }
 
-        if (!media) {
-            return [];
-        }
-
-        const predictions =
-            await model(
-                media
-            );
-
-        const {
-            width,
-            height
-        } =
-            getMediaDimensions();
-
-        return normalizeAIPredictions(
-            predictions,
-            width,
-            height
-        ).filter(
-            item =>
-                item.score >=
-                threshold
-        );
-    } catch (error) {
-        lastAIError =
-            error;
-
-        console.error(
-            "Fallback detection failed:",
-            error
-        );
-
-        return [];
-    }
+  /*
+   * The video element represents the current frame,
+   * so the detector receives exactly the frame currently
+   * displayed in the annotation workspace.
+   */
+  return autoAnnotate({
+    ...options,
+    element:
+      video
+  });
 }
 
 
-// ============================================================
-// RUN DETECTION
-// ============================================================
+/* =========================================================
+   AI ACTIVITY LOG
+   ========================================================= */
 
-export async function runDetection(
-    options = {}
+async function recordAIActivity(
+  annotations,
+  modelType
 ) {
-    const {
-        model = "detr",
-        threshold = 0.5
-    } = options;
+  const user =
+    getCurrentUser();
 
-    const modelName =
-        normalizeModelName(
-            model
-        );
+  if (!user?.id) {
+    return;
+  }
 
-    const media =
-        getAIInputMedia();
+  const payload = {
+    user_id:
+      user.id,
 
-    if (!media) {
-        throw new Error(
-            "No usable image or video frame is available."
-        );
-    }
+    model:
+      MODELS[modelType],
 
-    const aiModel =
-        await loadAIModel(
-            modelName
-        );
+    model_type:
+      modelType,
 
-    setAIStatus(
-        "Running AI detection…",
-        "loading"
+    annotation_count:
+      Array.isArray(
+        annotations
+      )
+        ? annotations.length
+        : 0,
+
+    confidence_threshold:
+      state.settings
+        .confidenceThreshold
+  };
+
+  try {
+    await logWorkflowEvent?.(
+      "ai_annotation_completed",
+      payload
     );
-
-    setAIProgress(
-        30
+  } catch (error) {
+    console.warn(
+      "Workflow event logging failed:",
+      error
     );
+  }
 
-    const predictions =
-        await aiModel(
-            media
-        );
-
-    setAIProgress(
-        75
+  try {
+    await logActivity?.(
+      "ai_annotation_completed",
+      payload
     );
-
-    const {
-        width,
-        height
-    } =
-        getMediaDimensions();
-
-    const normalized =
-        normalizeAIPredictions(
-            predictions,
-            width,
-            height
-        );
-
-    const filtered =
-        normalized.filter(
-            prediction =>
-                prediction.score >=
-                threshold
-        );
-
-    setAIProgress(
-        90
+  } catch (error) {
+    console.warn(
+      "Activity logging failed:",
+      error
     );
-
-    return filtered;
+  }
 }
 
 
-// ============================================================
-// RUN AUTO ANNOTATE
-// ============================================================
+/* =========================================================
+   AI BUTTON UI
+   ========================================================= */
 
-export async function runAutoAnnotate(
-    options = {}
-) {
-    if (aiRunning) {
-        return [];
-    }
+function updateAIButtonState() {
+  const button =
+    byId("autoAnnotate");
 
-    const permitted =
-        await checkAIPermission();
+  if (!button) {
+    return;
+  }
 
-    if (!permitted) {
-        setAIStatus(
-            "AI annotation is not available.",
-            "warning"
-        );
+  const disabled =
+    !state.enabled ||
+    state.loading ||
+    state.running;
 
-        return [];
-    }
+  /*
+   * Do not permanently disable the button for roles here.
+   * Workspace/auth controls visibility.
+   */
+  button.disabled =
+    disabled;
 
-    if (!hasUsableMedia()) {
-        setAIStatus(
-            "Upload an image or video first.",
-            "warning"
-        );
+  button.classList.toggle(
+    "ai-running",
+    state.running
+  );
 
-        return [];
-    }
+  button.classList.toggle(
+    "ai-loading",
+    state.loading
+  );
 
-    aiRunning =
-        true;
-
-    aiCancelled =
-        false;
-
-    const runId =
-        ++aiRunId;
-
-    setAIButtonState(
-        true
+  if (
+    state.running
+  ) {
+    button.setAttribute(
+      "aria-busy",
+      "true"
     );
 
-    setAIProgress(
-        0
+    button.dataset.originalText =
+      button.dataset.originalText ||
+      button.textContent;
+
+    button.textContent =
+      "AI analyzing…";
+  } else if (
+    state.loading
+  ) {
+    button.setAttribute(
+      "aria-busy",
+      "true"
     );
 
-    setAIStatus(
-        "Preparing AI annotation…",
-        "loading"
+    button.dataset.originalText =
+      button.dataset.originalText ||
+      button.textContent;
+
+    button.textContent =
+      "Loading AI…";
+  } else {
+    button.removeAttribute(
+      "aria-busy"
     );
-
-    emit(
-        "aiStarted",
-        {
-            runId
-        }
-    );
-
-    try {
-        const {
-            model = "detr",
-            threshold = 0.5,
-            replace = false
-        } = options;
-
-        const predictions =
-            await runDetection({
-                model,
-                threshold
-            });
-
-        if (
-            aiCancelled ||
-            runId !== aiRunId
-        ) {
-            setAIStatus(
-                "AI annotation cancelled.",
-                "warning"
-            );
-
-            return [];
-        }
-
-        const created =
-            addAIPredictions(
-                predictions,
-                {
-                    replace,
-                    deduplicate:
-                        true
-                }
-            );
-
-        setAIProgress(
-            100
-        );
-
-        setAIStatus(
-            created.length
-                ? `${created.length} AI annotation${
-                    created.length === 1
-                        ? ""
-                        : "s"
-                } created.`
-                : "No objects detected.",
-            created.length
-                ? "success"
-                : "info"
-        );
-
-        emit(
-            "aiCompleted",
-            {
-                runId,
-
-                count:
-                    created.length,
-
-                annotations:
-                    created
-            }
-        );
-
-        return created;
-    } catch (error) {
-        lastAIError =
-            error;
-
-        console.error(
-            "AI annotation error:",
-            error
-        );
-
-        setAIProgress(
-            0
-        );
-
-        setAIStatus(
-            `AI annotation failed: ${
-                error?.message ||
-                error ||
-                "Unknown error"
-            }`,
-            "error"
-        );
-
-        emit(
-            "aiError",
-            {
-                runId,
-                error
-            }
-        );
-
-        /*
-         * Fallback to DETR if the
-         * selected model fails.
-         */
-
-        try {
-            if (
-                !aiCancelled &&
-                runId === aiRunId
-            ) {
-                setAIStatus(
-                    "Trying fallback AI detection…",
-                    "loading"
-                );
-
-                const fallback =
-                    await fallbackDetection({
-                        threshold:
-                            options.threshold ??
-                            0.5
-                    });
-
-                if (
-                    fallback.length
-                ) {
-                    const created =
-                        addAIPredictions(
-                            fallback,
-                            {
-                                replace:
-                                    Boolean(
-                                        options.replace
-                                    ),
-                                deduplicate:
-                                    true
-                            }
-                        );
-
-                    setAIProgress(
-                        100
-                    );
-
-                    setAIStatus(
-                        `${created.length} AI annotation${
-                            created.length === 1
-                                ? ""
-                                : "s"
-                        } created using fallback detection.`,
-                        "success"
-                    );
-
-                    return created;
-                }
-            }
-        } catch (
-            fallbackError
-        ) {
-            console.error(
-                "Fallback AI error:",
-                fallbackError
-            );
-        }
-
-        return [];
-    } finally {
-        aiRunning =
-            false;
-
-        setAIButtonState(
-            false
-        );
-
-        if (
-            state &&
-            state.mediaType
-        ) {
-            try {
-                render();
-            } catch (_) {}
-        }
-
-        emit(
-            "aiFinished",
-            {
-                runId
-            }
-        );
-    }
-}
-
-
-// ============================================================
-// CANCEL AI
-// ============================================================
-
-export function cancelAI() {
-    aiCancelled =
-        true;
-
-    aiRunId +=
-        1;
-
-    aiRunning =
-        false;
-
-    setAIButtonState(
-        false
-    );
-
-    setAIStatus(
-        "AI annotation cancelled.",
-        "warning"
-    );
-
-    emit(
-        "aiCancelled"
-    );
-}
-
-
-// ============================================================
-// AI RUNNING
-// ============================================================
-
-export function isAIRunning() {
-    return aiRunning;
-}
-
-
-// ============================================================
-// CURRENT MODEL
-// ============================================================
-
-export function getCurrentAIModel() {
-    return currentAIModel;
-}
-
-
-// ============================================================
-// LAST ERROR
-// ============================================================
-
-export function getLastAIError() {
-    return lastAIError;
-}
-
-
-// ============================================================
-// CLEAR MODEL CACHE
-// ============================================================
-
-export function clearAIModelCache() {
-    modelCache.detr =
-        null;
-
-    modelCache.yolo =
-        null;
-
-    modelCache.panoptic =
-        null;
-
-    modelPromises.detr =
-        null;
-
-    modelPromises.yolo =
-        null;
-
-    modelPromises.panoptic =
-        null;
-
-    currentAIModel =
-        null;
-}
-
-
-// ============================================================
-// MODEL SELECTOR
-// ============================================================
-
-function bindAIModelSelector() {
-    const selector =
-        $("aiModel") ||
-        $("aiModelSelect") ||
-        $("modelSelect");
-
-    if (!selector) {
-        return;
-    }
 
     if (
-        selector.dataset.aiModelBound ===
-        "true"
+      button.dataset.originalText
     ) {
-        return;
+      button.textContent =
+        button.dataset.originalText;
+
+      delete button.dataset
+        .originalText;
     }
+  }
 
-    selector.dataset.aiModelBound =
-        "true";
+  button.title =
+    state.enabled
+      ? "Automatically detect objects"
+      : "AI annotation is disabled";
+}
 
-    selector.addEventListener(
-        "change",
-        () => {
-            currentAIModel =
-                normalizeModelName(
-                    selector.value
-                );
-        }
-    );
+function updateAIProgress() {
+  const progress =
+    byId("aiProgress");
+
+  if (progress) {
+    progress.value =
+      state.progress;
+
+    progress.textContent =
+      `${state.progress}%`;
+  }
+
+  const progressBar =
+    byId("aiProgressBar");
+
+  if (progressBar) {
+    progressBar.style.width =
+      `${state.progress}%`;
+  }
+
+  const progressText =
+    byId("aiProgressText");
+
+  if (progressText) {
+    progressText.textContent =
+      state.progress > 0
+        ? `${state.progress}%`
+        : "";
+  }
 }
 
 
-// ============================================================
-// THRESHOLD
-// ============================================================
-
-function getAIThreshold() {
-    const element =
-        $("aiThreshold") ||
-        $("confidenceThreshold") ||
-        $("aiConfidence");
-
-    if (!element) {
-        return 0.5;
-    }
-
-    let value =
-        Number(
-            element.value
-        );
-
-    if (
-        !Number.isFinite(value)
-    ) {
-        return 0.5;
-    }
-
-    if (
-        value > 1
-    ) {
-        value /=
-            100;
-    }
-
-    return Math.max(
-        0,
-        Math.min(
-            1,
-            value
-        )
-    );
-}
-
-
-// ============================================================
-// AUTO ANNOTATE BUTTON
-// ============================================================
+/* =========================================================
+   AI BUTTON BINDING
+   ========================================================= */
 
 function bindAutoAnnotateButton() {
-    const buttons = [
-        $("autoAnnotate"),
-        $("runAI"),
-        $("runAi"),
-        $("aiAnnotateButton")
-    ].filter(Boolean);
+  const button =
+    byId("autoAnnotate");
 
-    const uniqueButtons =
-        [...new Set(buttons)];
+  if (!button) {
+    return;
+  }
 
-    for (
-        const button of uniqueButtons
-    ) {
-        if (
-            button.dataset.aiBound ===
-            "true"
-        ) {
-            continue;
-        }
+  if (
+    button.dataset.aiBound ===
+    "true"
+  ) {
+    return;
+  }
 
-        button.dataset.aiBound =
-            "true";
+  button.dataset.aiBound =
+    "true";
 
-        button.addEventListener(
-            "click",
-            async event => {
-                event.preventDefault();
+  button.addEventListener(
+    "click",
+    async event => {
+      event.preventDefault();
 
-                if (aiRunning) {
-                    cancelAI();
-                    return;
-                }
-
-                const selector =
-                    $("aiModel") ||
-                    $("aiModelSelect") ||
-                    $("modelSelect");
-
-                const model =
-                    selector?.value ||
-                    "detr";
-
-                await runAutoAnnotate({
-                    model:
-                        normalizeModelName(
-                            model
-                        ),
-
-                    threshold:
-                        getAIThreshold(),
-
-                    replace:
-                        false
-                });
-            }
-        );
+      await autoAnnotate();
     }
+  );
 }
 
 
-// ============================================================
-// AI KEYBOARD SHORTCUT
-// ============================================================
+/* =========================================================
+   SETTINGS UI
+   ========================================================= */
 
-function bindAIKeyboardShortcut() {
+function bindSettingsControls() {
+  const toggle =
+    byId("aiEnabledToggle");
+
+  if (toggle) {
+    /*
+     * Handle checkbox and non-checkbox controls.
+     */
     if (
-        window.__annotationAIKeyboardBound
+      toggle.type ===
+      "checkbox"
     ) {
-        return;
+      toggle.checked =
+        state.enabled;
+    } else if (
+      toggle.tagName ===
+      "SELECT"
+    ) {
+      toggle.value =
+        state.enabled
+          ? "true"
+          : "false";
     }
 
-    window.__annotationAIKeyboardBound =
-        true;
-
-    document.addEventListener(
-        "keydown",
-        event => {
-            if (
-                event.ctrlKey &&
-                event.shiftKey &&
-                event.key.toLowerCase() ===
-                    "a"
-            ) {
-                const target =
-                    event.target;
-
-                if (
-                    target &&
-                    (
-                        target.tagName ===
-                            "INPUT" ||
-                        target.tagName ===
-                            "TEXTAREA" ||
-                        target.tagName ===
-                            "SELECT" ||
-                        target.isContentEditable
-                    )
-                ) {
-                    return;
-                }
-
-                event.preventDefault();
-
-                if (aiRunning) {
-                    cancelAI();
-                } else {
-                    runAutoAnnotate();
-                }
-            }
-        }
-    );
-}
-
-
-// ============================================================
-// MEDIA LOADED
-// ============================================================
-
-function bindMediaLoaded() {
     if (
-        window.__annotationAIMediaLoadedBound
+      toggle.dataset.aiBound !==
+      "true"
     ) {
-        return;
-    }
+      toggle.dataset.aiBound =
+        "true";
 
-    window.__annotationAIMediaLoadedBound =
-        true;
-
-    window.addEventListener(
-        "annotation:mediaLoaded",
+      toggle.addEventListener(
+        "change",
         () => {
-            setAIProgress(
-                0
-            );
+          const enabled =
+            toggle.type ===
+            "checkbox"
+              ? toggle.checked
+              : String(
+                  toggle.value
+                ) === "true";
 
-            setAIStatus(
-                "Ready for AI annotation.",
-                "info"
-            );
+          setAIEnabled(
+            enabled
+          );
         }
-    );
-}
-
-
-// ============================================================
-// APPLICATION AI EVENT
-// ============================================================
-
-function bindAIEvent() {
-    if (
-        window.__annotationAIRunEventBound
-    ) {
-        return;
+      );
     }
+  }
 
-    window.__annotationAIRunEventBound =
-        true;
+  const confidence =
+    byId(
+      "aiConfidenceThreshold"
+    );
 
-    window.addEventListener(
-        "annotation:runAI",
+  if (confidence) {
+    confidence.value =
+      state.settings
+        .confidenceThreshold;
+
+    if (
+      confidence.dataset.aiBound !==
+      "true"
+    ) {
+      confidence.dataset.aiBound =
+        "true";
+
+      confidence.addEventListener(
+        "change",
         () => {
-            runAutoAnnotate();
+          setConfidenceThreshold(
+            confidence.value
+          );
         }
+      );
+    }
+  }
+
+  const maximum =
+    byId(
+      "aiMaxDetections"
     );
-}
 
-
-// ============================================================
-// GLOBAL COMPATIBILITY
-// ============================================================
-
-window.runAutoAnnotate =
-    runAutoAnnotate;
-
-window.autoAnnotate =
-    runAutoAnnotate;
-
-window.runAI =
-    runAutoAnnotate;
-
-window.cancelAI =
-    cancelAI;
-
-window.loadAIModel =
-    loadAIModel;
-
-window.preloadAIModel =
-    preloadAIModel;
-
-window.checkAIPermission =
-    checkAIPermission;
-
-window.normalizeAIPredictions =
-    normalizeAIPredictions;
-
-window.createAIAnnotation =
-    createAIAnnotation;
-
-window.addAIPredictions =
-    addAIPredictions;
-
-window.fallbackDetection =
-    fallbackDetection;
-
-window.runDetection =
-    runDetection;
-
-window.isAIRunning =
-    isAIRunning;
-
-window.getCurrentAIModel =
-    getCurrentAIModel;
-
-window.getLastAIError =
-    getLastAIError;
-
-window.setAIStatus =
-    setAIStatus;
-
-window.updateAIStatus =
-    updateAIStatus;
-
-window.clearAIModelCache =
-    clearAIModelCache;
-
-
-// ============================================================
-// INITIALIZATION
-// ============================================================
-
-export function initializeAI() {
-    bindAutoAnnotateButton();
-
-    bindAIModelSelector();
-
-    bindAIKeyboardShortcut();
-
-    bindMediaLoaded();
-
-    bindAIEvent();
-
-    setAIProgress(
-        0
-    );
+  if (maximum) {
+    maximum.value =
+      state.settings
+        .maxDetections;
 
     if (
-        hasUsableMedia()
+      maximum.dataset.aiBound !==
+      "true"
     ) {
-        setAIStatus(
-            "Ready for AI annotation.",
-            "info"
-        );
+      maximum.dataset.aiBound =
+        "true";
+
+      maximum.addEventListener(
+        "change",
+        () => {
+          setMaxDetections(
+            maximum.value
+          );
+        }
+      );
     }
+  }
+
+  const model =
+    byId(
+      "aiModelSelect"
+    );
+
+  if (model) {
+    model.value =
+      state.settings
+        .modelType;
+
+    if (
+      model.dataset.aiBound !==
+      "true"
+    ) {
+      model.dataset.aiBound =
+        "true";
+
+      model.addEventListener(
+        "change",
+        () => {
+          try {
+            setModelType(
+              model.value
+            );
+          } catch (
+            error
+          ) {
+            showToast(
+              error.message,
+              "error"
+            );
+          }
+        }
+      );
+    }
+  }
 }
 
 
-// ============================================================
-// DOM INITIALIZATION
-// ============================================================
+/* =========================================================
+   PUBLIC MODEL CONTROL
+   ========================================================= */
 
-if (
-    document.readyState ===
-    "loading"
+async function preloadModel(
+  modelType =
+    state.settings.modelType
 ) {
-    document.addEventListener(
-        "DOMContentLoaded",
-        initializeAI,
-        {
-            once: true
-        }
+  if (!canUseAI()) {
+    return false;
+  }
+
+  try {
+    await loadDetector(
+      modelType
     );
-} else {
-    initializeAI();
+
+    return true;
+  } catch (error) {
+    console.error(
+      "AI preload failed:",
+      error
+    );
+
+    return false;
+  }
+}
+
+function unloadModel() {
+  state.detector =
+    null;
+
+  state.currentModel =
+    null;
+
+  state.currentModelType =
+    null;
+
+  state.progress =
+    0;
+
+  updateAIProgress();
 }
 
 
-// ============================================================
-// END js/ai.js
-// ============================================================
+/* =========================================================
+   INITIALIZE
+   ========================================================= */
+
+async function initializeAI() {
+  if (
+    state.initialized
+  ) {
+    return state;
+  }
+
+  loadAISettings();
+
+  bindAutoAnnotateButton();
+  bindSettingsControls();
+
+  updateAIButtonState();
+  updateAIProgress();
+
+  state.initialized =
+    true;
+
+  return state;
+}
+
+
+/* =========================================================
+   AUTH CHANGE
+   ========================================================= */
+
+document.addEventListener(
+  "authStateChanged",
+  () => {
+    updateAIButtonState();
+  }
+);
+
+document.addEventListener(
+  "profileUpdated",
+  () => {
+    updateAIButtonState();
+  }
+);
+
+
+/* =========================================================
+   MEDIA CHANGE
+   ========================================================= */
+
+document.addEventListener(
+  "mediaLoaded",
+  () => {
+    state.lastResult =
+      null;
+
+    state.lastError =
+      null;
+
+    updateAIButtonState();
+  }
+);
+
+document.addEventListener(
+  "taskSelected",
+  () => {
+    state.lastResult =
+      null;
+
+    state.lastError =
+      null;
+
+    updateAIButtonState();
+  }
+);
+
+
+/* =========================================================
+   LEGACY COMPATIBILITY
+   ========================================================= */
+
+window.ai = {
+  state,
+
+  initialize:
+    initializeAI,
+
+  loadTransformers,
+  loadDetector,
+
+  autoAnnotate,
+  autoAnnotateCurrentFrame,
+
+  preloadModel,
+  unloadModel,
+
+  setEnabled:
+    setAIEnabled,
+
+  setConfidenceThreshold,
+  setMaxDetections,
+  setModelType,
+
+  getMediaElement,
+
+  getImage:
+    getAnnotationImage,
+
+  getVideo:
+    getAnnotationVideo
+};
+
+
+/* =========================================================
+   EXPORTS
+   ========================================================= */
+
+export {
+  state,
+
+  MODELS,
+
+  initializeAI,
+
+  loadTransformers,
+  loadDetector,
+
+  autoAnnotate,
+  autoAnnotateCurrentFrame,
+
+  preloadModel,
+  unloadModel,
+
+  setAIEnabled,
+  setConfidenceThreshold,
+  setMaxDetections,
+  setModelType,
+
+  getAnnotationImage,
+  getAnnotationVideo,
+  getMediaElement,
+
+  canUseAI
+};
