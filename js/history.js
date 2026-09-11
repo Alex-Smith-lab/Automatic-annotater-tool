@@ -1,57 +1,101 @@
-// ============================================================
-// ANNOTATION AI
-// HISTORY MODULE
-// File: js/history.js
-// ============================================================
+/* ============================================================
+   WORK HISTORY
+   ============================================================
+   Handles:
+   - User work history
+   - Completed / submitted / approved tasks
+   - Payment records
+   - Paid / unpaid status
+   - Payment totals
+   - History modal
+   - Work history navigation
+   - Automatically hides the history shortcut when all
+     available payment records for the current user are paid
+   ============================================================ */
 
 import {
-    supabase,
+    APP_CONFIG,
+    normalizeRole,
+    roleLabel
+} from "./config.js";
+
+import {
+    getSupabase,
     getCurrentUser,
-    getCurrentSession
+    getCurrentProfile,
+    logActivity
 } from "./supabase.js";
 
+import {
+    getRole,
+    getUserEmail
+} from "./auth.js";
 
-// ============================================================
-// STATE
-// ============================================================
+
+/* ============================================================
+   STATE
+   ============================================================ */
 
 const historyState = {
     initialized: false,
+    open: false,
     loading: false,
-    items: [],
-    limit: 100
+
+    tasks: [],
+    payments: [],
+    combined: [],
+
+    totals: {
+        tasks: 0,
+        completed: 0,
+        approved: 0,
+        submitted: 0,
+
+        paid: 0,
+        unpaid: 0,
+
+        earned: 0,
+        paidAmount: 0,
+        unpaidAmount: 0
+    }
 };
 
 
-// ============================================================
-// DOM HELPER
-// ============================================================
+/* ============================================================
+   TABLE NAMES
+   ============================================================ */
+
+const TABLES = {
+    tasks:
+        APP_CONFIG?.tables?.tasks ||
+        "tasks",
+
+    payments:
+        APP_CONFIG?.tables?.payments ||
+        "payments",
+
+    annotations:
+        APP_CONFIG?.tables?.annotations ||
+        "annotations"
+};
+
+
+/* ============================================================
+   DOM HELPERS
+   ============================================================ */
 
 function $(id) {
     return document.getElementById(id);
 }
 
-
-// ============================================================
-// HISTORY CONTAINER
-// ============================================================
-
-function getHistoryContainer() {
-    return (
-        $("workHistoryList") ||
-        $("historyList") ||
-        $("workHistory") ||
-        $("activityHistory")
+function all(selector, root = document) {
+    return Array.from(
+        root.querySelectorAll(selector)
     );
 }
 
-
-// ============================================================
-// SAFE HTML
-// ============================================================
-
 function escapeHTML(value) {
-    return String(value == null ? "" : value)
+    return String(value ?? "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
@@ -59,1501 +103,1566 @@ function escapeHTML(value) {
         .replace(/'/g, "&#039;");
 }
 
+function safeText(value, fallback = "") {
+    const text =
+        String(value ?? "").trim();
 
-// ============================================================
-// DATE / TIME
-// ============================================================
+    return text || fallback;
+}
 
-function formatDateTime(value) {
+function formatMoney(value) {
+    const number = Number(value);
 
+    if (!Number.isFinite(number)) {
+        return "0.00";
+    }
+
+    return number.toLocaleString(
+        undefined,
+        {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }
+    );
+}
+
+function formatDate(value) {
     if (!value) {
         return "—";
     }
 
-    const date = new Date(value);
+    const date =
+        new Date(value);
 
     if (Number.isNaN(date.getTime())) {
         return String(value);
     }
 
-    return date.toLocaleString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-    });
+    return date.toLocaleString();
 }
 
-
-// ============================================================
-// RELATIVE TIME
-// ============================================================
-
-function relativeTime(value) {
-
+function formatDateOnly(value) {
     if (!value) {
-        return "";
+        return "—";
     }
 
-    const date = new Date(value);
+    const date =
+        new Date(value);
 
     if (Number.isNaN(date.getTime())) {
-        return "";
+        return String(value);
     }
 
-    const diff = Date.now() - date.getTime();
-
-    const seconds = Math.floor(diff / 1000);
-
-    if (seconds < 10) {
-        return "just now";
-    }
-
-    if (seconds < 60) {
-        return String(seconds) + "s ago";
-    }
-
-    const minutes = Math.floor(seconds / 60);
-
-    if (minutes < 60) {
-        return String(minutes) + "m ago";
-    }
-
-    const hours = Math.floor(minutes / 60);
-
-    if (hours < 24) {
-        return String(hours) + "h ago";
-    }
-
-    const days = Math.floor(hours / 24);
-
-    if (days < 30) {
-        return String(days) + "d ago";
-    }
-
-    return formatDateTime(value);
+    return date.toLocaleDateString();
 }
 
 
-// ============================================================
-// SAFE ID
-// ============================================================
+/* ============================================================
+   SUPABASE
+   ============================================================ */
 
-function cryptoSafeId() {
+function client() {
+    return getSupabase?.();
+}
 
-    try {
 
-        if (
-            typeof crypto !== "undefined" &&
-            typeof crypto.randomUUID === "function"
-        ) {
-            return crypto.randomUUID();
-        }
+/* ============================================================
+   USER
+   ============================================================ */
 
-    } catch (error) {
-        // Ignore and use fallback.
-    }
-
+function getUserId() {
     return (
-        "history_" +
-        Date.now() +
-        "_" +
-        Math.random()
-            .toString(36)
-            .slice(2)
+        getCurrentUser?.()?.id ||
+        getCurrentProfile?.()?.id ||
+        null
+    );
+}
+
+function getUserRole() {
+    return normalizeRole(
+        getRole?.() ||
+        getCurrentProfile?.()?.role ||
+        ""
+    );
+}
+
+function getUserEmailAddress() {
+    return safeText(
+        getUserEmail?.() ||
+        getCurrentUser?.()?.email ||
+        getCurrentProfile?.()?.email ||
+        ""
     );
 }
 
 
-// ============================================================
-// NORMALIZE HISTORY RECORD
-// ============================================================
+/* ============================================================
+   INITIALIZATION
+   ============================================================ */
 
-function normalizeHistoryRecord(row) {
-
-    row = row || {};
-
-    return {
-
-        id:
-            row.id ||
-            row.history_id ||
-            row.activity_id ||
-            row.result_id ||
-            cryptoSafeId(),
-
-        taskId:
-            row.task_id ||
-            row.taskId ||
-            row.job_id ||
-            row.jobId ||
-            null,
-
-        userId:
-            row.user_id ||
-            row.userId ||
-            row.worker_id ||
-            null,
-
-        action:
-            row.action ||
-            row.event ||
-            row.activity ||
-            row.type ||
-            row.status ||
-            "Activity",
-
-        title:
-            row.task_title ||
-            row.task_name ||
-            row.title ||
-            row.name ||
-            (
-                row.task &&
-                row.task.title
-            ) ||
-            "Task",
-
-        description:
-            row.description ||
-            row.message ||
-            row.details ||
-            "",
-
-        status:
-            row.status ||
-            row.result_status ||
-            row.task_status ||
-            "",
-
-        createdAt:
-            row.created_at ||
-            row.createdAt ||
-            row.timestamp ||
-            row.updated_at ||
-            row.completed_at ||
-            row.submitted_at ||
-            row.date ||
-            null,
-
-        updatedAt:
-            row.updated_at ||
-            row.updatedAt ||
-            null,
-
-        raw: row
-    };
-}
-
-
-// ============================================================
-// ACTION LABEL
-// ============================================================
-
-function actionLabel(action) {
-
-    const value =
-        String(action || "")
-            .trim()
-            .toLowerCase();
-
-    const labels = {
-
-        submit: "Task submitted",
-        submitted: "Task submitted",
-
-        complete: "Task completed",
-        completed: "Task completed",
-
-        approve: "Task approved",
-        approved: "Task approved",
-
-        reject: "Task rejected",
-        rejected: "Task rejected",
-
-        skip: "Task skipped",
-        skipped: "Task skipped",
-
-        start: "Task started",
-        started: "Task started",
-
-        assign: "Task assigned",
-        assigned: "Task assigned",
-
-        create: "Task created",
-        created: "Task created",
-
-        upload: "Media uploaded",
-        uploaded: "Media uploaded",
-
-        annotation: "Annotation activity",
-        annotated: "Annotation completed",
-
-        login: "Signed in",
-        logout: "Signed out",
-        signup: "Account created"
-    };
-
-    return labels[value] || action || "Activity";
-}
-
-
-// ============================================================
-// ACTION ICON
-// ============================================================
-
-function actionIcon(action) {
-
-    const value =
-        String(action || "")
-            .trim()
-            .toLowerCase();
-
-    if (
-        value.includes("approve") ||
-        value.includes("complete") ||
-        value.includes("submit")
-    ) {
-        return "✓";
+export function initializeHistory() {
+    if (historyState.initialized) {
+        return;
     }
 
-    if (
-        value.includes("reject") ||
-        value.includes("delete")
-    ) {
-        return "×";
-    }
+    historyState.initialized = true;
 
-    if (value.includes("skip")) {
-        return "→";
-    }
+    bindHistoryButtons();
 
-    if (
-        value.includes("upload") ||
-        value.includes("media")
-    ) {
-        return "↑";
-    }
+    /*
+     * Load visibility immediately and again whenever authentication
+     * changes or the workspace becomes active.
+     */
+    updateHistoryVisibility();
 
-    if (
-        value.includes("login") ||
-        value.includes("sign in")
-    ) {
-        return "↪";
-    }
-
-    if (
-        value.includes("logout") ||
-        value.includes("sign out")
-    ) {
-        return "↩";
-    }
-
-    return "•";
-}
-
-
-// ============================================================
-// HISTORY TABLES
-// ============================================================
-
-const HISTORY_TABLES = [
-    "work_history",
-    "task_history",
-    "activity_logs",
-    "activities",
-    "history"
-];
-
-
-// ============================================================
-// QUERY HISTORY TABLE
-// ============================================================
-
-async function queryHistoryTable(
-    table,
-    user
-) {
-
-    if (!supabase || !user) {
-
-        return {
-            success: false,
-            rows: []
-        };
-    }
-
-    try {
-
-        const result =
-            await supabase
-                .from(table)
-                .select("*")
-                .eq("user_id", user.id)
-                .order(
-                    "created_at",
-                    {
-                        ascending: false
-                    }
-                )
-                .limit(
-                    historyState.limit
-                );
-
-        const data =
-            result.data;
-
-        const error =
-            result.error;
-
-        if (error) {
-
-            return {
-                success: false,
-                rows: [],
-                error
-            };
+    document.addEventListener(
+        "taskSubmitted",
+        async () => {
+            await refreshHistory();
         }
+    );
 
-        return {
+    document.addEventListener(
+        "taskApproved",
+        async () => {
+            await refreshHistory();
+        }
+    );
 
-            success: true,
+    document.addEventListener(
+        "paymentUpdated",
+        async () => {
+            await refreshHistory();
+        }
+    );
 
-            rows:
-                Array.isArray(data)
-                    ? data
-                    : []
-        };
-
-    } catch (error) {
-
-        return {
-
-            success: false,
-
-            rows: [],
-
-            error
-        };
-    }
+    document.addEventListener(
+        "authStateChanged",
+        async () => {
+            await updateHistoryVisibility();
+        }
+    );
 }
 
 
-// ============================================================
-// TASK RESULTS FALLBACK
-// ============================================================
+/* ============================================================
+   OPEN / CLOSE
+   ============================================================ */
 
-async function queryTaskResults(user) {
+export async function openWorkHistory() {
+    const modal = $("workHistoryModal");
 
-    if (!supabase || !user) {
-        return [];
+    if (!modal) {
+        return false;
     }
 
-    try {
+    const userId = getUserId();
 
-        const result =
-            await supabase
-                .from("task_results")
-                .select("*")
-                .eq("user_id", user.id)
-                .order(
-                    "created_at",
-                    {
-                        ascending: false
-                    }
-                )
-                .limit(
-                    historyState.limit
-                );
+    if (!userId) {
+        return false;
+    }
 
-        const data =
-            result.data;
+    historyState.open = true;
 
-        const error =
-            result.error;
+    modal.hidden = false;
+    modal.style.display = "flex";
 
-        if (
-            error ||
-            !Array.isArray(data)
-        ) {
-            return [];
-        }
+    document.body.classList.add(
+        "work-history-open"
+    );
 
-        return data.map(
-            function(row) {
+    await refreshHistory();
 
-                return {
-                    ...row,
+    return true;
+}
 
-                    action:
-                        row.status ||
-                        row.action ||
-                        "Task result"
-                };
+export function closeWorkHistory() {
+    const modal =
+        $("workHistoryModal");
+
+    historyState.open = false;
+
+    if (modal) {
+        modal.hidden = true;
+        modal.style.display = "none";
+    }
+
+    document.body.classList.remove(
+        "work-history-open"
+    );
+}
+
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+
+function bindHistoryButtons() {
+    const button =
+        $("workHistoryButton");
+
+    if (button) {
+        button.addEventListener(
+            "click",
+            async event => {
+                event.preventDefault();
+
+                await openWorkHistory();
             }
         );
+    }
 
+    const close =
+        $("closeWorkHistoryModal");
+
+    if (close) {
+        close.addEventListener(
+            "click",
+            event => {
+                event.preventDefault();
+
+                closeWorkHistory();
+            }
+        );
+    }
+
+    const modal =
+        $("workHistoryModal");
+
+    if (modal) {
+        modal.addEventListener(
+            "click",
+            event => {
+                if (
+                    event.target === modal
+                ) {
+                    closeWorkHistory();
+                }
+            }
+        );
+    }
+
+    document.addEventListener(
+        "keydown",
+        event => {
+            if (
+                event.key === "Escape" &&
+                historyState.open
+            ) {
+                closeWorkHistory();
+            }
+        }
+    );
+}
+
+
+/* ============================================================
+   LOAD HISTORY
+   ============================================================ */
+
+export async function refreshHistory() {
+    const userId =
+        getUserId();
+
+    if (!userId) {
+        clearHistory();
+
+        updateHistoryVisibility();
+
+        return false;
+    }
+
+    if (historyState.loading) {
+        return false;
+    }
+
+    historyState.loading = true;
+
+    try {
+        await Promise.all([
+            loadUserTasks(userId),
+            loadUserPayments(userId)
+        ]);
+
+        buildCombinedHistory();
+
+        calculateTotals();
+
+        renderHistory();
+
+        updateHistoryVisibility();
+
+        return true;
     } catch (error) {
+        console.error(
+            "refreshHistory failed:",
+            error
+        );
 
-        return [];
+        renderHistoryError(
+            error?.message ||
+            "Unable to load work history."
+        );
+
+        return false;
+    } finally {
+        historyState.loading = false;
     }
 }
 
 
-// ============================================================
-// TASK FALLBACK
-// ============================================================
+/* ============================================================
+   LOAD USER TASKS
+   ============================================================ */
 
-async function queryUserTasks(user) {
+async function loadUserTasks(userId) {
+    const db = client();
 
-    if (!supabase || !user) {
+    if (!db) {
+        historyState.tasks = [];
         return [];
     }
 
     try {
+        /*
+         * We intentionally query broadly and filter client-side.
+         * This handles projects where worker ownership may be stored
+         * as claimed_by, assigned_to, completed_by or user_id.
+         */
 
-        const result =
-            await supabase
-                .from("tasks")
+        let result =
+            await db
+                .from(TABLES.tasks)
                 .select("*")
-                .or(
-                    "assigned_to.eq." +
-                    user.id +
-                    ",worker_id.eq." +
-                    user.id +
-                    ",user_id.eq." +
-                    user.id
-                )
                 .order(
                     "updated_at",
                     {
                         ascending: false
                     }
                 )
-                .limit(
-                    historyState.limit
-                );
+                .limit(500);
 
-        const data =
-            result.data;
-
-        const error =
-            result.error;
-
-        if (
-            error ||
-            !Array.isArray(data)
-        ) {
-            return [];
+        if (result.error) {
+            /*
+             * Some schemas do not have updated_at.
+             */
+            result =
+                await db
+                    .from(TABLES.tasks)
+                    .select("*")
+                    .order(
+                        "created_at",
+                        {
+                            ascending: false
+                        }
+                    )
+                    .limit(500);
         }
 
-        return data;
+        if (result.error) {
+            throw result.error;
+        }
 
+        const rows =
+            result.data || [];
+
+        historyState.tasks =
+            rows
+                .filter(task =>
+                    taskBelongsToUser(
+                        task,
+                        userId
+                    )
+                )
+                .map(normalizeTask);
+
+        return historyState.tasks;
     } catch (error) {
+        console.warn(
+            "loadUserTasks failed:",
+            error
+        );
+
+        historyState.tasks = [];
 
         return [];
     }
 }
 
-
-// ============================================================
-// LOAD HISTORY
-// ============================================================
-
-export async function loadHistory(
-    options
+function taskBelongsToUser(
+    task,
+    userId
 ) {
+    const uid =
+        String(userId);
 
-    options =
-        options || {};
+    const possibleOwners = [
+        task?.claimed_by,
+        task?.assigned_to,
+        task?.completed_by,
+        task?.reviewed_by,
+        task?.approved_by,
+        task?.user_id,
+        task?.worker_id,
+        task?.owner_id
+    ]
+        .filter(Boolean)
+        .map(String);
 
-    if (historyState.loading) {
+    return possibleOwners.includes(uid);
+}
 
-        return historyState.items;
+
+/* ============================================================
+   NORMALIZE TASK
+   ============================================================ */
+
+function normalizeTask(task) {
+    const status =
+        String(
+            task?.status ||
+            "unknown"
+        ).toLowerCase();
+
+    return {
+        ...task,
+
+        id:
+            task?.id ||
+            task?.task_id ||
+            "",
+
+        title:
+            safeText(
+                task?.title ||
+                task?.name ||
+                task?.task_title,
+                "Untitled task"
+            ),
+
+        work_type:
+            safeText(
+                task?.work_type ||
+                task?.annotation_type ||
+                task?.type,
+                "Annotation"
+            ),
+
+        work_role:
+            normalizeRole(
+                task?.work_role ||
+                task?.role ||
+                ""
+            ),
+
+        status,
+
+        pay:
+            Number(
+                task?.pay ??
+                task?.amount ??
+                task?.worker_pay ??
+                0
+            ),
+
+        created_at:
+            task?.created_at ||
+            null,
+
+        updated_at:
+            task?.updated_at ||
+            task?.completed_at ||
+            task?.submitted_at ||
+            null,
+
+        completed_at:
+            task?.completed_at ||
+            null,
+
+        submitted_at:
+            task?.submitted_at ||
+            null,
+
+        approved_at:
+            task?.approved_at ||
+            null
+    };
+}
+
+
+/* ============================================================
+   LOAD PAYMENTS
+   ============================================================ */
+
+async function loadUserPayments(userId) {
+    const db = client();
+
+    if (!db) {
+        historyState.payments = [];
+
+        return [];
     }
 
-    historyState.loading =
-        true;
-
     try {
+        /*
+         * First try the most common user_id field.
+         */
 
-        const user =
-            options.user ||
-            await getCurrentUser();
+        let result =
+            await db
+                .from(TABLES.payments)
+                .select("*")
+                .eq("user_id", userId)
+                .order(
+                    "created_at",
+                    {
+                        ascending: false
+                    }
+                )
+                .limit(500);
 
-        if (!user) {
+        if (result.error) {
+            /*
+             * Some projects use worker_id instead.
+             */
+            result =
+                await db
+                    .from(TABLES.payments)
+                    .select("*")
+                    .eq("worker_id", userId)
+                    .order(
+                        "created_at",
+                        {
+                            ascending: false
+                        }
+                    )
+                    .limit(500);
+        }
 
-            historyState.items = [];
+        if (result.error) {
+            /*
+             * Last fallback: retrieve rows and filter locally.
+             */
+            result =
+                await db
+                    .from(TABLES.payments)
+                    .select("*")
+                    .order(
+                        "created_at",
+                        {
+                            ascending: false
+                        }
+                    )
+                    .limit(500);
+        }
 
-            renderHistory();
+        if (result.error) {
+            /*
+             * Payment table may not exist yet.
+             * History should still continue to work.
+             */
+            console.warn(
+                "Payments query failed:",
+                result.error
+            );
+
+            historyState.payments = [];
 
             return [];
         }
 
-        let rows = [];
+        const rows =
+            result.data || [];
 
-
-        // ----------------------------------------------------
-        // Dedicated history tables
-        // ----------------------------------------------------
-
-        for (
-            const table of HISTORY_TABLES
-        ) {
-
-            const result =
-                await queryHistoryTable(
-                    table,
-                    user
-                );
-
-            if (
-                result.success &&
-                result.rows.length
-            ) {
-
-                rows.push(
-                    ...result.rows
-                );
-
-                break;
-            }
-        }
-
-
-        // ----------------------------------------------------
-        // Task results fallback
-        // ----------------------------------------------------
-
-        if (!rows.length) {
-
-            rows =
-                await queryTaskResults(
-                    user
-                );
-        }
-
-
-        // ----------------------------------------------------
-        // Tasks fallback
-        // ----------------------------------------------------
-
-        if (!rows.length) {
-
-            rows =
-                await queryUserTasks(
-                    user
-                );
-        }
-
-
-        // ----------------------------------------------------
-        // Normalize
-        // ----------------------------------------------------
-
-        historyState.items =
+        historyState.payments =
             rows
-                .map(
-                    normalizeHistoryRecord
+                .filter(payment =>
+                    paymentBelongsToUser(
+                        payment,
+                        userId
+                    )
                 )
-                .sort(
-                    function(a, b) {
+                .map(normalizePayment);
 
-                        const dateA =
-                            new Date(
-                                a.createdAt || 0
-                            ).getTime();
-
-                        const dateB =
-                            new Date(
-                                b.createdAt || 0
-                            ).getTime();
-
-                        return dateB - dateA;
-                    }
-                )
-                .slice(
-                    0,
-                    historyState.limit
-                );
-
-
-        renderHistory();
-
-        return historyState.items;
-
+        return historyState.payments;
     } catch (error) {
-
-        console.error(
-            "History loading error:",
+        console.warn(
+            "loadUserPayments failed:",
             error
         );
 
-        return historyState.items;
+        historyState.payments = [];
 
-    } finally {
-
-        historyState.loading =
-            false;
+        return [];
     }
 }
 
-
-// ============================================================
-// EMPTY HISTORY
-// ============================================================
-
-function renderEmptyHistory(
-    container
+function paymentBelongsToUser(
+    payment,
+    userId
 ) {
+    const uid =
+        String(userId);
 
-    container.innerHTML =
-        '<div class="history-empty">' +
-            '<div class="history-empty-icon">◷</div>' +
-            '<div class="history-empty-title">' +
-                'No work history yet' +
-            '</div>' +
-            '<div class="history-empty-text">' +
-                'Your completed and recent task activity ' +
-                'will appear here.' +
-            '</div>' +
-        '</div>';
+    const possibleOwners = [
+        payment?.user_id,
+        payment?.worker_id,
+        payment?.profile_id,
+        payment?.owner_id
+    ]
+        .filter(Boolean)
+        .map(String);
+
+    /*
+     * If no ownership field exists, don't expose the payment.
+     */
+    if (!possibleOwners.length) {
+        return false;
+    }
+
+    return possibleOwners.includes(uid);
 }
 
 
-// ============================================================
-// ERROR HISTORY
-// ============================================================
+/* ============================================================
+   NORMALIZE PAYMENT
+   ============================================================ */
 
-function renderHistoryError(
-    container,
-    error
-) {
+function normalizePayment(payment) {
+    const status =
+        String(
+            payment?.status ||
+            (
+                payment?.paid === true
+                    ? "paid"
+                    : "unpaid"
+            )
+        ).toLowerCase();
 
-    console.error(
-        "History loading error:",
-        error
+    const amount =
+        Number(
+            payment?.amount ??
+            payment?.total ??
+            payment?.pay ??
+            payment?.worker_pay ??
+            0
+        );
+
+    const paid =
+        payment?.paid === true ||
+        status === "paid" ||
+        status === "released";
+
+    return {
+        ...payment,
+
+        id:
+            payment?.id ||
+            payment?.payment_id ||
+            "",
+
+        amount,
+
+        status,
+
+        paid,
+
+        created_at:
+            payment?.created_at ||
+            payment?.date ||
+            null,
+
+        paid_at:
+            payment?.paid_at ||
+            null,
+
+        task_id:
+            payment?.task_id ||
+            null,
+
+        work_type:
+            payment?.work_type ||
+            payment?.annotation_type ||
+            "",
+
+        description:
+            payment?.description ||
+            payment?.period ||
+            ""
+    };
+}
+
+
+/* ============================================================
+   COMBINE
+   ============================================================ */
+
+function buildCombinedHistory() {
+    const entries = [];
+
+    historyState.tasks.forEach(task => {
+        entries.push({
+            kind: "task",
+            id: `task-${task.id}`,
+            date:
+                task.approved_at ||
+                task.completed_at ||
+                task.submitted_at ||
+                task.updated_at ||
+                task.created_at,
+
+            task,
+
+            payment: null
+        });
+    });
+
+    historyState.payments.forEach(payment => {
+        entries.push({
+            kind: "payment",
+            id: `payment-${payment.id}`,
+            date:
+                payment.paid_at ||
+                payment.created_at,
+
+            task: null,
+
+            payment
+        });
+    });
+
+    entries.sort(
+        (a, b) => {
+            const aTime =
+                new Date(
+                    a.date || 0
+                ).getTime();
+
+            const bTime =
+                new Date(
+                    b.date || 0
+                ).getTime();
+
+            return bTime - aTime;
+        }
     );
 
-    container.innerHTML =
-        '<div class="history-empty">' +
-            '<div class="history-empty-icon">!</div>' +
-            '<div class="history-empty-title">' +
-                'History unavailable' +
-            '</div>' +
-            '<div class="history-empty-text">' +
-                'Your work history could not be loaded ' +
-                'right now.' +
-            '</div>' +
-            '<button ' +
-                'type="button" ' +
-                'class="history-retry-btn" ' +
-                'data-history-retry>' +
-                'Retry' +
-            '</button>' +
-        '</div>';
-
-    const retry =
-        container.querySelector(
-            "[data-history-retry]"
-        );
-
-    if (retry) {
-
-        retry.addEventListener(
-            "click",
-            function() {
-                loadHistory();
-            }
-        );
-    }
+    historyState.combined =
+        entries;
 }
 
 
-// ============================================================
-// RENDER HISTORY
-// ============================================================
+/* ============================================================
+   TOTALS
+   ============================================================ */
 
-export function renderHistory() {
+function calculateTotals() {
+    const tasks =
+        historyState.tasks;
 
+    const payments =
+        historyState.payments;
+
+    historyState.totals.tasks =
+        tasks.length;
+
+    historyState.totals.completed =
+        tasks.filter(task =>
+            [
+                "completed",
+                "submitted",
+                "approved",
+                "done"
+            ].includes(task.status)
+        ).length;
+
+    historyState.totals.submitted =
+        tasks.filter(task =>
+            [
+                "submitted",
+                "completed"
+            ].includes(task.status)
+        ).length;
+
+    historyState.totals.approved =
+        tasks.filter(task =>
+            [
+                "approved",
+                "done"
+            ].includes(task.status)
+        ).length;
+
+    /*
+     * Task earnings are used as a fallback when payment records
+     * have not been generated yet.
+     */
+    const completedTaskPay =
+        tasks
+            .filter(task =>
+                [
+                    "completed",
+                    "submitted",
+                    "approved",
+                    "done"
+                ].includes(task.status)
+            )
+            .reduce(
+                (total, task) =>
+                    total +
+                    (
+                        Number.isFinite(task.pay)
+                            ? task.pay
+                            : 0
+                    ),
+                0
+            );
+
+    const paymentTotal =
+        payments.reduce(
+            (total, payment) =>
+                total +
+                (
+                    Number.isFinite(payment.amount)
+                        ? payment.amount
+                        : 0
+                ),
+            0
+        );
+
+    /*
+     * If payment records exist, they are the authoritative
+     * payment amount. Otherwise use completed task pay.
+     */
+    historyState.totals.earned =
+        payments.length
+            ? paymentTotal
+            : completedTaskPay;
+
+    historyState.totals.paid =
+        payments.filter(
+            payment => payment.paid
+        ).length;
+
+    historyState.totals.unpaid =
+        payments.filter(
+            payment => !payment.paid
+        ).length;
+
+    historyState.totals.paidAmount =
+        payments
+            .filter(
+                payment => payment.paid
+            )
+            .reduce(
+                (total, payment) =>
+                    total +
+                    payment.amount,
+                0
+            );
+
+    historyState.totals.unpaidAmount =
+        payments
+            .filter(
+                payment => !payment.paid
+            )
+            .reduce(
+                (total, payment) =>
+                    total +
+                    payment.amount,
+                0
+            );
+}
+
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+
+function renderHistory() {
     const container =
-        getHistoryContainer();
+        $("workHistoryList");
 
     if (!container) {
         return;
     }
 
-    if (
-        !historyState.items.length
-    ) {
+    renderHistorySummary(
+        container
+    );
 
-        renderEmptyHistory(
-            container
+    if (
+        !historyState.combined.length
+    ) {
+        container.insertAdjacentHTML(
+            "beforeend",
+            `
+                <div class="history-empty-state">
+                    <div class="history-empty-icon">
+                        📋
+                    </div>
+
+                    <h3>
+                        No work history yet
+                    </h3>
+
+                    <p>
+                        Completed work and payment records
+                        will appear here.
+                    </p>
+                </div>
+            `
         );
 
         return;
     }
 
+    const list =
+        document.createElement("div");
 
-    container.innerHTML =
-        historyState.items
+    list.className =
+        "history-entry-list";
+
+    list.innerHTML =
+        historyState.combined
             .map(
-                function(item) {
-
-                    const title =
-                        escapeHTML(
-                            item.title ||
-                            "Task"
-                        );
-
-                    const action =
-                        escapeHTML(
-                            actionLabel(
-                                item.action
-                            )
-                        );
-
-                    const description =
-                        escapeHTML(
-                            item.description
-                        );
-
-                    const date =
-                        escapeHTML(
-                            formatDateTime(
-                                item.createdAt
-                            )
-                        );
-
-                    const relative =
-                        escapeHTML(
-                            relativeTime(
-                                item.createdAt
-                            )
-                        );
-
-                    const status =
-                        escapeHTML(
-                            item.status || ""
-                        );
-
-                    const icon =
-                        escapeHTML(
-                            actionIcon(
-                                item.action
-                            )
-                        );
-
-                    let descriptionHTML =
-                        "";
-
-                    if (description) {
-
-                        descriptionHTML =
-                            '<div class="history-item-description">' +
-                                description +
-                            '</div>';
-                    }
-
-                    let statusHTML =
-                        "";
-
-                    if (status) {
-
-                        statusHTML =
-                            '<span class="history-item-status">' +
-                                status +
-                            '</span>';
-                    }
-
-                    return (
-
-                        '<div ' +
-                            'class="history-item" ' +
-                            'data-history-id="' +
-                                escapeHTML(item.id) +
-                            '" ' +
-                            'data-task-id="' +
-                                escapeHTML(
-                                    item.taskId || ""
-                                ) +
-                            '">' +
-
-                            '<div class="history-item-icon">' +
-                                icon +
-                            '</div>' +
-
-                            '<div class="history-item-content">' +
-
-                                '<div class="history-item-title">' +
-                                    title +
-                                '</div>' +
-
-                                '<div class="history-item-action">' +
-                                    action +
-                                '</div>' +
-
-                                descriptionHTML +
-
-                                statusHTML +
-
-                            '</div>' +
-
-                            '<div ' +
-                                'class="history-item-time" ' +
-                                'title="' +
-                                    date +
-                                '">' +
-
-                                (
-                                    relative ||
-                                    date
-                                ) +
-
-                            '</div>' +
-
-                        '</div>'
-                    );
-                }
+                entry =>
+                    renderHistoryEntry(
+                        entry
+                    )
             )
             .join("");
 
-    bindHistoryItems(
-        container
+    container.appendChild(list);
+}
+
+function renderHistorySummary(
+    container
+) {
+    const summary =
+        document.createElement("div");
+
+    summary.className =
+        "history-summary";
+
+    summary.innerHTML = `
+        <div class="history-stat">
+
+            <span>
+                Completed
+            </span>
+
+            <strong>
+                ${escapeHTML(
+                    historyState.totals.completed
+                )}
+            </strong>
+
+        </div>
+
+        <div class="history-stat">
+
+            <span>
+                Approved
+            </span>
+
+            <strong>
+                ${escapeHTML(
+                    historyState.totals.approved
+                )}
+            </strong>
+
+        </div>
+
+        <div class="history-stat">
+
+            <span>
+                Earned
+            </span>
+
+            <strong>
+                ${escapeHTML(
+                    formatMoney(
+                        historyState.totals.earned
+                    )
+                )}
+            </strong>
+
+        </div>
+
+        <div class="history-stat">
+
+            <span>
+                Paid
+            </span>
+
+            <strong>
+                ${escapeHTML(
+                    formatMoney(
+                        historyState.totals.paidAmount
+                    )
+                )}
+            </strong>
+
+        </div>
+
+        <div class="history-stat">
+
+            <span>
+                Unpaid
+            </span>
+
+            <strong>
+                ${escapeHTML(
+                    formatMoney(
+                        historyState.totals.unpaidAmount
+                    )
+                )}
+            </strong>
+
+        </div>
+    `;
+
+    container.innerHTML = "";
+
+    container.appendChild(
+        summary
+    );
+}
+
+function renderHistoryEntry(
+    entry
+) {
+    if (entry.kind === "payment") {
+        return renderPaymentEntry(
+            entry.payment
+        );
+    }
+
+    return renderTaskEntry(
+        entry.task
     );
 }
 
 
-// ============================================================
-// HISTORY ITEM CLICK
-// ============================================================
+/* ============================================================
+   TASK HISTORY ENTRY
+   ============================================================ */
 
-function bindHistoryItems(
-    container
-) {
+function renderTaskEntry(task) {
+    const status =
+        task.status;
 
-    container
-        .querySelectorAll(
-            ".history-item"
-        )
-        .forEach(
-            function(item) {
+    const approved =
+        [
+            "approved",
+            "done"
+        ].includes(status);
 
-                item.addEventListener(
-                    "click",
-                    function() {
+    const completed =
+        [
+            "completed",
+            "submitted",
+            "approved",
+            "done"
+        ].includes(status);
 
-                        const taskId =
-                            item.dataset.taskId;
+    const role =
+        task.work_role
+            ? roleLabel(task.work_role)
+            : "";
 
-                        if (!taskId) {
-                            return;
-                        }
+    const date =
+        task.approved_at ||
+        task.completed_at ||
+        task.submitted_at ||
+        task.updated_at ||
+        task.created_at;
 
-                        openTaskFromHistory(
-                            taskId
-                        );
+    return `
+        <article
+            class="history-entry history-task-entry"
+            data-history-task-id="${escapeHTML(task.id)}"
+        >
+
+            <div class="history-entry-icon">
+                ${
+                    approved
+                        ? "✓"
+                        : completed
+                            ? "✓"
+                            : "◷"
+                }
+            </div>
+
+            <div class="history-entry-content">
+
+                <div class="history-entry-header">
+
+                    <div>
+
+                        <h3>
+                            ${escapeHTML(task.title)}
+                        </h3>
+
+                        <p>
+                            Task ID:
+                            ${escapeHTML(task.id)}
+                        </p>
+
+                    </div>
+
+                    <span class="history-status ${
+                        status === "approved"
+                            ? "status-approved"
+                            : status === "completed" ||
+                              status === "submitted"
+                                ? "status-completed"
+                                : "status-pending"
+                    }">
+                        ${escapeHTML(status)}
+                    </span>
+
+                </div>
+
+                <div class="history-entry-details">
+
+                    <span>
+                        Work:
+                        ${escapeHTML(task.work_type)}
+                    </span>
+
+                    ${
+                        role
+                            ? `
+                                <span>
+                                    Role:
+                                    ${escapeHTML(role)}
+                                </span>
+                            `
+                            : ""
                     }
-                );
-            }
-        );
+
+                    <span>
+                        Pay:
+                        ${escapeHTML(
+                            formatMoney(
+                                task.pay
+                            )
+                        )}
+                    </span>
+
+                    <span>
+                        ${escapeHTML(
+                            formatDate(date)
+                        )}
+                    </span>
+
+                </div>
+
+            </div>
+
+        </article>
+    `;
 }
 
 
-// ============================================================
-// OPEN TASK
-// ============================================================
+/* ============================================================
+   PAYMENT ENTRY
+   ============================================================ */
 
-export function openTaskFromHistory(
-    taskId
+function renderPaymentEntry(
+    payment
 ) {
+    const paid =
+        payment.paid;
 
-    if (!taskId) {
+    const statusText =
+        paid
+            ? "Paid"
+            : "Not paid";
+
+    const date =
+        payment.paid_at ||
+        payment.created_at;
+
+    return `
+        <article
+            class="history-entry history-payment-entry"
+            data-history-payment-id="${escapeHTML(payment.id)}"
+        >
+
+            <div class="history-entry-icon">
+                ${
+                    paid
+                        ? "✓"
+                        : "💰"
+                }
+            </div>
+
+            <div class="history-entry-content">
+
+                <div class="history-entry-header">
+
+                    <div>
+
+                        <h3>
+                            Payment
+                        </h3>
+
+                        <p>
+                            ${
+                                payment.task_id
+                                    ? `
+                                        Task:
+                                        ${escapeHTML(
+                                            payment.task_id
+                                        )}
+                                    `
+                                    : escapeHTML(
+                                        payment.description ||
+                                        "Work payment"
+                                    )
+                            }
+                        </p>
+
+                    </div>
+
+                    <span class="history-status ${
+                        paid
+                            ? "status-paid"
+                            : "status-unpaid"
+                    }">
+                        ${statusText}
+                    </span>
+
+                </div>
+
+                <div class="history-entry-details">
+
+                    <strong>
+                        ${escapeHTML(
+                            formatMoney(
+                                payment.amount
+                            )
+                        )}
+                    </strong>
+
+                    ${
+                        payment.work_type
+                            ? `
+                                <span>
+                                    Work:
+                                    ${escapeHTML(
+                                        payment.work_type
+                                    )}
+                                </span>
+                            `
+                            : ""
+                    }
+
+                    <span>
+                        ${escapeHTML(
+                            formatDate(date)
+                        )}
+                    </span>
+
+                </div>
+
+            </div>
+
+        </article>
+    `;
+}
+
+
+/* ============================================================
+   ERROR
+   ============================================================ */
+
+function renderHistoryError(
+    message
+) {
+    const container =
+        $("workHistoryList");
+
+    if (!container) {
         return;
     }
 
-    window.dispatchEvent(
-        new CustomEvent(
-            "history:openTask",
+    container.innerHTML = `
+        <div class="history-error-state">
+
+            <h3>
+                Unable to load work history
+            </h3>
+
+            <p>
+                ${escapeHTML(message)}
+            </p>
+
+            <button
+                type="button"
+                id="retryHistoryButton"
+            >
+                Try again
+            </button>
+
+        </div>
+    `;
+
+    const retry =
+        $("retryHistoryButton");
+
+    if (retry) {
+        retry.addEventListener(
+            "click",
+            async () => {
+                await refreshHistory();
+            },
             {
-                detail: {
-                    taskId: taskId
-                }
+                once: true
             }
-        )
-    );
-
-
-    try {
-
-        if (
-            typeof window.loadTask ===
-            "function"
-        ) {
-
-            window.loadTask(
-                taskId
-            );
-
-            return;
-        }
-
-        if (
-            typeof window.openTask ===
-            "function"
-        ) {
-
-            window.openTask(
-                taskId
-            );
-
-            return;
-        }
-
-        if (
-            typeof window.selectTask ===
-            "function"
-        ) {
-
-            window.selectTask(
-                taskId
-            );
-
-            return;
-        }
-
-    } catch (error) {
-
-        console.warn(
-            "Unable to open task from history:",
-            error
         );
     }
 }
 
 
-// ============================================================
-// ADD LOCAL HISTORY
-// ============================================================
+/* ============================================================
+   CLEAR
+   ============================================================ */
 
-export function addHistoryItem(
-    item
-) {
+function clearHistory() {
+    historyState.tasks = [];
+    historyState.payments = [];
+    historyState.combined = [];
 
-    item =
-        item || {};
-
-    const normalized =
-        normalizeHistoryRecord({
-
-            ...item,
-
-            created_at:
-                item.created_at ||
-                item.createdAt ||
-                new Date().toISOString()
-        });
-
-
-    historyState.items.unshift(
-        normalized
-    );
-
-
-    historyState.items =
-        historyState.items.slice(
-            0,
-            historyState.limit
-        );
-
-
-    renderHistory();
-
-    return normalized;
-}
-
-
-// ============================================================
-// SAVE HISTORY ACTIVITY
-// ============================================================
-
-export async function saveHistoryActivity(
-    activity
-) {
-
-    activity =
-        activity || {};
-
-    const user =
-        activity.user ||
-        await getCurrentUser();
-
-    if (!supabase || !user) {
-
-        return {
-
-            success: false,
-
-            localOnly: true
-        };
-    }
-
-
-    const payload = {
-
-        user_id:
-            user.id,
-
-        action:
-            activity.action ||
-            activity.event ||
-            "activity",
-
-        description:
-            activity.description ||
-            activity.message ||
-            "",
-
-        task_id:
-            activity.taskId ||
-            activity.task_id ||
-            null,
-
-        created_at:
-            activity.createdAt ||
-            activity.created_at ||
-            new Date().toISOString()
+    historyState.totals = {
+        tasks: 0,
+        completed: 0,
+        approved: 0,
+        submitted: 0,
+        paid: 0,
+        unpaid: 0,
+        earned: 0,
+        paidAmount: 0,
+        unpaidAmount: 0
     };
-
-
-    for (
-        const table of HISTORY_TABLES
-    ) {
-
-        try {
-
-            const result =
-                await supabase
-                    .from(table)
-                    .insert(payload)
-                    .select()
-                    .maybeSingle();
-
-            const data =
-                result.data;
-
-            const error =
-                result.error;
-
-            if (!error) {
-
-                const item =
-                    addHistoryItem(
-                        data ||
-                        payload
-                    );
-
-                return {
-
-                    success: true,
-
-                    table: table,
-
-                    item: item
-                };
-            }
-
-        } catch (error) {
-
-            // Try the next table.
-        }
-    }
-
-
-    addHistoryItem(
-        payload
-    );
-
-
-    return {
-
-        success: false,
-
-        localOnly: true
-    };
-}
-
-
-// ============================================================
-// REFRESH HISTORY
-// ============================================================
-
-export async function refreshHistory() {
-
-    return loadHistory({
-        force: true
-    });
-}
-
-
-// ============================================================
-// SHOW HISTORY
-// ============================================================
-
-function showHistoryView() {
-
-    const history =
-        getHistoryContainer();
-
-    if (!history) {
-        return;
-    }
-
-
-    const possibleViews = [
-
-        $("workHistoryView"),
-
-        $("historyView"),
-
-        $("workHistoryPage")
-    ];
-
-
-    possibleViews.forEach(
-        function(view) {
-
-            if (view) {
-
-                view.hidden =
-                    false;
-
-                view.style.display =
-                    "";
-            }
-        }
-    );
-
-
-    history.scrollTop = 0;
-
-    loadHistory();
-}
-
-
-// ============================================================
-// HISTORY BUTTON
-// ============================================================
-
-function bindHistoryButton() {
-
-    const button =
-        $("workHistoryButton") ||
-        $("workHistoryBtn");
-
-    if (
-        !button ||
-        button.dataset.historyBound ===
-            "true"
-    ) {
-        return;
-    }
-
-
-    button.dataset.historyBound =
-        "true";
-
-
-    button.addEventListener(
-        "click",
-        function(event) {
-
-            event.preventDefault();
-
-            showHistoryView();
-
-            window.dispatchEvent(
-                new CustomEvent(
-                    "history:open"
-                )
-            );
-        }
-    );
-}
-
-
-// ============================================================
-// AUTH EVENTS
-// ============================================================
-
-function bindAuthEvents() {
-
-    window.addEventListener(
-        "auth:login",
-        function() {
-
-            loadHistory();
-        }
-    );
-
-
-    window.addEventListener(
-        "auth:logout",
-        function() {
-
-            historyState.items =
-                [];
-
-            renderHistory();
-        }
-    );
-
-
-    window.addEventListener(
-        "auth:session",
-        function(event) {
-
-            const session =
-                event.detail &&
-                event.detail.session;
-
-            if (
-                session &&
-                session.user
-            ) {
-
-                loadHistory({
-                    user:
-                        session.user
-                });
-            }
-        }
-    );
-}
-
-
-// ============================================================
-// TASK EVENTS
-// ============================================================
-
-function bindTaskEvents() {
-
-    const refreshEvents = [
-
-        "task:submitted",
-
-        "task:completed",
-
-        "task:approved",
-
-        "task:rejected",
-
-        "task:skipped",
-
-        "task:created",
-
-        "task:updated",
-
-        "annotation:saved",
-
-        "annotation:submitted"
-    ];
-
-
-    refreshEvents.forEach(
-        function(eventName) {
-
-            window.addEventListener(
-                eventName,
-                function(event) {
-
-                    const detail =
-                        event.detail ||
-                        {};
-
-
-                    if (
-                        detail.action ||
-                        detail.event ||
-                        detail.description
-                    ) {
-
-                        addHistoryItem({
-
-                            ...detail,
-
-                            action:
-                                detail.action ||
-                                detail.event ||
-                                eventName.replace(
-                                    "task:",
-                                    ""
-                                )
-                        });
-                    }
-
-
-                    setTimeout(
-                        function() {
-
-                            loadHistory();
-
-                        },
-                        300
-                    );
-                }
-            );
-        }
-    );
-}
-
-
-// ============================================================
-// GLOBALS
-// ============================================================
-
-function exposeGlobals() {
-
-    window.loadHistory =
-        loadHistory;
-
-    window.renderHistory =
-        renderHistory;
-
-    window.refreshHistory =
-        refreshHistory;
-
-    window.addHistoryItem =
-        addHistoryItem;
-
-    window.saveHistoryActivity =
-        saveHistoryActivity;
-
-    window.openTaskFromHistory =
-        openTaskFromHistory;
-}
-
-
-// ============================================================
-// INITIALIZATION
-// ============================================================
-
-export async function initializeHistory() {
-
-    if (
-        historyState.initialized
-    ) {
-
-        return;
-    }
-
-
-    historyState.initialized =
-        true;
-
-
-    exposeGlobals();
-
-    bindHistoryButton();
-
-    bindAuthEvents();
-
-    bindTaskEvents();
-
 
     const container =
-        getHistoryContainer();
+        $("workHistoryList");
 
     if (container) {
+        container.innerHTML = "";
+    }
+}
 
-        renderEmptyHistory(
-            container
-        );
+
+/* ============================================================
+   HISTORY VISIBILITY
+   ============================================================
+   Requirement:
+   "work history shortcut disappears once all payment
+    records for user are paid."
+
+   If there are no payment records yet, keep the shortcut visible
+   because there is nothing to indicate that all records have
+   already been paid.
+   ============================================================ */
+
+export function updateHistoryVisibility() {
+    const button =
+        $("workHistoryButton");
+
+    if (!button) {
+        return;
     }
 
+    const userId =
+        getUserId();
 
-    // getCurrentSession() returns:
-    // { session, error }
+    if (!userId) {
+        button.hidden = true;
+        button.style.display = "none";
 
+        return;
+    }
+
+    const payments =
+        historyState.payments;
+
+    /*
+     * No records:
+     * keep History available.
+     */
+    if (!payments.length) {
+        button.hidden = false;
+        button.style.display = "";
+
+        return;
+    }
+
+    const allPaid =
+        payments.every(
+            payment => payment.paid
+        );
+
+    if (allPaid) {
+        button.hidden = true;
+        button.style.display = "none";
+    } else {
+        button.hidden = false;
+        button.style.display = "";
+    }
+}
+
+
+/* ============================================================
+   PAYMENT STATUS CHECK
+   ============================================================ */
+
+export function areAllPaymentsPaid() {
+    const payments =
+        historyState.payments;
+
+    if (!payments.length) {
+        return false;
+    }
+
+    return payments.every(
+        payment => payment.paid
+    );
+}
+
+export function hasUnpaidPayments() {
+    return historyState.payments.some(
+        payment => !payment.paid
+    );
+}
+
+
+/* ============================================================
+   USER PAYMENT SUMMARY
+   ============================================================ */
+
+export function getPaymentSummary() {
+    return {
+        totalRecords:
+            historyState.payments.length,
+
+        paidRecords:
+            historyState.totals.paid,
+
+        unpaidRecords:
+            historyState.totals.unpaid,
+
+        totalAmount:
+            historyState.totals.earned,
+
+        paidAmount:
+            historyState.totals.paidAmount,
+
+        unpaidAmount:
+            historyState.totals.unpaidAmount,
+
+        allPaid:
+            areAllPaymentsPaid()
+    };
+}
+
+
+/* ============================================================
+   GET STATE
+   ============================================================ */
+
+export function getHistoryState() {
+    return historyState;
+}
+
+
+/* ============================================================
+   LOG HISTORY VIEW
+   ============================================================ */
+
+async function logHistoryViewed() {
     try {
-
-        const result =
-            await getCurrentSession();
-
-        const session =
-            result &&
-            result.session;
-
-        if (
-            session &&
-            session.user
-        ) {
-
-            await loadHistory({
-                user:
-                    session.user
-            });
-        }
-
+        await logActivity?.(
+            "work_history_viewed",
+            {
+                user_id:
+                    getUserId(),
+                email:
+                    getUserEmailAddress()
+            }
+        );
     } catch (error) {
-
         console.warn(
-            "History session check failed:",
+            "History activity log failed:",
             error
         );
     }
 }
 
 
-// ============================================================
-// AUTO INITIALIZE
-// ============================================================
+/* ============================================================
+   PUBLIC WINDOW COMPATIBILITY
+   ============================================================ */
+
+window.historyManager = {
+    state: historyState,
+
+    initialize:
+        initializeHistory,
+
+    open:
+        openWorkHistory,
+
+    close:
+        closeWorkHistory,
+
+    refresh:
+        refreshHistory,
+
+    getState:
+        getHistoryState,
+
+    getPaymentSummary,
+
+    areAllPaymentsPaid,
+
+    hasUnpaidPayments,
+
+    updateVisibility:
+        updateHistoryVisibility
+};
+
+
+/* ============================================================
+   AUTO INITIALIZATION
+   ============================================================ */
 
 if (
     document.readyState ===
     "loading"
 ) {
-
     document.addEventListener(
         "DOMContentLoaded",
-        function() {
-
-            initializeHistory()
-                .catch(
-                    function(error) {
-
-                        console.error(
-                            "History initialization failed:",
-                            error
-                        );
-                    }
-                );
-        },
+        initializeHistory,
         {
             once: true
         }
     );
-
 } else {
-
-    initializeHistory()
-        .catch(
-            function(error) {
-
-                console.error(
-                    "History initialization failed:",
-                    error
-                );
-            }
-        );
+    initializeHistory();
 }
 
 
-// ============================================================
-// EXPORT STATE
-// ============================================================
+/* ============================================================
+   EXPORTS
+   ============================================================ */
 
 export {
-    historyState
+    loadUserTasks,
+    loadUserPayments,
+    calculateTotals,
+    renderHistory
 };
