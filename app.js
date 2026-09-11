@@ -1,1850 +1,2110 @@
-// ============================================================
-// ANNOTATION AI
-// MAIN APPLICATION BOOTSTRAP
-// File: app.js
-// ============================================================
-//
-// This file is the central application coordinator.
-//
-// IMPORTANT:
-// - index.html loads this file as a module.
-// - All feature logic remains inside ./js/*.js
-// - Do not put annotation drawing, AI detection, task CRUD,
-//   authentication forms, admin tables, etc. in this file.
-//
-// Modules:
-//   js/config.js
-//   js/supabase.js
-//   js/auth.js
-//   js/workspace.js
-//   js/home.js
-//   js/tasks.js
-//   js/media.js
-//   js/annotation.js
-//   js/ai.js
-//   js/admin.js
-//   js/profile.js
-//   js/history.js
-// ============================================================
+/* ============================================================
+   ANNOTATION AI
+   APP ENTRY POINT
+   ============================================================
 
-
-// ============================================================
-// IMPORTS
-// ============================================================
-
-import {
-    APP_CONFIG
-} from "./js/config.js";
-
-
-import {
-    supabase,
-    getCurrentUser,
-    getCurrentSession,
-    onAuthStateChange,
-    updateCloudStatus
-} from "./js/supabase.js";
-
+   IMPORTANT:
+   - This file is the application entry point.
+   - It loads the modular JavaScript files.
+   - Keep this file in the same folder as index.html.
+   - All modules are inside ./js/
+   ============================================================ */
 
 import {
     initializeAuth,
     loadSessionOnStartup
 } from "./js/auth.js";
 
-
 import {
-    initializeWorkspace
-} from "./js/workspace.js";
-
-
-import {
-    initializeHome
-} from "./js/home.js";
-
-
-import {
-    initializeTasks
-} from "./js/tasks.js";
-
+    initializeAnnotation,
+    initializeAnnotationCanvas
+} from "./js/annotation.js";
 
 import {
     initializeMedia
 } from "./js/media.js";
 
+import {
+    initializeTasks
+} from "./js/tasks.js";
 
 import {
-    initializeAnnotation
-} from "./js/annotation.js";
-
-
-import {
-    initializeAI
-} from "./js/ai.js";
-
+    initializeHome
+} from "./js/home.js";
 
 import {
-    initializeAdmin
-} from "./js/admin.js";
-
-
-import {
-    initializeProfile
-} from "./js/profile.js";
-
+    initializeWorkspace
+} from "./js/workspace.js";
 
 import {
     initializeHistory
 } from "./js/history.js";
 
+import {
+    initializeProfile
+} from "./js/profile.js";
 
-// ============================================================
-// APPLICATION STATE
-// ============================================================
+import {
+    initializeAdmin
+} from "./js/admin.js";
+
+import {
+    initializeAI
+} from "./js/ai.js";
+
+import {
+    getSupabase,
+    checkSupabaseConnection
+} from "./js/supabase.js";
+
+import {
+    APP_CONFIG
+} from "./js/config.js";
+
+
+/* ============================================================
+   GLOBAL APP STATE
+   ============================================================ */
 
 const appState = {
-
     initialized: false,
-
-    initializing: false,
-
-    ready: false,
-
-    session: null,
-
-    user: null,
-
-    startedAt: null,
-
-    lastAuthEvent: null,
-
-    moduleStatus: {}
-
+    loading: true,
+    modulesInitialized: false,
+    supabaseReady: false
 };
 
 
-// ============================================================
-// DOM HELPER
-// ============================================================
+/* ============================================================
+   DOM HELPERS
+   ============================================================ */
 
 function $(id) {
     return document.getElementById(id);
 }
 
 
-// ============================================================
-// SAFE EVENT DISPATCH
-// ============================================================
-
-function emit(name, detail = {}) {
-
-    try {
-
-        window.dispatchEvent(
-            new CustomEvent(
-                name,
-                {
-                    detail
-                }
-            )
-        );
-
-    } catch (error) {
-
-        console.warn(
-            `Could not dispatch ${name}:`,
-            error
-        );
-
+function showElement(element) {
+    if (!element) {
+        return;
     }
 
+    element.classList.remove("hidden");
+
+    element.removeAttribute("aria-hidden");
 }
 
 
-// ============================================================
-// TOAST FALLBACK
-// ============================================================
-//
-// Most modules have their own toast function.
-// This fallback keeps app-level errors visible even if a
-// feature module has not initialized yet.
-// ============================================================
+function hideElement(element) {
+    if (!element) {
+        return;
+    }
 
-function showAppToast(message) {
+    element.classList.add("hidden");
 
+    element.setAttribute(
+        "aria-hidden",
+        "true"
+    );
+}
+
+
+/* ============================================================
+   LOADING SCREEN
+   ============================================================ */
+
+function setLoaderText(text) {
+    const loaderText =
+        $("appLoader")
+            ?.querySelector(".loader-text");
+
+    if (loaderText) {
+        loaderText.textContent = text;
+    }
+}
+
+
+function showLoader() {
+    const loader = $("appLoader");
+
+    if (!loader) {
+        return;
+    }
+
+    loader.classList.remove("hidden");
+
+    loader.setAttribute(
+        "aria-hidden",
+        "false"
+    );
+}
+
+
+function hideLoader() {
+    const loader = $("appLoader");
+
+    if (!loader) {
+        return;
+    }
+
+    loader.classList.add("hidden");
+
+    loader.setAttribute(
+        "aria-hidden",
+        "true"
+    );
+}
+
+
+/* ============================================================
+   PAGE HELPERS
+   ============================================================ */
+
+function showPage(id) {
+    const pages = [
+        "authPage",
+        "appPage"
+    ];
+
+    pages.forEach(pageId => {
+        const page =
+            $(pageId);
+
+        if (!page) {
+            return;
+        }
+
+        if (pageId === id) {
+            showElement(page);
+        } else {
+            hideElement(page);
+        }
+    });
+}
+
+
+function showAppPage() {
+    showPage("appPage");
+}
+
+
+function showAuthPage() {
+    showPage("authPage");
+}
+
+
+function showApprovalPage() {
+    const approvalPage =
+        $("approvalPage");
+
+    const homePage =
+        $("homePage");
+
+    const annotationPage =
+        $("annotationPage");
+
+    if (approvalPage) {
+        showElement(approvalPage);
+    }
+
+    if (homePage) {
+        hideElement(homePage);
+    }
+
+    if (annotationPage) {
+        hideElement(annotationPage);
+    }
+}
+
+
+function showHomePage() {
+    const approvalPage =
+        $("approvalPage");
+
+    const homePage =
+        $("homePage");
+
+    const annotationPage =
+        $("annotationPage");
+
+    if (approvalPage) {
+        hideElement(approvalPage);
+    }
+
+    if (homePage) {
+        showElement(homePage);
+    }
+
+    if (annotationPage) {
+        hideElement(annotationPage);
+    }
+}
+
+
+function showAnnotationPage() {
+    const approvalPage =
+        $("approvalPage");
+
+    const homePage =
+        $("homePage");
+
+    const annotationPage =
+        $("annotationPage");
+
+    if (approvalPage) {
+        hideElement(approvalPage);
+    }
+
+    if (homePage) {
+        hideElement(homePage);
+    }
+
+    if (annotationPage) {
+        showElement(annotationPage);
+    }
+}
+
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+
+function showToast(
+    message,
+    type = "info",
+    duration = 3500
+) {
     const container =
         $("toastContainer");
 
     if (!container) {
-
-        console.warn(message);
-
+        console.log(message);
         return;
-
     }
-
 
     const toast =
         document.createElement("div");
 
     toast.className =
-        "toast";
+        `toast toast-${type}`;
 
+    toast.setAttribute(
+        "role",
+        "status"
+    );
 
     toast.textContent =
-        String(message);
-
+        String(message || "");
 
     container.appendChild(toast);
 
-
     window.setTimeout(
         () => {
-
             toast.classList.add(
-                "show"
-            );
-
-        },
-        10
-    );
-
-
-    window.setTimeout(
-        () => {
-
-            toast.classList.remove(
-                "show"
+                "toast-hide"
             );
 
             window.setTimeout(
                 () => {
-
                     toast.remove();
-
                 },
                 250
             );
-
         },
-        4500
+        duration
     );
-
 }
 
 
-// ============================================================
-// CLOUD STATUS
-// ============================================================
+/* ============================================================
+   GLOBAL TOAST COMPATIBILITY
+   ============================================================ */
 
-function refreshCloudStatus(session) {
-
-    try {
-
-        updateCloudStatus(
-            session || null
-        );
-
-        return;
-
-    } catch (_) {
-        // Fall through to local UI update.
-    }
+window.showToast =
+    showToast;
 
 
-    const element =
-        $("cloudStatus");
+/* ============================================================
+   ERROR HANDLING
+   ============================================================ */
 
-    if (!element) {
-
-        return;
-
-    }
-
-
-    if (!supabase) {
-
-        element.textContent =
-            "Cloud connection not configured";
-
-        element.dataset.status =
-            "offline";
-
-        return;
-
-    }
-
-
-    if (session?.user) {
-
-        element.textContent =
-            "Cloud connected";
-
-        element.dataset.status =
-            "online";
-
-    } else {
-
-        element.textContent =
-            "Not signed in";
-
-        element.dataset.status =
-            "offline";
-
-    }
-
-}
-
-
-// ============================================================
-// APPLICATION VISIBILITY
-// ============================================================
-//
-// Your current index.html uses:
-//
-//   authPage
-//   appPage
-//   approvalPage
-//
-// Older versions used loginPage/authLoggedIn/etc.
-// This function intentionally supports both so the application
-// does not break if an older HTML element still exists.
-// ============================================================
-
-function setElementVisible(
-    element,
-    visible
+function handleAppError(
+    error,
+    fallbackMessage =
+        "Something went wrong."
 ) {
-
-    if (!element) {
-
-        return;
-
-    }
-
-
-    element.hidden =
-        !visible;
-
-
-    element.classList.toggle(
-        "hidden",
-        !visible
+    console.error(
+        "ANNOTATION AI error:",
+        error
     );
 
+    const message =
+        error?.message ||
+        fallbackMessage;
 
-    element.style.display =
-        visible
-            ? ""
-            : "none";
-
+    showToast(
+        message,
+        "error"
+    );
 }
 
 
-// ============================================================
-// AUTH PAGE
-// ============================================================
-
-function showAuthPage() {
-
-    setElementVisible(
-        $("authPage"),
-        true
-    );
-
-
-    setElementVisible(
-        $("appPage"),
-        false
-    );
-
-
-    setElementVisible(
-        $("approvalPage"),
-        false
-    );
-
-
-    // Compatibility with older HTML.
-    setElementVisible(
-        $("loginPage"),
-        true
-    );
-
-
-    setElementVisible(
-        $("authLoggedOut"),
-        true
-    );
-
-
-    setElementVisible(
-        $("authLoggedIn"),
-        false
-    );
-
-
-    document.body.dataset.auth =
-        "logged-out";
-
-
-    document.body.dataset.access =
-        "logged-out";
-
-}
-
-
-// ============================================================
-// APPLICATION PAGE
-// ============================================================
-
-function showApplicationPage() {
-
-    setElementVisible(
-        $("authPage"),
-        false
-    );
-
-
-    setElementVisible(
-        $("appPage"),
-        true
-    );
-
-
-    setElementVisible(
-        $("approvalPage"),
-        false
-    );
-
-
-    // Compatibility with older HTML.
-    setElementVisible(
-        $("loginPage"),
-        false
-    );
-
-
-    setElementVisible(
-        $("authLoggedOut"),
-        false
-    );
-
-
-    setElementVisible(
-        $("authLoggedIn"),
-        true
-    );
-
-
-    document.body.dataset.auth =
-        "logged-in";
-
-
-    document.body.dataset.access =
-        "active";
-
-}
-
-
-// ============================================================
-// PENDING APPROVAL PAGE
-// ============================================================
-
-function showApprovalPage() {
-
-    setElementVisible(
-        $("authPage"),
-        false
-    );
-
-
-    setElementVisible(
-        $("appPage"),
-        false
-    );
-
-
-    setElementVisible(
-        $("approvalPage"),
-        true
-    );
-
-
-    // Compatibility with older HTML.
-    setElementVisible(
-        $("loginPage"),
-        false
-    );
-
-
-    setElementVisible(
-        $("authLoggedOut"),
-        false
-    );
-
-
-    setElementVisible(
-        $("authLoggedIn"),
-        false
-    );
-
-
-    document.body.dataset.auth =
-        "logged-in";
-
-
-    document.body.dataset.access =
-        "pending";
-
-
-    const approvalTitle =
-        document.querySelector(
-            "#approvalPage h1"
+window.addEventListener(
+    "error",
+    event => {
+        console.error(
+            "Unhandled application error:",
+            event.error ||
+            event.message
         );
-
-
-    if (approvalTitle) {
-
-        approvalTitle.textContent =
-            "Wait for admin approval";
-
     }
-
-}
-
-
-// ============================================================
-// DETERMINE PROFILE ACCESS
-// ============================================================
-//
-// Authentication belongs to auth.js. This function only reads
-// the current profile/user information to determine which
-// top-level page should be visible.
-//
-// New customers are expected to be inactive until approved.
-// Admin/staff access is handled by the role modules.
-// ============================================================
-
-async function getAccessState(user) {
-
-    if (!user) {
-
-        return {
-            loggedIn: false,
-            active: false,
-            pending: false
-        };
-
-    }
+);
 
 
-    // Admin email is also handled by auth.js/config.js.
-    // We do not expose it in the UI.
-
-
-    try {
-
-        const {
-            data,
-            error
-        } = await supabase
-            .from("profiles")
-            .select(
-                "id,role,active,email,full_name"
-            )
-            .eq(
-                "id",
-                user.id
-            )
-            .maybeSingle();
-
-
-        if (!error && data) {
-
-            const active =
-                data.active !== false;
-
-
-            return {
-
-                loggedIn: true,
-
-                active,
-
-                pending: !active,
-
-                profile: data
-
-            };
-
-        }
-
-    } catch (error) {
-
-        console.warn(
-            "Could not read profile access state:",
-            error
+window.addEventListener(
+    "unhandledrejection",
+    event => {
+        console.error(
+            "Unhandled promise rejection:",
+            event.reason
         );
-
     }
+);
 
 
-    // If the profile cannot be read, do not invent a
-    // permission decision. Keep the normal application visible
-    // for an existing authenticated session and allow auth.js
-    // to handle the detailed state.
-    return {
+/* ============================================================
+   AUTH PANEL SWITCHING
+   ============================================================ */
 
-        loggedIn: true,
+function initializeAuthPanels() {
+    const loginPanel =
+        $("loginPanel");
 
-        active: true,
+    const signupPanel =
+        $("signupPanel");
 
-        pending: false,
+    const showSignup =
+        $("showSignupButton");
 
-        profile: null
+    const showLogin =
+        $("showLoginButton");
 
-    };
-
-}
-
-
-// ============================================================
-// APPLY SESSION TO APPLICATION
-// ============================================================
-
-async function applySession(
-    session,
-    options = {}
-) {
-
-    const user =
-        session?.user || null;
-
-
-    appState.session =
-        session || null;
-
-
-    appState.user =
-        user;
-
-
-    if (options.authEvent) {
-
-        appState.lastAuthEvent =
-            options.authEvent;
-
-    }
-
-
-    refreshCloudStatus(
-        session
-    );
-
-
-    // --------------------------------------------------------
-    // Logged out
-    // --------------------------------------------------------
-
-    if (!user) {
-
-        showAuthPage();
-
-        emit(
-            "app:session",
-            {
-                session: null,
-                user: null
-            }
-        );
-
-        emit(
-            "app:loggedOut",
-            {}
-        );
-
-        return;
-
-    }
-
-
-    // --------------------------------------------------------
-    // Logged in
-    // --------------------------------------------------------
-
-    const access =
-        await getAccessState(
-            user
-        );
-
-
-    if (
-        access.pending
-    ) {
-
-        showApprovalPage();
-
-    } else {
-
-        showApplicationPage();
-
-    }
-
-
-    emit(
-        "app:session",
-        {
-            session:
-                appState.session,
-
-            user:
-                appState.user,
-
-            profile:
-                access.profile,
-
-            active:
-                access.active,
-
-            pending:
-                access.pending
-        }
-    );
-
-
-    if (access.pending) {
-
-        emit(
-            "app:pendingApproval",
-            {
-                user,
-                profile:
-                    access.profile
-            }
-        );
-
-    } else {
-
-        emit(
-            "app:accessGranted",
-            {
-                user,
-                profile:
-                    access.profile
-            }
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// AUTH STATE LISTENER
-// ============================================================
-
-let authListenerAttached =
-    false;
-
-
-function bindAuthStateListener() {
-
-    if (
-        authListenerAttached ||
-        !supabase
-    ) {
-
-        return;
-
-    }
-
-
-    try {
-
-        onAuthStateChange(
-            async (
-                event,
-                session
-            ) => {
-
-                authListenerAttached =
-                    true;
-
-
-                console.log(
-                    "Supabase auth event:",
-                    event
-                );
-
-
-                appState.lastAuthEvent =
-                    event;
-
-
-                // Supabase may fire auth events while another
-                // initialization task is still running.
-                try {
-
-                    await applySession(
-                        session,
-                        {
-                            authEvent:
-                                event
-                        }
-                    );
-
-                } catch (error) {
-
-                    console.error(
-                        "Could not apply auth session:",
-                        error
-                    );
-
-                }
-
-
-                emit(
-                    "app:authChange",
-                    {
-                        event,
-                        session:
-                            session || null
-                    }
-                );
-
-            }
-        );
-
-
-        authListenerAttached =
-            true;
-
-    } catch (error) {
-
-        console.warn(
-            "Auth listener could not be attached:",
-            error
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// APPLICATION EVENTS
-// ============================================================
-
-let applicationEventsBound =
-    false;
-
-
-function bindApplicationEvents() {
-
-    if (
-        applicationEventsBound
-    ) {
-
-        return;
-
-    }
-
-
-    applicationEventsBound =
-        true;
-
-
-    // --------------------------------------------------------
-    // Authentication
-    // --------------------------------------------------------
-
-    window.addEventListener(
-        "auth:login",
-        async event => {
-
-            const session =
-                event.detail?.session ||
-                appState.session ||
-                null;
-
-
-            const user =
-                event.detail?.user ||
-                session?.user ||
-                null;
-
-
-            appState.user =
-                user;
-
-
-            appState.session =
-                session;
-
-
-            await applySession(
-                session,
-                {
-                    authEvent:
-                        "LOGIN"
-                }
-            );
-
-        }
-    );
-
-
-    window.addEventListener(
-        "auth:logout",
+    showSignup?.addEventListener(
+        "click",
         () => {
+            if (loginPanel) {
+                loginPanel.classList.add(
+                    "hidden"
+                );
+            }
 
-            appState.user =
-                null;
-
-            appState.session =
-                null;
-
-
-            showAuthPage();
-
-
-            refreshCloudStatus(
-                null
-            );
-
-
-            emit(
-                "app:loggedOut",
-                {}
-            );
-
+            if (signupPanel) {
+                signupPanel.classList.remove(
+                    "hidden"
+                );
+            }
         }
     );
 
 
-    // --------------------------------------------------------
-    // Approval refresh
-    // --------------------------------------------------------
+    showLogin?.addEventListener(
+        "click",
+        () => {
+            if (signupPanel) {
+                signupPanel.classList.add(
+                    "hidden"
+                );
+            }
 
-    window.addEventListener(
-        "app:refreshApproval",
-        async () => {
+            if (loginPanel) {
+                loginPanel.classList.remove(
+                    "hidden"
+                );
+            }
+        }
+    );
+}
 
-            const session =
-                await getCurrentSession();
 
+/* ============================================================
+   BASIC NAVIGATION
+   ============================================================ */
 
-            await applySession(
-                session
+function initializeNavigation() {
+    $("homeButton")?.addEventListener(
+        "click",
+        () => {
+            showHomePage();
+
+            window.dispatchEvent(
+                new CustomEvent(
+                    "homeRequested"
+                )
             );
-
         }
     );
 
 
-    // --------------------------------------------------------
-    // Home task events
-    // --------------------------------------------------------
+    $("backToHomeButton")?.addEventListener(
+        "click",
+        () => {
+            showHomePage();
 
-    window.addEventListener(
-        "home:openTask",
-        event => {
-
-            emit(
-                "app:taskRequested",
-                {
-                    taskId:
-                        event.detail?.taskId,
-
-                    task:
-                        event.detail?.task ||
-                        null
-                }
+            window.dispatchEvent(
+                new CustomEvent(
+                    "homeRequested"
+                )
             );
-
         }
     );
 
 
-    // --------------------------------------------------------
-    // History task events
-    // --------------------------------------------------------
-
-    window.addEventListener(
-        "history:openTask",
-        event => {
-
-            emit(
-                "app:historyTaskRequested",
-                {
-                    taskId:
-                        event.detail?.taskId,
-
-                    task:
-                        event.detail?.task ||
-                        null
-                }
-            );
-
-        }
-    );
+    $("approvalRefreshButton")
+        ?.addEventListener(
+            "click",
+            async () => {
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "approvalRefreshRequested"
+                    )
+                );
+            }
+        );
 
 
-    // --------------------------------------------------------
-    // Task events
-    // --------------------------------------------------------
+    $("approvalLogoutButton")
+        ?.addEventListener(
+            "click",
+            async () => {
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "approvalLogoutRequested"
+                    )
+                );
+            }
+        );
+}
 
+
+/* ============================================================
+   WORKSPACE EVENTS
+   ============================================================ */
+
+function initializeWorkspaceEvents() {
     window.addEventListener(
         "taskSelected",
-        event => {
+        () => {
+            showAnnotationPage();
+        }
+    );
 
-            document.body.dataset.taskSelected =
-                "true";
 
-
-            emit(
-                "app:taskSelected",
-                event.detail || {}
-            );
-
+    window.addEventListener(
+        "taskOpened",
+        () => {
+            showAnnotationPage();
         }
     );
 
 
     window.addEventListener(
         "taskCleared",
-        event => {
-
-            document.body.dataset.taskSelected =
-                "false";
-
-
-            emit(
-                "app:taskCleared",
-                event.detail || {}
-            );
-
+        () => {
+            showHomePage();
         }
     );
 
 
     window.addEventListener(
         "taskSubmitted",
-        event => {
-
-            emit(
-                "app:taskSubmitted",
-                event.detail || {}
-            );
-
+        () => {
+            showHomePage();
         }
     );
 
 
     window.addEventListener(
         "taskSkipped",
-        event => {
-
-            emit(
-                "app:taskSkipped",
-                event.detail || {}
-            );
-
-        }
-    );
-
-
-    // --------------------------------------------------------
-    // Annotation media events
-    // --------------------------------------------------------
-
-    window.addEventListener(
-        "annotation:loadTaskMedia",
-        event => {
-
-            console.debug(
-                "Task media requested:",
-                event.detail
-            );
-
-        }
-    );
-
-
-    window.addEventListener(
-        "annotation:loadMediaURL",
-        event => {
-
-            console.debug(
-                "Media URL requested:",
-                event.detail
-            );
-
-        }
-    );
-
-
-    // --------------------------------------------------------
-    // Annotation changes
-    // --------------------------------------------------------
-
-    const annotationEvents = [
-
-        "annotation:changed",
-
-        "annotation:created",
-
-        "annotation:updated",
-
-        "annotation:deleted",
-
-        "annotation:saved",
-
-        "annotation:frameChanged"
-
-    ];
-
-
-    annotationEvents.forEach(
-        eventName => {
-
-            window.addEventListener(
-                eventName,
-                event => {
-
-                    emit(
-                        "app:" + eventName,
-                        event.detail || {}
-                    );
-
-                }
-            );
-
-        }
-    );
-
-
-    // --------------------------------------------------------
-    // AI
-    // --------------------------------------------------------
-
-    window.addEventListener(
-        "home:runAI",
         () => {
+            showHomePage();
+        }
+    );
 
-            if (
-                typeof window.runAutoAnnotate ===
-                "function"
-            ) {
 
-                window.runAutoAnnotate();
+    window.addEventListener(
+        "homeRequested",
+        () => {
+            showHomePage();
+        }
+    );
+}
 
-            } else {
 
-                const button =
-                    $("autoAnnotate");
+/* ============================================================
+   WORKBENCH
+   ============================================================ */
 
-                if (button) {
+function initializeWorkbench() {
+    const editTool =
+        $("workbenchEditTool");
 
-                    button.click();
+    const uploadButton =
+        $("workbenchUpload");
 
-                }
+    const aiButton =
+        $("workbenchAI");
 
+    const annotationTypeButton =
+        $("workbenchAnnotationType");
+
+
+    editTool?.addEventListener(
+        "click",
+        () => {
+            const panel =
+                $("editToolsPanel");
+
+            if (panel) {
+                panel.scrollIntoView({
+                    behavior: "smooth",
+                    block: "nearest"
+                });
             }
 
+            window.dispatchEvent(
+                new CustomEvent(
+                    "workbenchEditRequested"
+                )
+            );
         }
     );
 
 
-    window.addEventListener(
-        "workbench:runAI",
+    annotationTypeButton?.addEventListener(
+        "click",
         () => {
+            const panel =
+                $("annotationTypePanel");
 
-            const button =
+            if (panel) {
+                panel.scrollIntoView({
+                    behavior: "smooth",
+                    block: "nearest"
+                });
+            }
+
+            window.dispatchEvent(
+                new CustomEvent(
+                    "workbenchAnnotationTypeRequested"
+                )
+            );
+        }
+    );
+
+
+    uploadButton?.addEventListener(
+        "click",
+        () => {
+            window.dispatchEvent(
+                new CustomEvent(
+                    "workbenchUploadRequested"
+                )
+            );
+        }
+    );
+
+
+    aiButton?.addEventListener(
+        "click",
+        () => {
+            const aiButtonElement =
                 $("autoAnnotate");
 
-
-            if (button) {
-
-                button.click();
-
+            if (
+                aiButtonElement &&
+                !aiButtonElement.disabled
+            ) {
+                aiButtonElement.click();
+                return;
             }
 
-        }
-    );
-
-
-    // --------------------------------------------------------
-    // Application ready
-    // --------------------------------------------------------
-
-    window.addEventListener(
-        "app:ready",
-        () => {
-
-            document.documentElement.dataset.appReady =
-                "true";
-
-        }
-    );
-
-
-    // --------------------------------------------------------
-    // Global errors
-    // --------------------------------------------------------
-
-    window.addEventListener(
-        "error",
-        event => {
-
-            console.error(
-                "Global application error:",
-                event.error ||
-                event.message
+            window.dispatchEvent(
+                new CustomEvent(
+                    "workbenchAIRequested"
+                )
             );
-
         }
     );
-
-
-    window.addEventListener(
-        "unhandledrejection",
-        event => {
-
-            console.error(
-                "Unhandled application promise rejection:",
-                event.reason
-            );
-
-        }
-    );
-
 }
 
 
-// ============================================================
-// INITIAL SESSION
-// ============================================================
+/* ============================================================
+   ANNOTATION TOOL BUTTONS
+   ============================================================ */
 
-async function loadInitialSession() {
-
-    try {
-
-        const session =
-            await getCurrentSession();
-
-
-        await applySession(
-            session
-        );
-
-
-        return session;
-
-    } catch (error) {
-
-        console.warn(
-            "Could not load initial Supabase session:",
-            error
-        );
-
-
-        await applySession(
-            null
-        );
-
-
-        return null;
-
-    }
-
-}
-
-
-// ============================================================
-// MODULE INITIALIZATION
-// ============================================================
-//
-// Authentication is initialized first because the rest of the
-// application needs the current user/role.
-//
-// Workspace is initialized before home/tasks so its UI state
-// is ready when those modules dispatch task events.
-// ============================================================
-
-async function initializeModules() {
-
-    const modules = [
-
+function initializeAnnotationTools() {
+    const toolButtons = [
         [
-            "auth",
-            initializeAuth
+            "selectTool",
+            "select"
         ],
-
         [
-            "workspace",
-            initializeWorkspace
+            "drawBoxTool",
+            "box"
         ],
-
         [
-            "annotation",
-            initializeAnnotation
+            "drawPolygonTool",
+            "polygon"
         ],
-
         [
-            "media",
-            initializeMedia
+            "drawSegmentationTool",
+            "segmentation"
         ],
-
         [
-            "ai",
-            initializeAI
+            "moveTool",
+            "move"
         ],
-
         [
-            "tasks",
-            initializeTasks
-        ],
-
-        [
-            "home",
-            initializeHome
-        ],
-
-        [
-            "history",
-            initializeHistory
-        ],
-
-        [
-            "profile",
-            initializeProfile
-        ],
-
-        [
-            "admin",
-            initializeAdmin
+            "editTool",
+            "edit"
         ]
-
     ];
 
 
-    for (
-        const [
-            name,
-            initializer
-        ]
-        of modules
-    ) {
+    toolButtons.forEach(
+        ([id, mode]) => {
+            const button =
+                $(id);
 
-        if (
-            typeof initializer !==
-            "function"
-        ) {
+            if (!button) {
+                return;
+            }
 
-            console.warn(
-                `Module "${name}" does not expose initialize${name}.`
-            );
-
-
-            appState.moduleStatus[
-                name
-            ] = "missing";
-
-
-            continue;
-
-        }
-
-
-        try {
-
-            await initializer();
-
-
-            appState.moduleStatus[
-                name
-            ] = "ready";
-
-
-            console.log(
-                `✓ ${name} initialized`
-            );
-
-        } catch (error) {
-
-            appState.moduleStatus[
-                name
-            ] = "error";
-
-
-            console.error(
-                `Failed to initialize ${name}:`,
-                error
-            );
-
-
-            // Do NOT stop the entire application because one
-            // optional module failed.
-
-        }
-
-    }
-
-}
-
-
-// ============================================================
-// REFRESH APPLICATION
-// ============================================================
-
-export async function refreshApp() {
-
-    try {
-
-        const session =
-            await getCurrentSession();
-
-
-        await applySession(
-            session
-        );
-
-
-        if (session?.user) {
-
-            emit(
-                "app:refresh",
-                {
-                    session,
-
-                    user:
-                        session.user
+            button.addEventListener(
+                "click",
+                () => {
+                    window.dispatchEvent(
+                        new CustomEvent(
+                            "annotationToolRequested",
+                            {
+                                detail: {
+                                    mode
+                                }
+                            }
+                        )
+                    );
                 }
             );
-
         }
+    );
 
 
-        return session;
-
-    } catch (error) {
-
-        console.error(
-            "Application refresh failed:",
-            error
-        );
-
-
-        return null;
-
-    }
-
-}
-
-
-// ============================================================
-// INITIALIZE APPLICATION
-// ============================================================
-
-export async function initializeApp() {
-
-    if (
-        appState.initialized
-    ) {
-
-        return appState;
-
-    }
-
-
-    if (
-        appState.initializing
-    ) {
-
-        return appState;
-
-    }
-
-
-    appState.initializing =
-        true;
-
-
-    appState.startedAt =
-        new Date().toISOString();
-
-
-    try {
-
-        console.log(
-            "========================================"
-        );
-
-
-        console.log(
-            `${APP_CONFIG.appName || "ANNOTATION AI"} starting`
-        );
-
-
-        console.log(
-            "========================================"
-        );
-
-
-        // ----------------------------------------------------
-        // Global application events
-        // ----------------------------------------------------
-
-        bindApplicationEvents();
-
-
-        // ----------------------------------------------------
-        // Supabase authentication listener
-        // ----------------------------------------------------
-
-        bindAuthStateListener();
-
-
-        // ----------------------------------------------------
-        // Load existing session first
-        // ----------------------------------------------------
-
-        const initialSession =
-            await loadInitialSession();
-
-
-        // ----------------------------------------------------
-        // Initialize all feature modules
-        // ----------------------------------------------------
-
-        await initializeModules();
-
-
-        // ----------------------------------------------------
-        // Auth startup compatibility
-        // ----------------------------------------------------
-        //
-        // auth.js may expose loadSessionOnStartup().
-        // It is safe to call it here as a final refresh.
-        //
-        // If it does not exist, nothing happens.
-        // ----------------------------------------------------
-
-        if (
-            typeof loadSessionOnStartup ===
-            "function"
-        ) {
-
-            try {
-
-                const loadedSession =
-                    await loadSessionOnStartup();
-
-
-                if (
-                    loadedSession?.user
-                ) {
-
-                    await applySession(
-                        loadedSession
+    $("clearAnnotationsButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                const confirmed =
+                    window.confirm(
+                        "Clear all annotations for this task?"
                     );
 
+                if (!confirmed) {
+                    return;
                 }
 
-            } catch (error) {
-
-                console.warn(
-                    "Auth startup refresh failed:",
-                    error
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "clearAnnotationsRequested"
+                    )
                 );
-
             }
+        );
+}
 
+
+/* ============================================================
+   ZOOM BUTTONS
+   ============================================================ */
+
+function initializeZoomControls() {
+    const zoomIn =
+        $("zoomInButton");
+
+    const zoomOut =
+        $("zoomOutButton");
+
+    const reset =
+        $("resetZoomButton") ||
+        $("resetViewButton");
+
+    zoomIn?.addEventListener(
+        "click",
+        () => {
+            window.dispatchEvent(
+                new CustomEvent(
+                    "zoomInRequested"
+                )
+            );
         }
+    );
 
 
-        // ----------------------------------------------------
-        // Final Supabase user refresh
-        // ----------------------------------------------------
+    zoomOut?.addEventListener(
+        "click",
+        () => {
+            window.dispatchEvent(
+                new CustomEvent(
+                    "zoomOutRequested"
+                )
+            );
+        }
+    );
 
-        try {
 
-            const currentSession =
-                await getCurrentSession();
+    reset?.addEventListener(
+        "click",
+        () => {
+            window.dispatchEvent(
+                new CustomEvent(
+                    "zoomResetRequested"
+                )
+            );
+        }
+    );
+}
 
 
-            if (
-                currentSession?.user
-            ) {
+/* ============================================================
+   VIDEO FRAME CONTROLS
+   ============================================================ */
 
-                await applySession(
-                    currentSession
+function initializeVideoControls() {
+    $("previousFrameButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "previousFrameRequested"
+                    )
                 );
-
-            } else if (
-                !initialSession
-            ) {
-
-                await applySession(
-                    null
-                );
-
             }
+        );
 
-        } catch (error) {
 
-            console.warn(
-                "Final session refresh failed:",
-                error
+    $("nextFrameButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "nextFrameRequested"
+                    )
+                );
+            }
+        );
+
+
+    $("videoPlayButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "videoPlayRequested"
+                    )
+                );
+            }
+        );
+
+
+    $("videoTimeline")
+        ?.addEventListener(
+            "input",
+            event => {
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "videoSeekRequested",
+                        {
+                            detail: {
+                                value:
+                                    Number(
+                                        event.target.value
+                                    )
+                            }
+                        }
+                    )
+                );
+            }
+        );
+}
+
+
+/* ============================================================
+   SAVE BUTTON
+   ============================================================ */
+
+function initializeSaveButton() {
+    $("saveAnnotationsButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "saveAnnotationsRequested"
+                    )
+                );
+            }
+        );
+}
+
+
+/* ============================================================
+   THEME COMPATIBILITY
+   ============================================================ */
+
+function initializeThemeCompatibility() {
+    const themeSelect =
+        $("themeSelect");
+
+    if (!themeSelect) {
+        return;
+    }
+
+    const savedTheme =
+        localStorage.getItem(
+            "annotationAI_theme"
+        );
+
+    if (savedTheme) {
+        themeSelect.value =
+            savedTheme;
+    }
+
+
+    themeSelect.addEventListener(
+        "change",
+        event => {
+            const theme =
+                event.target.value;
+
+            localStorage.setItem(
+                "annotationAI_theme",
+                theme
             );
 
+            applyTheme(
+                theme
+            );
         }
+    );
 
 
-        // ----------------------------------------------------
-        // Mark ready
-        // ----------------------------------------------------
-
-        appState.initialized =
-            true;
-
-
-        appState.ready =
-            true;
+    applyTheme(
+        themeSelect.value ||
+        "system"
+    );
+}
 
 
-        appState.initializing =
-            false;
+function applyTheme(theme) {
+    const root =
+        document.documentElement;
+
+    if (!root) {
+        return;
+    }
+
+    root.classList.remove(
+        "theme-light",
+        "theme-dark"
+    );
 
 
-        document.documentElement.dataset.app =
-            "annotation-ai";
+    if (theme === "light") {
+        root.classList.add(
+            "theme-light"
+        );
+        return;
+    }
 
 
-        document.documentElement.dataset.appReady =
-            "true";
+    if (theme === "dark") {
+        root.classList.add(
+            "theme-dark"
+        );
+        return;
+    }
 
 
-        emit(
-            "app:ready",
-            {
-                config:
-                    APP_CONFIG,
+    const prefersDark =
+        window.matchMedia &&
+        window.matchMedia(
+            "(prefers-color-scheme: dark)"
+        ).matches;
 
-                user:
-                    appState.user,
+    root.classList.add(
+        prefersDark
+            ? "theme-dark"
+            : "theme-light"
+    );
+}
 
-                session:
-                    appState.session,
 
-                modules:
-                    {
-                        ...appState.moduleStatus
-                    }
+/* ============================================================
+   MODAL ESCAPE HANDLING
+   ============================================================ */
+
+function initializeModalEscape() {
+    document.addEventListener(
+        "keydown",
+        event => {
+            if (
+                event.key !==
+                "Escape"
+            ) {
+                return;
             }
-        );
+
+            closeVisibleModal();
+        }
+    );
+}
 
 
-        console.log(
-            "========================================"
-        );
+function closeVisibleModal() {
+    const modalIds = [
+        "profileModal",
+        "settingsModal",
+        "workHistoryModal",
+        "skipModal",
+        "createTaskModal",
+        "createCoworkerModal"
+    ];
 
 
-        console.log(
-            "ANNOTATION AI is ready."
-        );
+    modalIds.forEach(
+        id => {
+            const modal =
+                $(id);
+
+            if (
+                modal &&
+                !modal.classList.contains(
+                    "hidden"
+                )
+            ) {
+                modal.classList.add(
+                    "hidden"
+                );
+            }
+        }
+    );
+}
 
 
-        console.log(
-            "Modules:",
-            appState.moduleStatus
-        );
+/* ============================================================
+   ADMIN MODAL COMPATIBILITY
+   ============================================================ */
 
+function initializeAdminModal() {
+    const adminButton =
+        $("adminCenterButton");
 
-        console.log(
-            "========================================"
-        );
+    const closeButton =
+        $("closeAdminModal");
 
+    adminButton?.addEventListener(
+        "click",
+        () => {
+            const modal =
+                $("adminModal");
 
-        return appState;
+            if (!modal) {
+                return;
+            }
 
-    } catch (error) {
-
-        appState.initializing =
-            false;
-
-
-        appState.ready =
-            false;
-
-
-        appState.initialized =
-            false;
-
-
-        console.error(
-            "Fatal application startup error:",
-            error
-        );
-
-
-        showAppToast(
-            "Application started with an error. Check the browser console."
-        );
-
-
-        const loader =
-            $("appLoader");
-
-
-        if (loader) {
-
-            loader.classList.add(
+            modal.classList.remove(
                 "hidden"
             );
 
-            loader.setAttribute(
-                "aria-hidden",
-                "true"
+            document.body.classList.add(
+                "admin-open"
             );
 
+            window.dispatchEvent(
+                new CustomEvent(
+                    "adminOpened"
+                )
+            );
         }
+    );
 
 
-        throw error;
+    closeButton?.addEventListener(
+        "click",
+        () => {
+            closeAdminModal();
+        }
+    );
+}
 
+
+function closeAdminModal() {
+    const modal =
+        $("adminModal");
+
+    if (modal) {
+        modal.classList.add(
+            "hidden"
+        );
     }
 
+    document.body.classList.remove(
+        "admin-open"
+    );
+
+    window.dispatchEvent(
+        new CustomEvent(
+            "adminClosed"
+        )
+    );
 }
 
 
-// ============================================================
-// GET APPLICATION STATE
-// ============================================================
+/* ============================================================
+   ADMIN TABS
+   ============================================================ */
 
-export function getAppState() {
+function initializeAdminTabs() {
+    const tabs =
+        document.querySelectorAll(
+            "[data-admin-tab]"
+        );
 
-    return {
+    const pages =
+        document.querySelectorAll(
+            "[data-admin-page]"
+        );
 
-        ...appState,
 
-        moduleStatus:
-            {
-                ...appState.moduleStatus
-            }
+    tabs.forEach(
+        tab => {
+            tab.addEventListener(
+                "click",
+                () => {
+                    const target =
+                        tab.dataset.adminTab;
 
-    };
+                    if (!target) {
+                        return;
+                    }
 
+
+                    tabs.forEach(
+                        item => {
+                            item.classList.toggle(
+                                "active",
+                                item === tab
+                            );
+                        }
+                    );
+
+
+                    pages.forEach(
+                        page => {
+                            const pageName =
+                                page.dataset.adminPage;
+
+                            page.classList.toggle(
+                                "active",
+                                pageName === target
+                            );
+                        }
+                    );
+
+
+                    window.dispatchEvent(
+                        new CustomEvent(
+                            "adminTabChanged",
+                            {
+                                detail: {
+                                    tab: target
+                                }
+                            }
+                        )
+                    );
+                }
+            );
+        }
+    );
 }
 
 
-// ============================================================
-// GET CURRENT USER
-// ============================================================
+/* ============================================================
+   PROFILE / SETTINGS / HISTORY BUTTONS
+   ============================================================ */
 
-export function getAppUser() {
+function initializeTopButtons() {
+    $("settingsButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                const modal =
+                    $("settingsModal");
 
-    return appState.user;
-
-}
-
-
-// ============================================================
-// GET CURRENT SESSION
-// ============================================================
-
-export function getAppSession() {
-
-    return appState.session;
-
-}
-
-
-// ============================================================
-// GLOBAL COMPATIBILITY
-// ============================================================
-//
-// Some older modules or browser console workflows may expect
-// these functions on window.
-// ============================================================
-
-window.initializeApp =
-    initializeApp;
-
-
-window.refreshApp =
-    refreshApp;
-
-
-window.restartApp =
-    refreshApp;
-
-
-window.getAppState =
-    getAppState;
-
-
-window.getAppUser =
-    getAppUser;
-
-
-window.getAppSession =
-    getAppSession;
-
-
-// ============================================================
-// STARTUP
-// ============================================================
-//
-// index.html already contains:
-//
-// <script type="module" src="./app.js"></script>
-//
-// No second script is necessary.
-// ============================================================
-
-function startApplication() {
-
-    initializeApp()
-        .catch(
-            error => {
-
-                console.error(
-                    "ANNOTATION AI could not start:",
-                    error
-                );
-
+                if (modal) {
+                    modal.classList.remove(
+                        "hidden"
+                    );
+                }
             }
         );
 
+
+    $("closeSettingsModal")
+        ?.addEventListener(
+            "click",
+            () => {
+                $("settingsModal")
+                    ?.classList.add(
+                        "hidden"
+                    );
+            }
+        );
+
+
+    $("profileButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                const modal =
+                    $("profileModal");
+
+                if (modal) {
+                    modal.classList.remove(
+                        "hidden"
+                    );
+                }
+            }
+        );
+
+
+    $("closeProfileModal")
+        ?.addEventListener(
+            "click",
+            () => {
+                $("profileModal")
+                    ?.classList.add(
+                        "hidden"
+                    );
+            }
+        );
+
+
+    $("workHistoryButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                const modal =
+                    $("workHistoryModal");
+
+                if (modal) {
+                    modal.classList.remove(
+                        "hidden"
+                    );
+                }
+
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "workHistoryRequested"
+                    )
+                );
+            }
+        );
+
+
+    $("closeWorkHistoryModal")
+        ?.addEventListener(
+            "click",
+            () => {
+                $("workHistoryModal")
+                    ?.classList.add(
+                        "hidden"
+                    );
+            }
+        );
 }
 
+
+/* ============================================================
+   SKIP MODAL
+   ============================================================ */
+
+function initializeSkipModal() {
+    $("skipTaskButton")
+        ?.addEventListener(
+            "click",
+            () => {
+                const modal =
+                    $("skipModal");
+
+                if (modal) {
+                    modal.classList.remove(
+                        "hidden"
+                    );
+                }
+
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "skipModalRequested"
+                    )
+                );
+            }
+        );
+
+
+    $("closeSkipModal")
+        ?.addEventListener(
+            "click",
+            () => {
+                $("skipModal")
+                    ?.classList.add(
+                        "hidden"
+                    );
+            }
+        );
+
+
+    $("cancelSkipTask")
+        ?.addEventListener(
+            "click",
+            () => {
+                $("skipModal")
+                    ?.classList.add(
+                        "hidden"
+                    );
+            }
+        );
+
+
+    $("confirmSkipTask")
+        ?.addEventListener(
+            "click",
+            () => {
+                const reason =
+                    $("skipReason")
+                        ?.value ||
+                    "";
+
+                const details =
+                    $("skipReasonDetails")
+                        ?.value ||
+                    "";
+
+                if (!reason) {
+                    showToast(
+                        "Please select a reason for skipping the task.",
+                        "warning"
+                    );
+
+                    return;
+                }
+
+
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "skipConfirmed",
+                        {
+                            detail: {
+                                reason,
+                                details
+                            }
+                        }
+                    )
+                );
+            }
+        );
+}
+
+
+/* ============================================================
+   AUTH / SUPABASE STARTUP
+   ============================================================ */
+
+async function initializeApplication() {
+    if (
+        appState.initialized
+    ) {
+        return;
+    }
+
+    appState.initialized =
+        true;
+
+    showLoader();
+
+    setLoaderText(
+        "Connecting to workspace..."
+    );
+
+
+    try {
+        /*
+         * Make sure the Supabase module is
+         * available before starting the rest
+         * of the application.
+         */
+        try {
+            const client =
+                getSupabase();
+
+            appState.supabaseReady =
+                Boolean(client);
+        } catch (error) {
+            console.warn(
+                "Supabase client check failed:",
+                error
+            );
+
+            appState.supabaseReady =
+                false;
+        }
+
+
+        /*
+         * Test the connection, but do not
+         * prevent the application from loading
+         * if the check itself fails.
+         */
+        if (appState.supabaseReady) {
+            try {
+                await checkSupabaseConnection();
+            } catch (error) {
+                console.warn(
+                    "Supabase connection check:",
+                    error
+                );
+            }
+        }
+
+
+        setLoaderText(
+            "Loading application..."
+        );
+
+
+        /*
+         * Initialize modules in a safe order.
+         *
+         * Authentication first.
+         * Annotation/media/task modules then
+         * register their event listeners.
+         */
+        await initializeModule(
+            "authentication",
+            initializeAuth
+        );
+
+
+        await initializeModule(
+            "annotation",
+            initializeAnnotation
+        );
+
+
+        await initializeModule(
+            "annotation canvas",
+            initializeAnnotationCanvas
+        );
+
+
+        await initializeModule(
+            "media",
+            initializeMedia
+        );
+
+
+        await initializeModule(
+            "tasks",
+            initializeTasks
+        );
+
+
+        await initializeModule(
+            "home",
+            initializeHome
+        );
+
+
+        await initializeModule(
+            "workspace",
+            initializeWorkspace
+        );
+
+
+        await initializeModule(
+            "history",
+            initializeHistory
+        );
+
+
+        await initializeModule(
+            "profile",
+            initializeProfile
+        );
+
+
+        await initializeModule(
+            "admin",
+            initializeAdmin
+        );
+
+
+        await initializeModule(
+            "AI",
+            initializeAI
+        );
+
+
+        /*
+         * Local UI bindings.
+         */
+        initializeAuthPanels();
+
+        initializeNavigation();
+
+        initializeWorkspaceEvents();
+
+        initializeWorkbench();
+
+        initializeAnnotationTools();
+
+        initializeZoomControls();
+
+        initializeVideoControls();
+
+        initializeSaveButton();
+
+        initializeThemeCompatibility();
+
+        initializeModalEscape();
+
+        initializeAdminModal();
+
+        initializeAdminTabs();
+
+        initializeTopButtons();
+
+        initializeSkipModal();
+
+
+        appState.modulesInitialized =
+            true;
+
+
+        /*
+         * Restore an existing session.
+         *
+         * auth.js is responsible for checking
+         * Supabase authentication and profile
+         * state.
+         */
+        setLoaderText(
+            "Checking account..."
+        );
+
+
+        let sessionResult =
+            null;
+
+        try {
+            sessionResult =
+                await loadSessionOnStartup();
+        } catch (error) {
+            console.warn(
+                "Session restoration failed:",
+                error
+            );
+        }
+
+
+        /*
+         * If auth.js returns a result, use it
+         * to determine the initial page.
+         *
+         * If it does not return anything,
+         * auth.js itself normally handles
+         * the visibility.
+         */
+        if (
+            sessionResult &&
+            typeof sessionResult ===
+                "object"
+        ) {
+            if (
+                sessionResult.pendingApproval
+            ) {
+                showAppPage();
+                showApprovalPage();
+            } else if (
+                sessionResult.authenticated
+            ) {
+                showAppPage();
+
+                showHomePage();
+            } else {
+                showAuthPage();
+            }
+        }
+
+
+        hideLoader();
+
+        appState.loading =
+            false;
+
+
+        window.dispatchEvent(
+            new CustomEvent(
+                "appReady",
+                {
+                    detail: {
+                        state:
+                            appState
+                    }
+                }
+            )
+        );
+
+
+    } catch (error) {
+        appState.loading =
+            false;
+
+        handleAppError(
+            error,
+            "Unable to start ANNOTATION AI."
+        );
+
+
+        /*
+         * Authentication must remain usable
+         * even if a non-critical module fails.
+         */
+        try {
+            showAuthPage();
+        } catch (pageError) {
+            console.error(
+                pageError
+            );
+        }
+
+
+        hideLoader();
+    }
+}
+
+
+/* ============================================================
+   SAFE MODULE INITIALIZER
+   ============================================================ */
+
+async function initializeModule(
+    name,
+    initializer
+) {
+    if (
+        typeof initializer !==
+        "function"
+    ) {
+        console.warn(
+            `${name} module has no initializer.`
+        );
+
+        return null;
+    }
+
+
+    try {
+        const result =
+            initializer();
+
+        if (
+            result &&
+            typeof result.then ===
+                "function"
+        ) {
+            return await result;
+        }
+
+        return result;
+
+    } catch (error) {
+        console.error(
+            `${name} initialization failed:`,
+            error
+        );
+
+        /*
+         * Do not automatically stop the entire
+         * application because one optional
+         * module failed.
+         */
+        return null;
+    }
+}
+
+
+/* ============================================================
+   SESSION / AUTH EVENTS
+   ============================================================ */
+
+window.addEventListener(
+    "authSignedIn",
+    () => {
+        showAppPage();
+        showHomePage();
+    }
+);
+
+
+window.addEventListener(
+    "authSignedOut",
+    () => {
+        closeAdminModal();
+        showAuthPage();
+    }
+);
+
+
+window.addEventListener(
+    "accountPendingApproval",
+    () => {
+        showAppPage();
+        showApprovalPage();
+    }
+);
+
+
+window.addEventListener(
+    "accountActivated",
+    () => {
+        showAppPage();
+        showHomePage();
+    }
+);
+
+
+window.addEventListener(
+    "accountKicked",
+    () => {
+        showAppPage();
+        showApprovalPage();
+
+        showToast(
+            "Your account is waiting for admin approval.",
+            "warning",
+            5000
+        );
+    }
+);
+
+
+/* ============================================================
+   APPROVAL REFRESH
+   ============================================================ */
+
+window.addEventListener(
+    "approvalRefreshRequested",
+    async () => {
+        try {
+            const result =
+                await loadSessionOnStartup();
+
+            if (
+                result?.authenticated &&
+                !result?.pendingApproval
+            ) {
+                showHomePage();
+
+                showToast(
+                    "Your account is now active.",
+                    "success"
+                );
+            } else {
+                showApprovalPage();
+
+                showToast(
+                    "Your account is still waiting for admin approval.",
+                    "info"
+                );
+            }
+
+        } catch (error) {
+            handleAppError(
+                error,
+                "Unable to check account approval."
+            );
+        }
+    }
+);
+
+
+/* ============================================================
+   APPROVAL LOGOUT
+   ============================================================ */
+
+window.addEventListener(
+    "approvalLogoutRequested",
+    async () => {
+        try {
+            window.dispatchEvent(
+                new CustomEvent(
+                    "logoutRequested"
+                )
+            );
+        } catch (error) {
+            handleAppError(
+                error,
+                "Unable to sign out."
+            );
+        }
+    }
+);
+
+
+/* ============================================================
+   SAVE REQUEST
+   ============================================================ */
+
+window.addEventListener(
+    "saveAnnotationsRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "saveTaskAnnotationsRequested"
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   CLEAR ANNOTATIONS
+   ============================================================ */
+
+window.addEventListener(
+    "clearAnnotationsRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "clearAllAnnotations"
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   ANNOTATION TOOL REQUEST
+   ============================================================ */
+
+window.addEventListener(
+    "annotationToolRequested",
+    event => {
+        const mode =
+            event.detail?.mode;
+
+        if (!mode) {
+            return;
+        }
+
+        window.dispatchEvent(
+            new CustomEvent(
+                "setAnnotationMode",
+                {
+                    detail: {
+                        mode
+                    }
+                }
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   ZOOM REQUESTS
+   ============================================================ */
+
+window.addEventListener(
+    "zoomInRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "annotationZoomIn"
+            )
+        );
+    }
+);
+
+
+window.addEventListener(
+    "zoomOutRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "annotationZoomOut"
+            )
+        );
+    }
+);
+
+
+window.addEventListener(
+    "zoomResetRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "annotationZoomReset"
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   VIDEO REQUESTS
+   ============================================================ */
+
+window.addEventListener(
+    "previousFrameRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "previousVideoFrame"
+            )
+        );
+    }
+);
+
+
+window.addEventListener(
+    "nextFrameRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "nextVideoFrame"
+            )
+        );
+    }
+);
+
+
+window.addEventListener(
+    "videoPlayRequested",
+    () => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "toggleVideoPlayback"
+            )
+        );
+    }
+);
+
+
+window.addEventListener(
+    "videoSeekRequested",
+    event => {
+        window.dispatchEvent(
+            new CustomEvent(
+                "seekVideoFrame",
+                {
+                    detail:
+                        event.detail
+                }
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   SKIP CONFIRMATION
+   ============================================================ */
+
+window.addEventListener(
+    "skipConfirmed",
+    event => {
+        const modal =
+            $("skipModal");
+
+        if (modal) {
+            modal.classList.add(
+                "hidden"
+            );
+        }
+
+        /*
+         * tasks.js owns the actual database
+         * operation.
+         */
+        window.dispatchEvent(
+            new CustomEvent(
+                "taskSkipConfirmed",
+                {
+                    detail:
+                        event.detail
+                }
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   APP VISIBILITY
+   ============================================================ */
+
+document.addEventListener(
+    "visibilitychange",
+    () => {
+        if (
+            document.visibilityState !==
+            "visible"
+        ) {
+            return;
+        }
+
+        window.dispatchEvent(
+            new CustomEvent(
+                "appVisible"
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   ONLINE / OFFLINE
+   ============================================================ */
+
+window.addEventListener(
+    "online",
+    () => {
+        showToast(
+            "Connection restored.",
+            "success"
+        );
+
+        window.dispatchEvent(
+            new CustomEvent(
+                "connectionRestored"
+            )
+        );
+    }
+);
+
+
+window.addEventListener(
+    "offline",
+    () => {
+        showToast(
+            "You are offline. Changes may be delayed.",
+            "warning",
+            5000
+        );
+
+        window.dispatchEvent(
+            new CustomEvent(
+                "connectionLost"
+            )
+        );
+    }
+);
+
+
+/* ============================================================
+   RESIZE
+   ============================================================ */
+
+let resizeTimer = null;
+
+window.addEventListener(
+    "resize",
+    () => {
+        window.clearTimeout(
+            resizeTimer
+        );
+
+        resizeTimer =
+            window.setTimeout(
+                () => {
+                    window.dispatchEvent(
+                        new CustomEvent(
+                            "appResize"
+                        )
+                    );
+                },
+                100
+            );
+    }
+);
+
+
+/* ============================================================
+   DEBUG / GLOBAL APP OBJECT
+   ============================================================ */
+
+window.annotationAI =
+    {
+        config:
+            APP_CONFIG,
+
+        state:
+            appState,
+
+        showHome:
+            showHomePage,
+
+        showAnnotation:
+            showAnnotationPage,
+
+        showApproval:
+            showApprovalPage,
+
+        showAuth:
+            showAuthPage,
+
+        showToast,
+
+        closeAdmin:
+            closeAdminModal
+    };
+
+
+/* ============================================================
+   START APPLICATION
+   ============================================================ */
 
 if (
     document.readyState ===
     "loading"
 ) {
-
     document.addEventListener(
         "DOMContentLoaded",
-        startApplication,
+        () => {
+            initializeApplication();
+        },
         {
             once: true
         }
     );
-
 } else {
-
-    startApplication();
-
+    initializeApplication();
 }
 
 
-// ============================================================
-// EXPORTS
-// ============================================================
-
-export {
-    appState
-};
+/* ============================================================
+   END
+   ============================================================ */
