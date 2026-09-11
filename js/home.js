@@ -1,64 +1,38 @@
-/* ============================================================
-   HOME.JS
-   Dashboard, greeting, available jobs and workbench
-   ============================================================ */
+// ============================================================
+// ANNOTATION AI
+// PART 9 — HOME / DASHBOARD MODULE
+// File: js/home.js
+// ============================================================
 
 import {
-    APP_CONFIG,
-    normalizeRole,
-    roleLabel,
-    roleForWorkType,
-    isAdminRole,
-    isStaffRole,
-    isReviewerRole,
-    isCoworkerRole
-} from "./config.js";
-
-import {
-    getSupabase
+    supabase,
+    getCurrentUser,
+    getCurrentSession
 } from "./supabase.js";
 
-import {
-    getUser,
-    getProfile,
-    getRole,
-    isLoggedIn,
-    isAdmin,
-    isStaff,
-    isReviewer,
-    isCoworker,
-    isPendingApproval,
-    refreshProfileStatus,
-    onAuthStateChange
-} from "./auth.js";
-
-/* ============================================================
-   STATE
-   ============================================================ */
 
 const homeState = {
     initialized: false,
     loading: false,
-    tasks: [],
-    lastLoadedAt: null,
-    refreshTimer: null
+    jobs: [],
+    user: null
 };
 
-/* ============================================================
-   DOM HELPERS
-   ============================================================ */
+
+// ------------------------------------------------------------
+// DOM HELPER
+// ------------------------------------------------------------
 
 function $(id) {
     return document.getElementById(id);
 }
 
-function all(selector, root = document) {
-    return Array.from(
-        root.querySelectorAll(selector)
-    );
-}
 
-function escapeHtml(value) {
+// ------------------------------------------------------------
+// SAFE HTML
+// ------------------------------------------------------------
+
+function escapeHTML(value) {
     return String(value ?? "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -67,1960 +41,1396 @@ function escapeHtml(value) {
         .replace(/'/g, "&#039;");
 }
 
-function showElement(element, display = "") {
-    if (!element) return;
 
-    element.hidden = false;
-    element.style.display = display;
-    element.removeAttribute("aria-hidden");
+// ------------------------------------------------------------
+// DATE
+// ------------------------------------------------------------
+
+function formatDate(value) {
+    if (!value) return "—";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return "—";
+    }
+
+    return date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+    });
 }
 
-function hideElement(element) {
-    if (!element) return;
 
-    element.hidden = true;
-    element.style.display = "none";
-    element.setAttribute("aria-hidden", "true");
+// ------------------------------------------------------------
+// TIME
+// ------------------------------------------------------------
+
+function formatTime(value) {
+    if (!value) return "—";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return "—";
+    }
+
+    return date.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit"
+    });
 }
 
-/* ============================================================
-   TOAST
-   ============================================================ */
 
-function showToast(message, type = "info") {
-    if (typeof window.showToast === "function") {
-        window.showToast(message, type);
-        return;
+// ------------------------------------------------------------
+// ROLE
+// ------------------------------------------------------------
+
+function normalizeRole(user) {
+    if (!user) {
+        return "customer";
     }
 
-    const container =
-        $("toastContainer");
+    const metadata =
+        user.user_metadata ||
+        user.app_metadata ||
+        {};
 
-    if (!container) {
-        console.log(message);
-        return;
-    }
-
-    const toast =
-        document.createElement("div");
-
-    toast.className =
-        `toast toast-${type}`;
-
-    toast.textContent =
-        String(message || "");
-
-    container.appendChild(toast);
-
-    setTimeout(() => {
-        toast.remove();
-    }, 4000);
+    return String(
+        metadata.role ||
+        metadata.user_role ||
+        user.role ||
+        "customer"
+    ).toLowerCase();
 }
 
-/* ============================================================
-   TIME / GREETING
-   ============================================================ */
 
-function getTimeInfo(date = new Date()) {
-    const hour = date.getHours();
+// ------------------------------------------------------------
+// TASK TITLE
+// ------------------------------------------------------------
 
-    if (hour >= 5 && hour < 12) {
-        return {
-            greeting: "Good morning",
-            emoji: "🌅"
-        };
-    }
-
-    if (hour >= 12 && hour < 17) {
-        return {
-            greeting: "Good afternoon",
-            emoji: "☀️"
-        };
-    }
-
-    if (hour >= 17 && hour < 21) {
-        return {
-            greeting: "Good evening",
-            emoji: "🌇"
-        };
-    }
-
-    return {
-        greeting: "Good night",
-        emoji: "🌙"
-    };
-}
-
-function getUserDisplayName() {
-    const profile = getProfile();
-    const user = getUser();
-
+function getTaskTitle(task) {
     return (
-        profile?.full_name ||
-        profile?.name ||
-        user?.user_metadata?.full_name ||
-        user?.user_metadata?.name ||
-        user?.email?.split("@")?.[0] ||
-        "there"
+        task?.title ||
+        task?.name ||
+        task?.task_title ||
+        task?.task_name ||
+        "Untitled task"
     );
 }
 
-function renderGreeting() {
-    const info =
-        getTimeInfo();
 
-    const name =
-        getUserDisplayName();
+// ------------------------------------------------------------
+// TASK STATUS
+// ------------------------------------------------------------
 
-    const role =
-        normalizeRole(getRole());
-
-    const roleText =
-        roleLabel(role);
-
-    const greeting =
-        $("dashboardGreetingText");
-
-    const nameElement =
-        $("dashboardUserName");
-
-    const roleElement =
-        $("dashboardRoleText");
-
-    const avatar =
-        $("dashboardAvatar");
-
-    const fallback =
-        $("dashboardAvatarFallback");
-
-    if (greeting) {
-        greeting.textContent =
-            `${info.greeting} ${info.emoji}`;
-    }
-
-    if (nameElement) {
-        nameElement.textContent =
-            name;
-    }
-
-    if (roleElement) {
-        roleElement.textContent =
-            roleText;
-    }
-
-    /*
-     * Keep the entire greeting centered.
-     */
-    const greetingContainer =
-        $("dashboardGreeting");
-
-    if (greetingContainer) {
-        greetingContainer.classList.add(
-            "dashboard-greeting-centered"
-        );
-    }
-
-    /*
-     * Dashboard avatar.
-     */
-    const profile =
-        getProfile();
-
-    const avatarUrl =
-        profile?.avatar_url ||
-        profile?.avatar ||
-        getUser()?.user_metadata?.avatar_url ||
-        "";
-
-    if (avatar && avatarUrl) {
-        avatar.src = avatarUrl;
-        showElement(avatar);
-        hideElement(fallback);
-    } else if (avatar) {
-        hideElement(avatar);
-
-        if (fallback) {
-            fallback.textContent =
-                name.charAt(0).toUpperCase();
-
-            showElement(fallback);
-        }
-    }
+function getTaskStatus(task) {
+    return String(
+        task?.status ||
+        task?.state ||
+        "available"
+    ).toLowerCase();
 }
 
-/* ============================================================
-   TIMELINE
-   ============================================================ */
 
-function renderTimeline() {
-    const timeline =
-        $("dashboardTimeline");
+// ------------------------------------------------------------
+// STATUS LABEL
+// ------------------------------------------------------------
 
-    if (!timeline) {
-        return;
-    }
+function statusLabel(status) {
+    const labels = {
+        available: "Available",
+        pending: "Pending",
+        assigned: "Assigned",
+        in_progress: "In progress",
+        "in-progress": "In progress",
+        working: "In progress",
+        submitted: "Submitted",
+        completed: "Completed",
+        approved: "Approved",
+        rejected: "Rejected",
+        skipped: "Skipped",
+        cancelled: "Cancelled",
+        canceled: "Cancelled"
+    };
 
-    const info =
-        getTimeInfo();
-
-    const name =
-        getUserDisplayName();
-
-    const role =
-        roleLabel(getRole());
-
-    timeline.innerHTML = `
-        <div class="timeline-item timeline-account">
-            <span class="timeline-dot">${info.emoji}</span>
-            <div class="timeline-content">
-                <strong>${escapeHtml(name)}</strong>
-                <span>${escapeHtml(role)}</span>
-            </div>
-        </div>
-
-        <div class="timeline-line"></div>
-
-        <div class="timeline-item timeline-status">
-            <span class="timeline-dot">💼</span>
-            <div class="timeline-content">
-                <strong>Workspace</strong>
-                <span>Ready for your next task</span>
-            </div>
-        </div>
-    `;
+    return labels[status] || status || "Available";
 }
 
-/* ============================================================
-   ROLE / WORK TYPE
-   ============================================================ */
 
-function getWorkType(task) {
+// ------------------------------------------------------------
+// STATUS CLASS
+// ------------------------------------------------------------
+
+function statusClass(status) {
+    const value = String(status || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "");
+
+    return `status-${value || "available"}`;
+}
+
+
+// ------------------------------------------------------------
+// TASK SHAPE
+// ------------------------------------------------------------
+
+function getTaskShape(task) {
     return (
-        task?.work_type ||
-        task?.task_type ||
         task?.shape ||
         task?.annotation_type ||
+        task?.annotationType ||
+        task?.task_type ||
+        task?.type ||
         "box"
     );
 }
 
-function getTaskRole(task) {
+
+// ------------------------------------------------------------
+// TASK PAY
+// ------------------------------------------------------------
+
+function getTaskPay(task) {
+    const value =
+        task?.pay ??
+        task?.payment ??
+        task?.reward ??
+        task?.amount ??
+        task?.price;
+
+    if (
+        value === null ||
+        value === undefined ||
+        value === ""
+    ) {
+        return "";
+    }
+
+    return value;
+}
+
+
+// ------------------------------------------------------------
+// TASK DURATION
+// ------------------------------------------------------------
+
+function getTaskDuration(task) {
     return (
-        task?.work_role ||
-        task?.required_role ||
-        task?.role ||
-        roleForWorkType(
-            getWorkType(task)
-        )
+        task?.duration ||
+        task?.duration_minutes ||
+        task?.estimated_minutes ||
+        ""
     );
 }
 
-function getWorkTypeLabel(workType) {
-    const value =
-        String(workType || "")
-            .toLowerCase()
-            .replace(/[_-]+/g, " ");
 
-    const labels = {
-        box: "2D Bounding Box",
-        "2d box": "2D Bounding Box",
-        boundingbox: "2D Bounding Box",
-        polygon: "Polygon",
-        segmentation: "Segmentation",
-        segment: "Segmentation"
-    };
+// ------------------------------------------------------------
+// MEDIA
+// ------------------------------------------------------------
 
-    if (labels[value]) {
-        return labels[value];
-    }
-
-    return value
-        .replace(/\b\w/g, letter =>
-            letter.toUpperCase()
-        );
+function getTaskMedia(task) {
+    return (
+        task?.media_url ||
+        task?.mediaUrl ||
+        task?.file_url ||
+        task?.fileUrl ||
+        task?.source_url ||
+        task?.sourceUrl ||
+        task?.url ||
+        null
+    );
 }
 
-/* ============================================================
-   TASK NORMALIZATION
-   ============================================================ */
 
-function normalizeTask(task) {
-    if (!task) {
-        return null;
+// ------------------------------------------------------------
+// USER NAME
+// ------------------------------------------------------------
+
+function getUserName(user) {
+    if (!user) {
+        return "User";
     }
 
-    const workType =
-        getWorkType(task);
-
-    const workRole =
-        getTaskRole(task);
-
-    return {
-        ...task,
-
-        id:
-            task.id ||
-            task.task_id ||
-            null,
-
-        title:
-            task.title ||
-            task.name ||
-            "Untitled task",
-
-        work_type:
-            workType,
-
-        work_role:
-            workRole,
-
-        work_type_label:
-            getWorkTypeLabel(workType),
-
-        role_label:
-            roleLabel(
-                normalizeRole(workRole)
-            ),
-
-        duration:
-            task.expected_duration ||
-            task.duration ||
-            task.estimated_duration ||
-            "Not specified",
-
-        pay:
-            task.pay ??
-            task.payment ??
-            task.amount ??
-            0,
-
-        status:
-            task.status ||
-            "available",
-
-        media_path:
-            task.media_path ||
-            task.file_path ||
-            task.storage_path ||
-            null,
-
-        media_type:
-            task.media_type ||
-            task.mediaType ||
-            "image"
-    };
+    return (
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        user.user_metadata?.display_name ||
+        user.email?.split("@")[0] ||
+        "User"
+    );
 }
 
-/* ============================================================
-   PAYMENT DISPLAY
-   ============================================================ */
 
-function formatPay(value) {
-    if (
-        value === null ||
-        value === undefined ||
-        value === ""
-    ) {
-        return "Pay not specified";
+// ------------------------------------------------------------
+// UPDATE USER UI
+// ------------------------------------------------------------
+
+function updateUserUI(user) {
+    if (!user) {
+        return;
     }
 
-    const number =
-        Number(value);
+    const name = getUserName(user);
+    const role = normalizeRole(user);
 
-    if (Number.isFinite(number)) {
-        return `KSh ${number.toLocaleString(
-            "en-KE",
-            {
-                minimumFractionDigits:
-                    number % 1 === 0 ? 0 : 2,
-                maximumFractionDigits: 2
+    const profileName =
+        $("profileName");
+
+    const profileRole =
+        $("profileRole");
+
+    const profileScreenName =
+        $("profileScreenName");
+
+    const profileScreenRole =
+        $("profileScreenRole");
+
+    const profileScreenEmail =
+        $("profileScreenEmail");
+
+    if (profileName) {
+        profileName.textContent = name;
+    }
+
+    if (profileRole) {
+        profileRole.textContent = role;
+    }
+
+    if (profileScreenName) {
+        profileScreenName.textContent = name;
+    }
+
+    if (profileScreenRole) {
+        profileScreenRole.textContent = role;
+    }
+
+    if (profileScreenEmail) {
+        profileScreenEmail.textContent =
+            user.email || "";
+    }
+
+    document.body.dataset.userRole = role;
+}
+
+
+// ------------------------------------------------------------
+// SHOW HOME
+// ------------------------------------------------------------
+
+export function showHome() {
+    const loginPage =
+        $("loginPage");
+
+    if (loginPage) {
+        loginPage.style.display = "none";
+        loginPage.hidden = true;
+    }
+
+    const home =
+        $("homePage") ||
+        $("home") ||
+        $("dashboard") ||
+        $("coworkerDashboard");
+
+    if (home) {
+        home.style.display = "";
+        home.hidden = false;
+    }
+
+    window.dispatchEvent(
+        new CustomEvent("home:shown")
+    );
+}
+
+
+// ------------------------------------------------------------
+// HIDE HOME
+// ------------------------------------------------------------
+
+export function hideHome() {
+    const home =
+        $("homePage") ||
+        $("home") ||
+        $("dashboard");
+
+    if (home) {
+        home.style.display = "none";
+        home.hidden = true;
+    }
+}
+
+
+// ------------------------------------------------------------
+// TASK QUERY HELPERS
+// ------------------------------------------------------------
+
+async function queryTasksByUser(user) {
+    if (!supabase || !user) {
+        return [];
+    }
+
+    const results = [];
+
+    // First attempt: tasks assigned directly to the user.
+    const directColumns = [
+        "assigned_to",
+        "assigned_user_id",
+        "worker_id",
+        "user_id"
+    ];
+
+    for (const column of directColumns) {
+        try {
+            const {
+                data,
+                error
+            } = await supabase
+                .from("tasks")
+                .select("*")
+                .eq(column, user.id)
+                .order("created_at", {
+                    ascending: false
+                })
+                .limit(100);
+
+            if (
+                !error &&
+                Array.isArray(data)
+            ) {
+                results.push(...data);
+                break;
             }
-        )}`;
-    }
-
-    return escapeHtml(value);
-}
-
-/* ============================================================
-   DURATION DISPLAY
-   ============================================================ */
-
-function formatDuration(value) {
-    if (
-        value === null ||
-        value === undefined ||
-        value === ""
-    ) {
-        return "Not specified";
-    }
-
-    if (typeof value === "number") {
-        if (value < 60) {
-            return `${value} min`;
+        } catch (_) {
+            // Try the next compatible column.
         }
+    }
 
-        const hours =
-            Math.floor(value / 60);
+    return results;
+}
 
-        const minutes =
-            value % 60;
 
-        if (!minutes) {
-            return `${hours} hr`;
+// ------------------------------------------------------------
+// AVAILABLE TASK QUERY
+// ------------------------------------------------------------
+
+async function queryAvailableTasks() {
+    if (!supabase) {
+        return [];
+    }
+
+    const attempts = [
+        {
+            column: "status",
+            values: [
+                "available",
+                "open",
+                "pending"
+            ]
         }
+    ];
 
-        return `${hours} hr ${minutes} min`;
+    for (const attempt of attempts) {
+        for (const value of attempt.values) {
+            try {
+                const {
+                    data,
+                    error
+                } = await supabase
+                    .from("tasks")
+                    .select("*")
+                    .eq(attempt.column, value)
+                    .order("created_at", {
+                        ascending: false
+                    })
+                    .limit(100);
+
+                if (
+                    !error &&
+                    Array.isArray(data)
+                ) {
+                    return data;
+                }
+            } catch (_) {
+                // Continue trying compatible statuses.
+            }
+        }
     }
 
-    return String(value);
+    // Last attempt: return recent tasks if the project
+    // does not use a status column.
+    try {
+        const {
+            data,
+            error
+        } = await supabase
+            .from("tasks")
+            .select("*")
+            .order("created_at", {
+                ascending: false
+            })
+            .limit(100);
+
+        if (
+            !error &&
+            Array.isArray(data)
+        ) {
+            return data;
+        }
+    } catch (_) {
+        // Ignore and return empty list.
+    }
+
+    return [];
 }
 
-/* ============================================================
-   ROLE MATCHING
-   ============================================================ */
 
-function taskMatchesUser(task) {
-    const role =
-        normalizeRole(getRole());
+// ------------------------------------------------------------
+// REMOVE DUPLICATES
+// ------------------------------------------------------------
 
-    /*
-     * Admin and staff can see everything.
-     */
-    if (
-        isAdminRole(role) ||
-        isStaffRole(role)
-    ) {
-        return true;
-    }
+function deduplicateTasks(tasks) {
+    const map = new Map();
 
-    const taskRole =
-        normalizeRole(
-            task.work_role ||
-            task.required_role ||
-            ""
-        );
+    tasks.forEach(task => {
+        const id =
+            task?.id ||
+            task?.task_id ||
+            `${getTaskTitle(task)}_${task?.created_at || ""}`;
 
-    /*
-     * If the task has an explicit assigned user, only that
-     * user should see it.
-     */
-    const user =
-        getUser();
+        if (!map.has(String(id))) {
+            map.set(String(id), task);
+        }
+    });
 
-    if (
-        task.assigned_to &&
-        user?.id
-    ) {
-        return (
-            task.assigned_to ===
-            user.id
-        );
-    }
-
-    if (
-        task.claimed_by &&
-        user?.id
-    ) {
-        return (
-            task.claimed_by ===
-            user.id
-        );
-    }
-
-    /*
-     * Customer tasks are customer-facing.
-     */
-    if (
-        role === "customer"
-    ) {
-        return (
-            !taskRole ||
-            taskRole === "customer"
-        );
-    }
-
-    /*
-     * Reviewer tasks.
-     */
-    if (
-        role === "reviewer"
-    ) {
-        return (
-            taskRole === "reviewer" ||
-            taskRole === "review" ||
-            taskRole === ""
-        );
-    }
-
-    /*
-     * Coworker tasks must match the specific worker role.
-     */
-    if (
-        isCoworkerRole(role)
-    ) {
-        return (
-            taskRole === role
-        );
-    }
-
-    return false;
+    return Array.from(map.values());
 }
 
-/* ============================================================
-   TASK STATUS
-   ============================================================ */
 
-function isAvailableTask(task) {
-    const status =
-        String(
-            task?.status ||
-            "available"
-        ).toLowerCase();
+// ------------------------------------------------------------
+// LOAD DASHBOARD JOBS
+// ------------------------------------------------------------
 
-    return [
-        "available",
-        "open",
-        "pending",
-        "queued",
-        "ready"
-    ].includes(status);
-}
-
-/* ============================================================
-   LOAD AVAILABLE JOBS
-   ============================================================ */
-
-export async function loadAvailableJobs(
-    options = {}
-) {
+export async function loadDashboardJobs() {
     if (homeState.loading) {
-        return homeState.tasks;
-    }
-
-    if (!isLoggedIn()) {
-        homeState.tasks = [];
-        renderAvailableJobs();
-        return [];
-    }
-
-    if (isPendingApproval()) {
-        homeState.tasks = [];
-        renderAvailableJobs();
-        return [];
+        return homeState.jobs;
     }
 
     homeState.loading = true;
 
     try {
-        const client =
-            getSupabase();
+        const user =
+            homeState.user ||
+            await getCurrentUser();
 
-        if (!client) {
-            throw new Error(
-                "Supabase is not initialized."
-            );
+        homeState.user = user;
+
+        if (!user) {
+            homeState.jobs = [];
+            renderAvailableJobs();
+            return [];
         }
 
-        const table =
-            APP_CONFIG.tables.tasks;
+        updateUserUI(user);
 
-        /*
-         * Get open/available tasks first.
-         *
-         * Do not rely on a single status value because older
-         * tasks may use "open" while newer tasks use "available".
-         */
-        let query =
-            client
-                .from(table)
-                .select("*")
-                .order(
-                    "created_at",
-                    {
-                        ascending: false
-                    }
-                )
-                .limit(
-                    Number(
-                        options.limit ||
-                        50
-                    )
-                );
+        const role =
+            normalizeRole(user);
 
-        const {
-            data,
-            error
-        } = await query;
+        let tasks = [];
 
-        if (error) {
-            throw error;
+        // Staff/reviewer/admin users may see available work.
+        if (
+            role === "admin" ||
+            role === "staff" ||
+            role === "reviewer" ||
+            role === "worker" ||
+            role === "coworker"
+        ) {
+            tasks =
+                await queryAvailableTasks();
+
+            const assigned =
+                await queryTasksByUser(user);
+
+            tasks = deduplicateTasks([
+                ...assigned,
+                ...tasks
+            ]);
+        } else {
+            tasks =
+                await queryTasksByUser(user);
+
+            if (!tasks.length) {
+                tasks =
+                    await queryAvailableTasks();
+            }
         }
 
-        const tasks =
-            Array.isArray(data)
-                ? data
-                    .map(normalizeTask)
-                    .filter(Boolean)
-                : [];
-
-        /*
-         * Client-side filtering keeps this compatible with
-         * installations where status/work_role values differ.
-         */
-        homeState.tasks =
-            tasks.filter(task => {
-                if (!isAvailableTask(task)) {
-                    return false;
-                }
-
-                if (
-                    task.claimed_by ||
-                    task.assigned_to
-                ) {
-                    /*
-                     * An assigned task is only shown to the assigned
-                     * person, unless the current user is admin/staff.
-                     */
-                    if (
-                        !isAdmin() &&
-                        !isStaff()
-                    ) {
-                        const user =
-                            getUser();
-
-                        return (
-                            task.assigned_to ===
-                            user?.id
-                        );
-                    }
-                }
-
-                return taskMatchesUser(task);
-            });
-
-        homeState.lastLoadedAt =
-            new Date();
+        homeState.jobs =
+            deduplicateTasks(tasks);
 
         renderAvailableJobs();
 
-        return homeState.tasks;
-    } catch (error) {
-        console.error(
-            "Could not load available jobs:",
-            error
-        );
+        updateDashboardStats();
 
-        homeState.tasks = [];
+        return homeState.jobs;
 
-        renderAvailableJobs(
-            "Unable to load jobs right now."
-        );
-
-        return [];
     } finally {
         homeState.loading = false;
     }
 }
 
-/* ============================================================
-   JOB CARD
-   ============================================================ */
 
-function renderJobCard(task) {
+// ------------------------------------------------------------
+// COMPATIBILITY DASHBOARD LOADER
+//
+// app.js versions may import either:
+//     loadDashboard
+// or:
+//     loadDashboardJobs
+//
+// Keep both names available so the modules remain compatible.
+// ------------------------------------------------------------
+
+export async function loadDashboard() {
+    return await loadDashboardJobs();
+}
+
+
+// ------------------------------------------------------------
+// RENDER LOADING
+// ------------------------------------------------------------
+
+function renderJobsLoading(container) {
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="jobs-loading">
+            <div class="jobs-loading-spinner"></div>
+            <div>Loading available work...</div>
+        </div>
+    `;
+}
+
+
+// ------------------------------------------------------------
+// RENDER NO JOBS
+// ------------------------------------------------------------
+
+function renderNoJobs(container) {
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="jobs-empty">
+            <div class="jobs-empty-icon">□</div>
+
+            <div class="jobs-empty-title">
+                Oops, looking for more work for you
+            </div>
+
+            <div class="jobs-empty-text">
+                We’re checking for the next role-matched job.
+                Please check again soon.
+            </div>
+        </div>
+    `;
+}
+
+
+// ------------------------------------------------------------
+// RENDER TASK CARD
+// ------------------------------------------------------------
+
+function renderTaskCard(task) {
     const id =
-        task.id;
+        task?.id ||
+        task?.task_id ||
+        "";
 
-    const workType =
-        task.work_type_label ||
-        getWorkTypeLabel(
-            task.work_type
+    const title =
+        escapeHTML(
+            getTaskTitle(task)
         );
 
-    const role =
-        task.role_label ||
-        roleLabel(
-            normalizeRole(
-                task.work_role
-            )
-        );
+    const status =
+        getTaskStatus(task);
 
-    const duration =
-        formatDuration(
-            task.duration
+    const shape =
+        escapeHTML(
+            getTaskShape(task)
         );
 
     const pay =
-        formatPay(
-            task.pay
-        );
+        getTaskPay(task);
 
-    const title =
-        task.title ||
-        "Available job";
+    const duration =
+        getTaskDuration(task);
+
+    const media =
+        getTaskMedia(task);
+
+    const created =
+        task?.created_at ||
+        task?.createdAt ||
+        null;
 
     return `
         <article
-            class="job-card"
-            data-task-id="${escapeHtml(id)}"
-            tabindex="0"
-            role="article"
+            class="available-job-card"
+            data-task-id="${escapeHTML(id)}"
         >
-            <div class="job-card-header">
-                <div class="job-card-icon">
-                    ${getWorkTypeIcon(task.work_type)}
+
+            <div class="available-job-card-header">
+
+                <div class="available-job-title">
+                    ${title}
                 </div>
 
-                <div class="job-card-title-wrap">
-                    <h3 class="job-card-title">
-                        ${escapeHtml(title)}
-                    </h3>
-
-                    <span class="job-card-status">
-                        Available
-                    </span>
-                </div>
-            </div>
-
-            <div class="job-card-details">
-
-                <div class="job-detail">
-                    <span class="job-detail-label">
-                        Work type
-                    </span>
-
-                    <strong>
-                        ${escapeHtml(workType)}
-                    </strong>
-                </div>
-
-                <div class="job-detail">
-                    <span class="job-detail-label">
-                        Role
-                    </span>
-
-                    <strong>
-                        ${escapeHtml(role)}
-                    </strong>
-                </div>
-
-                <div class="job-detail">
-                    <span class="job-detail-label">
-                        Expected duration
-                    </span>
-
-                    <strong>
-                        ${escapeHtml(duration)}
-                    </strong>
-                </div>
-
-                <div class="job-detail job-pay">
-                    <span class="job-detail-label">
-                        Pay
-                    </span>
-
-                    <strong>
-                        ${escapeHtml(pay)}
-                    </strong>
-                </div>
+                <span
+                    class="task-status ${statusClass(status)}"
+                >
+                    ${escapeHTML(
+                        statusLabel(status)
+                    )}
+                </span>
 
             </div>
 
-            <div class="job-card-footer">
+
+            <div class="available-job-meta">
+
+                <span class="job-shape">
+                    ${shape}
+                </span>
+
+                ${
+                    duration !== ""
+                        ? `
+                            <span class="job-duration">
+                                ${escapeHTML(duration)}
+                                ${
+                                    Number(duration) === 1
+                                        ? "min"
+                                        : "mins"
+                                }
+                            </span>
+                        `
+                        : ""
+                }
+
+                ${
+                    pay !== ""
+                        ? `
+                            <span class="job-pay">
+                                ${escapeHTML(pay)}
+                            </span>
+                        `
+                        : ""
+                }
+
+            </div>
+
+
+            ${
+                created
+                    ? `
+                        <div class="available-job-date">
+                            ${escapeHTML(
+                                formatDate(created)
+                            )}
+                            ·
+                            ${escapeHTML(
+                                formatTime(created)
+                            )}
+                        </div>
+                    `
+                    : ""
+            }
+
+
+            ${
+                media
+                    ? `
+                        <div class="available-job-media">
+                            Media available
+                        </div>
+                    `
+                    : ""
+            }
+
+
+            <div class="available-job-actions">
+
                 <button
                     type="button"
-                    class="primary-button open-task-button"
-                    data-task-id="${escapeHtml(id)}"
+                    class="open-task-btn"
+                    data-task-id="${escapeHTML(id)}"
                 >
-                    Start job
+                    Open task
                 </button>
+
             </div>
+
         </article>
     `;
 }
 
-function getWorkTypeIcon(type) {
-    const value =
-        String(type || "")
-            .toLowerCase();
 
-    if (
-        value.includes("polygon")
-    ) {
-        return "⬡";
-    }
+// ------------------------------------------------------------
+// RENDER AVAILABLE JOBS
+// ------------------------------------------------------------
 
-    if (
-        value.includes("segment")
-    ) {
-        return "✦";
-    }
-
-    if (
-        value.includes("box") ||
-        value.includes("bounding")
-    ) {
-        return "▣";
-    }
-
-    return "◆";
-}
-
-/* ============================================================
-   RENDER JOBS
-   ============================================================ */
-
-export function renderNoJobs(message) {
+export function renderAvailableJobs() {
     const container =
-        $("availableJobs");
-
-    const noJobs =
-        $("noJobsMessage");
-
-    if (container) {
-        container.innerHTML = "";
-    }
-
-    if (noJobs) {
-        const heading =
-            noJobs.querySelector(
-                ".no-jobs-title"
-            );
-
-        const description =
-            noJobs.querySelector(
-                ".no-jobs-description"
-            );
-
-        if (heading) {
-            heading.textContent =
-                message ||
-                "Oops, looking for more work for you";
-        } else {
-            noJobs.textContent =
-                message ||
-                "Oops, looking for more work for you";
-        }
-
-        if (description) {
-            description.textContent =
-                "We’re checking for the next role-matched job. Please check again soon.";
-        }
-
-        showElement(noJobs);
-    }
-}
-
-export function renderAvailableJobs(
-    errorMessage = ""
-) {
-    const container =
-        $("availableJobs");
-
-    const noJobs =
-        $("noJobsMessage");
+        $("availableJobs") ||
+        $("jobsList") ||
+        $("availableJobsList");
 
     if (!container) {
         return;
     }
 
-    if (
-        errorMessage
-    ) {
-        renderNoJobs(
-            errorMessage
-        );
+    if (!homeState.jobs.length) {
+        renderNoJobs(container);
         return;
     }
-
-    if (
-        !homeState.tasks.length
-    ) {
-        renderNoJobs();
-        return;
-    }
-
-    hideElement(noJobs);
 
     container.innerHTML =
-        homeState.tasks
-            .map(renderJobCard)
+        homeState.jobs
+            .map(renderTaskCard)
             .join("");
 
-    bindJobButtons();
+    bindTaskCards(container);
 }
 
-/* ============================================================
-   JOB BUTTONS
-   ============================================================ */
 
-function bindJobButtons() {
-    all(
-        ".open-task-button",
-        $("availableJobs") || document
-    ).forEach(button => {
-        if (
-            button.dataset.bound === "true"
-        ) {
-            return;
-        }
+// ------------------------------------------------------------
+// TASK CARD EVENTS
+// ------------------------------------------------------------
 
-        button.dataset.bound =
-            "true";
+function bindTaskCards(container) {
+    container
+        .querySelectorAll(".open-task-btn")
+        .forEach(button => {
 
-        button.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
-                event.stopPropagation();
-
-                const id =
-                    button.dataset.taskId;
-
-                if (id) {
-                    openTask(id);
-                }
-            }
-        );
-    });
-
-    all(
-        ".job-card",
-        $("availableJobs") || document
-    ).forEach(card => {
-        if (
-            card.dataset.keyboardBound === "true"
-        ) {
-            return;
-        }
-
-        card.dataset.keyboardBound =
-            "true";
-
-        card.addEventListener(
-            "keydown",
-            event => {
-                if (
-                    event.key === "Enter" ||
-                    event.key === " "
-                ) {
-                    /*
-                     * Do not trigger when the actual button has focus.
-                     */
-                    if (
-                        document.activeElement?.matches(
-                            "button"
-                        )
-                    ) {
-                        return;
-                    }
+            button.addEventListener(
+                "click",
+                event => {
 
                     event.preventDefault();
+                    event.stopPropagation();
 
-                    const id =
+                    const taskId =
+                        button.dataset.taskId;
+
+                    openTask(taskId);
+                }
+            );
+        });
+
+
+    container
+        .querySelectorAll(".available-job-card")
+        .forEach(card => {
+
+            card.addEventListener(
+                "dblclick",
+                () => {
+
+                    const taskId =
                         card.dataset.taskId;
 
-                    if (id) {
-                        openTask(id);
-                    }
+                    openTask(taskId);
+                }
+            );
+        });
+}
+
+
+// ------------------------------------------------------------
+// OPEN TASK
+// ------------------------------------------------------------
+
+export function openTask(taskId) {
+    if (!taskId) {
+        return;
+    }
+
+    window.dispatchEvent(
+        new CustomEvent(
+            "home:openTask",
+            {
+                detail: {
+                    taskId
+                }
+            }
+        )
+    );
+
+
+    // Compatibility with tasks.js.
+    try {
+
+        if (
+            typeof window.loadTask ===
+            "function"
+        ) {
+            window.loadTask(taskId);
+            return;
+        }
+
+
+        if (
+            typeof window.openTask ===
+            "function"
+        ) {
+
+            // Avoid recursively calling this function.
+            if (
+                window.openTask !==
+                openTask
+            ) {
+                window.openTask(taskId);
+                return;
+            }
+        }
+
+
+        if (
+            typeof window.selectTask ===
+            "function"
+        ) {
+            window.selectTask(taskId);
+            return;
+        }
+
+    } catch (error) {
+
+        console.warn(
+            "Unable to open task:",
+            error
+        );
+    }
+}
+
+
+// ------------------------------------------------------------
+// REFRESH DASHBOARD
+// ------------------------------------------------------------
+
+export async function refreshDashboard() {
+    const button =
+        $("refreshDashboardJobs");
+
+    if (button) {
+        button.disabled = true;
+        button.classList.add("loading");
+    }
+
+    try {
+        return await loadDashboardJobs();
+
+    } finally {
+
+        if (button) {
+            button.disabled = false;
+            button.classList.remove(
+                "loading"
+            );
+        }
+    }
+}
+
+
+// ------------------------------------------------------------
+// DASHBOARD STATS
+// ------------------------------------------------------------
+
+export function updateDashboardStats() {
+    const jobs =
+        homeState.jobs || [];
+
+
+    const availableCount =
+        jobs.filter(task => {
+
+            const status =
+                getTaskStatus(task);
+
+            return [
+                "available",
+                "open",
+                "pending"
+            ].includes(status);
+
+        }).length;
+
+
+    const assignedCount =
+        jobs.filter(task => {
+
+            const status =
+                getTaskStatus(task);
+
+            return [
+                "assigned",
+                "in_progress",
+                "in-progress",
+                "working"
+            ].includes(status);
+
+        }).length;
+
+
+    const completedCount =
+        jobs.filter(task => {
+
+            const status =
+                getTaskStatus(task);
+
+            return [
+                "completed",
+                "approved",
+                "submitted"
+            ].includes(status);
+
+        }).length;
+
+
+    const mappings = {
+        availableCount,
+        assignedCount,
+        completedCount,
+        totalJobs: jobs.length
+    };
+
+
+    Object.entries(mappings)
+        .forEach(
+            ([id, value]) => {
+
+                const element =
+                    $(id);
+
+                if (element) {
+                    element.textContent =
+                        String(value);
                 }
             }
         );
-    });
 }
 
-/* ============================================================
-   OPEN TASK
-   ============================================================ */
 
-export async function openTask(taskId) {
-    if (!taskId) {
-        showToast(
-            "This task has no valid ID.",
-            "error"
-        );
-        return;
-    }
+// ------------------------------------------------------------
+// REFRESH BUTTON
+// ------------------------------------------------------------
 
-    if (!isLoggedIn()) {
-        showToast(
-            "Please sign in first.",
-            "error"
-        );
-        return;
-    }
-
-    if (isPendingApproval()) {
-        showToast(
-            "Your account is waiting for administrator approval.",
-            "warning"
-        );
-        return;
-    }
-
-    const task =
-        homeState.tasks.find(
-            item =>
-                String(item.id) ===
-                String(taskId)
-        );
-
-    /*
-     * If the task isn't currently in the dashboard list, still
-     * allow the task module to handle it. This is important for
-     * reviewer continuation and direct task links.
-     */
-    try {
-        window.dispatchEvent(
-            new CustomEvent(
-                "taskSelected",
-                {
-                    detail: {
-                        taskId,
-                        task
-                    }
-                }
-            )
-        );
-
-        /*
-         * The tasks module listens for taskSelected. If it exposes
-         * an open/select method, use it too.
-         */
-        if (
-            typeof window.openTask ===
-            "function" &&
-            window.openTask !== openTask
-        ) {
-            await window.openTask(
-                taskId
-            );
-        }
-    } catch (error) {
-        console.error(
-            "Could not open task:",
-            error
-        );
-
-        showToast(
-            "Unable to open this task.",
-            "error"
-        );
-    }
-}
-
-/* ============================================================
-   WORKBENCH
-   ============================================================ */
-
-function renderWorkbench() {
-    const container =
-        $("coworkerWorkbench");
-
-    const dashboard =
-        $("coworkerDashboard");
-
-    const profile =
-        getProfile();
-
-    const role =
-        normalizeRole(
-            getRole()
-        );
-
-    const worker =
-        isCoworkerRole(role);
-
-    if (
-        !worker
-    ) {
-        if (dashboard) {
-            hideElement(dashboard);
-        }
-
-        return;
-    }
-
-    if (dashboard) {
-        showElement(dashboard);
-    }
-
-    if (container) {
-        showElement(container);
-    }
-
-    const name =
-        getUserDisplayName();
-
-    const nameElement =
-        $("workbenchName");
-
-    const roleElement =
-        $("workbenchRole");
-
-    const annotationType =
-        $("workbenchAnnotationType");
-
-    const avatar =
-        $("workbenchAvatar");
-
-    if (nameElement) {
-        nameElement.textContent =
-            name;
-    }
-
-    if (roleElement) {
-        roleElement.textContent =
-            roleLabel(role);
-    }
-
-    if (annotationType) {
-        annotationType.textContent =
-            getWorkbenchAnnotationType(
-                role
-            );
-    }
-
-    const avatarUrl =
-        profile?.avatar_url ||
-        profile?.avatar ||
-        getUser()?.user_metadata?.avatar_url ||
-        "";
-
-    if (
-        avatar &&
-        avatarUrl
-    ) {
-        avatar.src =
-            avatarUrl;
-
-        showElement(avatar);
-    }
-}
-
-function getWorkbenchAnnotationType(role) {
-    if (
-        role === "coworker_2d_box"
-    ) {
-        return "2D Bounding Box";
-    }
-
-    if (
-        role === "coworker_polygon"
-    ) {
-        return "Polygon";
-    }
-
-    if (
-        role === "coworker_segmentation"
-    ) {
-        return "Segmentation";
-    }
-
-    return "AI Annotation";
-}
-
-/* ============================================================
-   CUSTOMER / ADMIN DASHBOARD VISIBILITY
-   ============================================================ */
-
-function updateDashboardRoleVisibility() {
-    const role =
-        normalizeRole(
-            getRole()
-        );
-
-    const customerUpload =
-        $("customerUploadPanel");
-
-    const manualPanel =
-        $("manualAnnotationTypePanel");
-
-    /*
-     * Coworkers cannot customer-upload or use the manual
-     * annotation type selector.
-     */
-    if (
-        isCoworkerRole(role)
-    ) {
-        if (customerUpload) {
-            hideElement(
-                customerUpload
-            );
-        }
-
-        if (manualPanel) {
-            hideElement(
-                manualPanel
-            );
-        }
-    } else {
-        /*
-         * The upload panel itself is controlled by media.js.
-         * Do not force it visible here.
-         */
-        if (manualPanel) {
-            showElement(
-                manualPanel
-            );
-        }
-    }
-
-    /*
-     * Admin center button.
-     */
-    const adminButton =
-        $("adminCenterButton");
-
-    if (adminButton) {
-        if (
-            isAdminRole(role)
-        ) {
-            showElement(
-                adminButton
-            );
-
-            adminButton.setAttribute(
-                "aria-hidden",
-                "false"
-            );
-        } else {
-            hideElement(
-                adminButton
-            );
-        }
-    }
-}
-
-/* ============================================================
-   REFRESH BUTTON
-   ============================================================ */
-
-function bindRefreshJobs() {
+function bindRefreshButton() {
     const button =
-        $("refreshJobsButton");
-
-    if (!button) {
-        return;
-    }
+        $("refreshDashboardJobs");
 
     if (
-        button.dataset.bound === "true"
+        !button ||
+        button.dataset.homeBound ===
+            "true"
     ) {
         return;
     }
 
-    button.dataset.bound =
+    button.dataset.homeBound =
         "true";
+
 
     button.addEventListener(
         "click",
-        async event => {
+        event => {
+
             event.preventDefault();
 
-            button.disabled =
-                true;
-
-            const original =
-                button.textContent;
-
-            button.textContent =
-                "Refreshing…";
-
-            try {
-                await loadAvailableJobs();
-            } finally {
-                button.disabled =
-                    false;
-
-                button.textContent =
-                    original;
-            }
+            refreshDashboard();
         }
     );
 }
 
-/* ============================================================
-   WORKBENCH BUTTONS
-   ============================================================ */
 
-function bindWorkbenchButtons() {
-    /*
-     * Edit tool.
-     */
-    const edit =
-        $("workbenchEditTool");
+// ------------------------------------------------------------
+// COWORKER DASHBOARD
+// ------------------------------------------------------------
 
-    if (
-        edit &&
-        edit.dataset.bound !== "true"
-    ) {
-        edit.dataset.bound =
-            "true";
+function setupCoworkerDashboard(user) {
+    const dashboard =
+        $("coworkerDashboard");
 
-        edit.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
-
-                /*
-                 * Prefer the actual select/edit tool in the
-                 * annotation workspace.
-                 */
-                const tool =
-                    $("editTool") ||
-                    $("selectTool");
-
-                if (tool) {
-                    tool.click();
-                    return;
-                }
-
-                /*
-                 * Fallback to annotation.js public API.
-                 */
-                if (
-                    typeof window.setAnnotationMode ===
-                    "function"
-                ) {
-                    window.setAnnotationMode(
-                        "select"
-                    );
-                }
-
-                window.dispatchEvent(
-                    new CustomEvent(
-                        "workbenchEditRequested"
-                    )
-                );
-            }
-        );
+    if (!dashboard) {
+        return;
     }
 
-    /*
-     * AI annotation.
-     */
-    const ai =
-        $("workbenchAI");
+    const role =
+        normalizeRole(user);
+
+    const coworkerRoles = [
+        "coworker",
+        "staff",
+        "reviewer",
+        "admin",
+        "worker"
+    ];
+
 
     if (
-        ai &&
-        ai.dataset.bound !== "true"
+        coworkerRoles.includes(role)
     ) {
-        ai.dataset.bound =
-            "true";
+        dashboard.hidden = false;
+        dashboard.style.display = "";
+    }
+}
 
-        ai.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
 
-                const button =
-                    $("autoAnnotate");
+// ------------------------------------------------------------
+// COWORKER WORKBENCH
+// ------------------------------------------------------------
 
-                if (
-                    button &&
-                    !button.disabled
-                ) {
-                    button.click();
-                    return;
-                }
+function bindCoworkerWorkbench() {
+    const workbench =
+        $("coworkerWorkbench");
 
-                window.dispatchEvent(
-                    new CustomEvent(
-                        "runAnnotationAI"
-                    )
-                );
-            }
-        );
+    if (!workbench) {
+        return;
     }
 
-    /*
-     * Customer upload.
-     * Coworkers never receive this functionality.
-     */
+
+    if (
+        workbench.dataset.homeBound ===
+        "true"
+    ) {
+        return;
+    }
+
+
+    workbench.dataset.homeBound =
+        "true";
+
+
     const upload =
         $("workbenchUpload");
 
-    if (
-        upload &&
-        upload.dataset.bound !== "true"
-    ) {
-        upload.dataset.bound =
-            "true";
+    const ai =
+        $("workbenchAI");
+
+
+    if (upload) {
 
         upload.addEventListener(
             "click",
-            event => {
-                event.preventDefault();
+            () => {
 
-                if (
-                    isCoworker()
-                ) {
-                    showToast(
-                        "Coworkers cannot upload customer media.",
-                        "warning"
-                    );
-                    return;
-                }
+                const mediaInput =
+                    $("mediaInput");
 
-                const input =
-                    $("customerMediaInput");
-
-                if (input) {
-                    input.click();
-                    return;
-                }
-
-                const panel =
-                    $("customerUploadPanel");
-
-                if (panel) {
-                    showElement(panel);
+                if (mediaInput) {
+                    mediaInput.click();
                 }
             }
         );
     }
 
-    /*
-     * Focus-panel buttons.
-     */
-    all(
-        "[data-focus-panel]"
-    ).forEach(button => {
-        if (
-            button.dataset.focusBound === "true"
-        ) {
-            return;
-        }
 
-        button.dataset.focusBound =
-            "true";
+    if (ai) {
 
-        button.addEventListener(
+        ai.addEventListener(
             "click",
-            event => {
-                event.preventDefault();
-
-                const selector =
-                    button.dataset.focusPanel;
-
-                if (!selector) {
-                    return;
-                }
-
-                const target =
-                    document.querySelector(
-                        selector
-                    ) ||
-                    $(selector.replace(
-                        /^#/,
-                        ""
-                    ));
-
-                if (!target) {
-                    return;
-                }
-
-                target.scrollIntoView({
-                    behavior: "smooth",
-                    block: "center"
-                });
-
-                target.classList.add(
-                    "workspace-focus"
-                );
-
-                setTimeout(() => {
-                    target.classList.remove(
-                        "workspace-focus"
-                    );
-                }, 1200);
-            }
-        );
-    });
-}
-
-/* ============================================================
-   PAGE VISIBILITY
-   ============================================================ */
-
-export function showHomePage() {
-    const home =
-        $("homePage");
-
-    const annotation =
-        $("annotationPage");
-
-    const approval =
-        $("approvalPage");
-
-    if (home) {
-        showElement(home);
-    }
-
-    if (annotation) {
-        hideElement(annotation);
-    }
-
-    if (approval) {
-        hideElement(approval);
-    }
-
-    renderGreeting();
-    renderTimeline();
-    renderWorkbench();
-    updateDashboardRoleVisibility();
-
-    if (
-        isLoggedIn() &&
-        !isPendingApproval()
-    ) {
-        loadAvailableJobs();
-    } else {
-        renderAvailableJobs();
-    }
-}
-
-export function showApprovalPage() {
-    const home =
-        $("homePage");
-
-    const annotation =
-        $("annotationPage");
-
-    const approval =
-        $("approvalPage");
-
-    if (home) {
-        hideElement(home);
-    }
-
-    if (annotation) {
-        hideElement(annotation);
-    }
-
-    if (approval) {
-        showElement(approval);
-    }
-}
-
-/* ============================================================
-   AUTH UI
-   ============================================================ */
-
-function updateAuthUI() {
-    if (!isLoggedIn()) {
-        return;
-    }
-
-    if (
-        isPendingApproval()
-    ) {
-        showApprovalPage();
-        return;
-    }
-
-    showHomePage();
-}
-
-/* ============================================================
-   EVENT LISTENERS
-   ============================================================ */
-
-function bindTaskEvents() {
-    window.addEventListener(
-        "taskSubmitted",
-        async () => {
-            await loadAvailableJobs();
-        }
-    );
-
-    window.addEventListener(
-        "taskSkipped",
-        async () => {
-            await loadAvailableJobs();
-        }
-    );
-
-    window.addEventListener(
-        "taskCleared",
-        async () => {
-            /*
-             * Returning to dashboard should refresh available work.
-             */
-            if (
-                isLoggedIn() &&
-                !isPendingApproval()
-            ) {
-                await loadAvailableJobs();
-            }
-        }
-    );
-
-    window.addEventListener(
-        "taskUpdated",
-        async () => {
-            if (
-                isLoggedIn() &&
-                !isPendingApproval()
-            ) {
-                await loadAvailableJobs();
-            }
-        }
-    );
-}
-
-function bindNavigation() {
-    const homeButton =
-        $("homeButton");
-
-    if (
-        homeButton &&
-        homeButton.dataset.bound !== "true"
-    ) {
-        homeButton.dataset.bound =
-            "true";
-
-        homeButton.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
-
-                if (
-                    isPendingApproval()
-                ) {
-                    showApprovalPage();
-                } else {
-                    showHomePage();
-                }
-            }
-        );
-    }
-
-    const backButton =
-        $("backToHomeButton");
-
-    if (
-        backButton &&
-        backButton.dataset.bound !== "true"
-    ) {
-        backButton.dataset.bound =
-            "true";
-
-        backButton.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
-
-                showHomePage();
-            }
-        );
-    }
-}
-
-/* ============================================================
-   APPROVAL PAGE
-   ============================================================ */
-
-function bindApprovalButtons() {
-    const refresh =
-        $("approvalRefreshButton");
-
-    if (
-        refresh &&
-        refresh.dataset.bound !== "true"
-    ) {
-        refresh.dataset.bound =
-            "true";
-
-        refresh.addEventListener(
-            "click",
-            async event => {
-                event.preventDefault();
-
-                refresh.disabled =
-                    true;
-
-                try {
-                    await refreshProfileStatus();
-
-                    if (
-                        isPendingApproval()
-                    ) {
-                        showToast(
-                            "Your account is still waiting for administrator approval.",
-                            "info"
-                        );
-                    } else {
-                        showToast(
-                            "Your account has been approved.",
-                            "success"
-                        );
-
-                        showHomePage();
-                    }
-                } finally {
-                    refresh.disabled =
-                        false;
-                }
-            }
-        );
-    }
-
-    const logout =
-        $("approvalLogoutButton");
-
-    if (
-        logout &&
-        logout.dataset.bound !== "true"
-    ) {
-        logout.dataset.bound =
-            "true";
-
-        logout.addEventListener(
-            "click",
-            async event => {
-                event.preventDefault();
-
-                if (
-                    typeof window.signOut ===
-                    "function"
-                ) {
-                    await window.signOut();
-                    return;
-                }
+            () => {
 
                 window.dispatchEvent(
                     new CustomEvent(
-                        "requestSignOut"
+                        "home:runAI"
                     )
                 );
+
+
+                if (
+                    typeof window.runAutoAnnotate ===
+                    "function"
+                ) {
+
+                    window.runAutoAnnotate();
+
+                } else if (
+                    typeof window.autoAnnotate ===
+                    "function"
+                ) {
+
+                    window.autoAnnotate();
+                }
             }
         );
     }
 }
 
-/* ============================================================
-   PERIODIC APPROVAL CHECK
-   ============================================================ */
 
-function startApprovalPolling() {
-    if (
-        homeState.refreshTimer
-    ) {
-        clearInterval(
-            homeState.refreshTimer
-        );
-    }
+// ------------------------------------------------------------
+// AUTH EVENTS
+// ------------------------------------------------------------
 
-    homeState.refreshTimer =
-        setInterval(
-            async () => {
-                if (
-                    !isLoggedIn()
-                ) {
-                    return;
-                }
+function bindAuthEvents() {
 
-                if (
-                    !isPendingApproval()
-                ) {
-                    return;
-                }
+    window.addEventListener(
+        "auth:login",
+        event => {
 
-                try {
-                    await refreshProfileStatus();
+            const user =
+                event.detail?.user ||
+                null;
 
-                    if (
-                        !isPendingApproval()
-                    ) {
-                        showHomePage();
-                    }
-                } catch (error) {
-                    console.warn(
-                        "Approval status refresh failed:",
-                        error
-                    );
-                }
-            },
-            60000
-        );
-}
+            homeState.user =
+                user;
 
-/* ============================================================
-   AUTH STATE CHANGES
-   ============================================================ */
 
-function bindAuthChanges() {
-    onAuthStateChange(
+            if (user) {
+
+                updateUserUI(user);
+
+                setupCoworkerDashboard(
+                    user
+                );
+            }
+
+
+            showHome();
+
+            loadDashboardJobs();
+        }
+    );
+
+
+    window.addEventListener(
+        "auth:session",
+        event => {
+
+            const session =
+                event.detail?.session;
+
+
+            if (session?.user) {
+
+                homeState.user =
+                    session.user;
+
+
+                updateUserUI(
+                    session.user
+                );
+
+
+                setupCoworkerDashboard(
+                    session.user
+                );
+
+
+                showHome();
+
+                loadDashboardJobs();
+            }
+        }
+    );
+
+
+    window.addEventListener(
+        "auth:logout",
         () => {
-            renderGreeting();
-            renderTimeline();
-            renderWorkbench();
-            updateDashboardRoleVisibility();
-            updateAuthUI();
+
+            homeState.user =
+                null;
+
+            homeState.jobs =
+                [];
+
+
+            const container =
+                $("availableJobs");
+
+
+            if (container) {
+                renderNoJobs(container);
+            }
+
+
+            hideHome();
         }
     );
 }
 
-/* ============================================================
-   CLOCK REFRESH
-   ============================================================ */
 
-function startClockRefresh() {
-    setInterval(
-        () => {
-            if (
-                isLoggedIn() &&
-                !isPendingApproval()
-            ) {
-                renderGreeting();
-                renderTimeline();
-            }
-        },
-        60000
+// ------------------------------------------------------------
+// TASK EVENTS
+// ------------------------------------------------------------
+
+function bindTaskEvents() {
+
+    const events = [
+        "task:created",
+        "task:updated",
+        "task:submitted",
+        "task:completed",
+        "task:approved",
+        "task:rejected",
+        "task:skipped"
+    ];
+
+
+    events.forEach(
+        eventName => {
+
+            window.addEventListener(
+                eventName,
+                () => {
+
+                    setTimeout(
+                        refreshDashboard,
+                        250
+                    );
+                }
+            );
+        }
     );
 }
 
-/* ============================================================
-   HOME INITIALIZATION
-   ============================================================ */
 
-export async function initializeHome() {
-    if (
-        homeState.initialized
-    ) {
-        return;
-    }
+// ------------------------------------------------------------
+// GLOBAL COMPATIBILITY
+// ------------------------------------------------------------
 
-    homeState.initialized =
-        true;
+function exposeGlobals() {
 
-    bindRefreshJobs();
-    bindWorkbenchButtons();
-    bindNavigation();
-    bindTaskEvents();
-    bindApprovalButtons();
-    bindAuthChanges();
+    window.loadDashboardJobs =
+        loadDashboardJobs;
 
-    startApprovalPolling();
-    startClockRefresh();
 
-    /*
-     * Wait for auth startup if necessary.
-     */
-    if (
-        isLoggedIn()
-    ) {
-        updateAuthUI();
-    }
-}
+    // Important:
+    // Some older/newer app.js versions use
+    // window.loadDashboard instead.
+    window.loadDashboard =
+        loadDashboard;
 
-/* ============================================================
-   PUBLIC REFRESH
-   ============================================================ */
-
-export async function refreshHome() {
-    renderGreeting();
-    renderTimeline();
-    renderWorkbench();
-    updateDashboardRoleVisibility();
-
-    if (
-        isLoggedIn() &&
-        !isPendingApproval()
-    ) {
-        return await loadAvailableJobs();
-    }
-
-    renderAvailableJobs();
-
-    return [];
-}
-
-/* ============================================================
-   GLOBAL COMPATIBILITY
-   ============================================================ */
-
-if (
-    typeof window !== "undefined"
-) {
-    window.homeState =
-        homeState;
-
-    window.loadAvailableJobs =
-        loadAvailableJobs;
-
-    window.refreshHome =
-        refreshHome;
 
     window.renderAvailableJobs =
         renderAvailableJobs;
 
-    window.showHomePage =
-        showHomePage;
 
-    window.showApprovalPage =
-        showApprovalPage;
+    window.refreshDashboard =
+        refreshDashboard;
 
-    window.openTask =
-        window.openTask ||
+
+    window.openDashboardTask =
         openTask;
 
-    window.getTimeInfo =
-        getTimeInfo;
+
+    window.showHome =
+        showHome;
+
+
+    window.hideHome =
+        hideHome;
+
+
+    window.updateDashboardStats =
+        updateDashboardStats;
 }
 
-/* ============================================================
-   AUTO INITIALIZATION
-   ============================================================ */
 
-if (
-    typeof document !== "undefined"
-) {
-    if (
-        document.readyState ===
-        "loading"
-    ) {
-        document.addEventListener(
-            "DOMContentLoaded",
-            () => {
-                initializeHome()
-                    .catch(error => {
-                        console.error(
-                            "Home initialization failed:",
-                            error
-                        );
-                    });
-            },
-            {
-                once: true
-            }
+// ------------------------------------------------------------
+// INITIALIZATION
+// ------------------------------------------------------------
+
+export async function initializeHome() {
+
+    if (homeState.initialized) {
+        return;
+    }
+
+
+    homeState.initialized =
+        true;
+
+
+    exposeGlobals();
+
+
+    bindRefreshButton();
+
+    bindCoworkerWorkbench();
+
+    bindAuthEvents();
+
+    bindTaskEvents();
+
+
+    const session =
+        await getCurrentSession();
+
+
+    if (session?.user) {
+
+        homeState.user =
+            session.user;
+
+
+        updateUserUI(
+            session.user
         );
-    } else {
-        initializeHome()
-            .catch(error => {
-                console.error(
-                    "Home initialization failed:",
-                    error
-                );
-            });
+
+
+        setupCoworkerDashboard(
+            session.user
+        );
+
+
+        showHome();
+
+
+        await loadDashboardJobs();
     }
 }
 
-/* ============================================================
-   EXPORTS
-   ============================================================ */
 
-export default {
+// ------------------------------------------------------------
+// AUTO INITIALIZE
+// ------------------------------------------------------------
+
+if (
+    document.readyState ===
+    "loading"
+) {
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeHome,
+        {
+            once: true
+        }
+    );
+
+} else {
+
+    initializeHome();
+}
+
+
+// ------------------------------------------------------------
+// EXPORT STATE
+// ------------------------------------------------------------
+
+export {
     homeState,
-    initializeHome,
-    refreshHome,
-    loadAvailableJobs,
-    renderAvailableJobs,
-    renderNoJobs,
-    showHomePage,
-    showApprovalPage,
-    openTask,
-    getTimeInfo
+    getTaskTitle,
+    getTaskStatus,
+    getTaskShape,
+    getTaskPay,
+    getTaskDuration,
+    getTaskMedia
 };
