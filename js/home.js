@@ -1,40 +1,70 @@
 // ============================================================
-// ANNOTATION AI
-// PART 9 — HOME / DASHBOARD MODULE
-// File: js/home.js
+// ANNOTATION AI - HOME / DASHBOARD MODULE
 // ============================================================
 
 import {
-    supabase,
-    getCurrentUser,
-    getCurrentSession
+    APP_CONFIG,
+    normalizeRole,
+    roleLabel,
+    workTypeLabel,
+    roleForWorkType
+} from "./config.js";
+
+import {
+    getSupabase,
+    getCurrentUser
 } from "./supabase.js";
 
+import {
+    getRole,
+    getProfile,
+    isLoggedIn,
+    isAdmin,
+    isStaff,
+    isReviewer,
+    isCoworker,
+    isPendingApproval
+} from "./auth.js";
 
-// ============================================================
-// HOME STATE
-// ============================================================
+import {
+    selectTask,
+    getCurrentTask
+} from "./tasks.js";
+
+// ------------------------------------------------------------
+// STATE
+// ------------------------------------------------------------
 
 const homeState = {
     initialized: false,
     loading: false,
+
     jobs: [],
-    user: null
+    currentTask: null,
+
+    user: null,
+    profile: null,
+    role: "customer",
+
+    lastLoadedAt: null,
+    error: null
 };
 
-
-// ============================================================
-// DOM HELPER
-// ============================================================
+// ------------------------------------------------------------
+// HELPERS
+// ------------------------------------------------------------
 
 function $(id) {
     return document.getElementById(id);
 }
 
+function qs(selector, root = document) {
+    return root.querySelector(selector);
+}
 
-// ============================================================
-// SAFE HTML
-// ============================================================
+function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+}
 
 function escapeHTML(value) {
     return String(value ?? "")
@@ -45,542 +75,631 @@ function escapeHTML(value) {
         .replace(/'/g, "&#039;");
 }
 
+function formatMoney(value) {
+    const amount = Number(value);
 
-// ============================================================
-// DATE
-// ============================================================
-
-function formatDate(value) {
-    if (!value) {
-        return "—";
+    if (!Number.isFinite(amount)) {
+        return "Pay not set";
     }
 
-    const date = new Date(value);
+    return new Intl.NumberFormat(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(amount);
+}
 
-    if (Number.isNaN(date.getTime())) {
-        return "—";
+function formatDuration(minutes) {
+    const value = Number(minutes);
+
+    if (!Number.isFinite(value) || value <= 0) {
+        return "Duration not set";
     }
 
-    return date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric"
-    });
-}
-
-
-// ============================================================
-// TIME
-// ============================================================
-
-function formatTime(value) {
-    if (!value) {
-        return "—";
+    if (value < 60) {
+        return `${Math.round(value)} min`;
     }
 
-    const date = new Date(value);
+    const hours = Math.floor(value / 60);
+    const remaining = Math.round(value % 60);
 
-    if (Number.isNaN(date.getTime())) {
-        return "—";
+    if (!remaining) {
+        return `${hours} hr`;
     }
 
-    return date.toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit"
-    });
+    return `${hours} hr ${remaining} min`;
 }
 
-
-// ============================================================
-// ROLE
-// ============================================================
-
-function normalizeRole(user) {
-    if (!user) {
-        return "customer";
+function normalizeTask(task) {
+    if (!task) {
+        return null;
     }
 
-    const metadata =
-        user.user_metadata ||
-        user.app_metadata ||
-        {};
+    const workType =
+        task.work_type ||
+        task.task_type ||
+        task.type ||
+        "";
 
-    return String(
-        metadata.role ||
-        metadata.user_role ||
-        user.role ||
-        "customer"
-    ).toLowerCase();
-}
+    const workRole =
+        task.work_role ||
+        task.role ||
+        roleForWorkType(workType) ||
+        "";
 
+    return {
+        ...task,
 
-// ============================================================
-// TASK TITLE
-// ============================================================
+        work_type: workType,
+        work_role: normalizeRole(workRole),
 
-function getTaskTitle(task) {
-    return (
-        task?.title ||
-        task?.name ||
-        task?.task_title ||
-        task?.task_name ||
-        "Untitled task"
-    );
-}
+        title:
+            task.title ||
+            task.name ||
+            "Annotation task",
 
+        expected_minutes:
+            task.expected_minutes ??
+            task.duration_minutes ??
+            task.duration ??
+            null,
 
-// ============================================================
-// TASK STATUS
-// ============================================================
-
-function getTaskStatus(task) {
-    return String(
-        task?.status ||
-        task?.state ||
-        "available"
-    ).toLowerCase();
-}
-
-
-// ============================================================
-// STATUS LABEL
-// ============================================================
-
-function statusLabel(status) {
-    const labels = {
-        available: "Available",
-        open: "Available",
-        pending: "Pending",
-        assigned: "Assigned",
-        in_progress: "In progress",
-        "in-progress": "In progress",
-        working: "In progress",
-        submitted: "Submitted",
-        completed: "Completed",
-        approved: "Approved",
-        rejected: "Rejected",
-        skipped: "Skipped",
-        cancelled: "Cancelled",
-        canceled: "Cancelled"
+        pay_amount:
+            task.pay_amount ??
+            task.pay ??
+            task.amount ??
+            null
     };
-
-    return labels[status] || status || "Available";
 }
 
+// ------------------------------------------------------------
+// TIME / GREETING
+// ------------------------------------------------------------
 
-// ============================================================
-// STATUS CLASS
-// ============================================================
+function getTimeInfo(date = new Date()) {
+    const hour = date.getHours();
 
-function statusClass(status) {
-    const value = String(status || "")
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "");
-
-    return `status-${value || "available"}`;
-}
-
-
-// ============================================================
-// TASK SHAPE
-// ============================================================
-
-function getTaskShape(task) {
-    return (
-        task?.shape ||
-        task?.annotation_type ||
-        task?.annotationType ||
-        task?.task_type ||
-        task?.type ||
-        "box"
-    );
-}
-
-
-// ============================================================
-// TASK PAY
-// ============================================================
-
-function getTaskPay(task) {
-    const value =
-        task?.pay ??
-        task?.payment ??
-        task?.reward ??
-        task?.amount ??
-        task?.price;
-
-    if (
-        value === null ||
-        value === undefined ||
-        value === ""
-    ) {
-        return "";
+    if (hour >= 5 && hour < 12) {
+        return {
+            greeting: "Good morning",
+            emoji: "🌅"
+        };
     }
 
-    return value;
+    if (hour >= 12 && hour < 17) {
+        return {
+            greeting: "Good afternoon",
+            emoji: "☀️"
+        };
+    }
+
+    if (hour >= 17 && hour < 21) {
+        return {
+            greeting: "Good evening",
+            emoji: "🌇"
+        };
+    }
+
+    return {
+        greeting: "Good night",
+        emoji: "🌙"
+    };
 }
 
-
-// ============================================================
-// TASK DURATION
-// ============================================================
-
-function getTaskDuration(task) {
-    return (
-        task?.duration ||
-        task?.duration_minutes ||
-        task?.estimated_minutes ||
-        ""
-    );
-}
-
-
-// ============================================================
-// MEDIA
-// ============================================================
-
-function getTaskMedia(task) {
-    return (
-        task?.media_url ||
-        task?.mediaUrl ||
-        task?.file_url ||
-        task?.fileUrl ||
-        task?.source_url ||
-        task?.sourceUrl ||
-        task?.url ||
-        null
-    );
-}
-
-
-// ============================================================
+// ------------------------------------------------------------
 // USER NAME
-// ============================================================
+// ------------------------------------------------------------
 
-function getUserName(user) {
-    if (!user) {
-        return "User";
+function getUserName() {
+    const profile = homeState.profile;
+
+    if (profile?.full_name) {
+        return profile.full_name;
     }
 
-    return (
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        user.user_metadata?.display_name ||
-        user.email?.split("@")[0] ||
-        "User"
-    );
+    if (homeState.user?.user_metadata?.full_name) {
+        return homeState.user.user_metadata.full_name;
+    }
+
+    if (homeState.user?.email) {
+        return homeState.user.email.split("@")[0];
+    }
+
+    return "there";
 }
 
+// ------------------------------------------------------------
+// GREETING
+// ------------------------------------------------------------
 
-// ============================================================
-// UPDATE USER UI
-// ============================================================
+function renderGreeting() {
+    const container =
+        $("dashboardGreeting") ||
+        $("homeGreeting") ||
+        $("welcomeGreeting") ||
+        qs("[data-dashboard-greeting]");
 
-function updateUserUI(user) {
-    if (!user) {
+    if (!container) {
         return;
     }
 
-    const name = getUserName(user);
-    const role = normalizeRole(user);
+    const {
+        greeting,
+        emoji
+    } = getTimeInfo();
 
-    const profileName =
-        $("profileName");
+    const name = escapeHTML(getUserName());
 
-    const profileRole =
-        $("profileRole");
+    container.innerHTML = `
+        <div class="dashboard-greeting-inner">
+            <div class="dashboard-greeting-emoji">
+                ${emoji}
+            </div>
 
-    const profileScreenName =
-        $("profileScreenName");
+            <div class="dashboard-greeting-text">
+                <div class="dashboard-greeting-title">
+                    ${greeting}, ${name}
+                </div>
 
-    const profileScreenRole =
-        $("profileScreenRole");
+                <div class="dashboard-greeting-subtitle">
+                    ${escapeHTML(
+                        roleLabel(homeState.role)
+                    )}
+                </div>
+            </div>
+        </div>
+    `;
 
-    const profileScreenEmail =
-        $("profileScreenEmail");
-
-    if (profileName) {
-        profileName.textContent = name;
-    }
-
-    if (profileRole) {
-        profileRole.textContent = role;
-    }
-
-    if (profileScreenName) {
-        profileScreenName.textContent = name;
-    }
-
-    if (profileScreenRole) {
-        profileScreenRole.textContent = role;
-    }
-
-    if (profileScreenEmail) {
-        profileScreenEmail.textContent =
-            user.email || "";
-    }
-
-    document.body.dataset.userRole = role;
+    container.classList.add("dashboard-greeting");
 }
 
+// ------------------------------------------------------------
+// TIMELINE
+// ------------------------------------------------------------
 
-// ============================================================
-// SHOW HOME
-// ============================================================
+function renderTimeline() {
+    const container =
+        $("workspaceTimeline") ||
+        $("dashboardTimeline") ||
+        $("homeTimeline") ||
+        qs("[data-workspace-timeline]");
 
-export function showHome() {
-    const loginPage = $("loginPage");
-
-    if (loginPage) {
-        loginPage.style.display = "none";
-        loginPage.hidden = true;
+    if (!container) {
+        return;
     }
 
-    const home =
-        $("homePage") ||
-        $("home") ||
-        $("dashboard") ||
-        $("coworkerDashboard");
+    const {
+        emoji
+    } = getTimeInfo();
 
-    if (home) {
-        home.style.display = "";
-        home.hidden = false;
-    }
+    const name = escapeHTML(getUserName());
 
-    window.dispatchEvent(
-        new CustomEvent("home:shown")
+    container.innerHTML = `
+        <div class="workspace-timeline-line"></div>
+
+        <div class="workspace-timeline-item active">
+            <div class="workspace-timeline-dot">
+                ${emoji}
+            </div>
+
+            <div class="workspace-timeline-content">
+                <strong>${name}</strong>
+                <span>${escapeHTML(roleLabel(homeState.role))}</span>
+            </div>
+        </div>
+
+        <div class="workspace-timeline-item">
+            <div class="workspace-timeline-dot">
+                🧑‍💻
+            </div>
+
+            <div class="workspace-timeline-content">
+                <strong>Workspace</strong>
+                <span>Ready for annotation work</span>
+            </div>
+        </div>
+    `;
+}
+
+// ------------------------------------------------------------
+// FIND DASHBOARD CONTAINER
+// ------------------------------------------------------------
+
+function getJobsContainer() {
+    return (
+        $("availableJobs") ||
+        $("availableJobsList") ||
+        $("jobsList") ||
+        $("taskList") ||
+        $("homeJobs") ||
+        qs("[data-available-jobs]")
     );
 }
 
+// ------------------------------------------------------------
+// EMPTY JOBS
+// ------------------------------------------------------------
 
-// ============================================================
-// HIDE HOME
-// ============================================================
+function renderNoJobs() {
+    const container = getJobsContainer();
 
-export function hideHome() {
-    const home =
-        $("homePage") ||
-        $("home") ||
-        $("dashboard");
-
-    if (home) {
-        home.style.display = "none";
-        home.hidden = true;
+    if (!container) {
+        return;
     }
+
+    container.innerHTML = `
+        <div class="no-jobs-card">
+            <div class="no-jobs-icon">
+                💤
+            </div>
+
+            <div class="no-jobs-title">
+                Oops, looking for more work for you
+            </div>
+
+            <div class="no-jobs-text">
+                We’re checking for the next role-matched job.
+                Please check again soon.
+            </div>
+
+            <button
+                type="button"
+                class="secondary-btn"
+                id="refreshJobsButton"
+            >
+                Refresh jobs
+            </button>
+        </div>
+    `;
+
+    $("refreshJobsButton")?.addEventListener(
+        "click",
+        () => {
+            loadAvailableJobs();
+        }
+    );
 }
 
+// ------------------------------------------------------------
+// LOADING JOBS
+// ------------------------------------------------------------
 
-// ============================================================
-// TASK QUERY HELPERS
-// ============================================================
+function renderJobsLoading() {
+    const container = getJobsContainer();
 
-async function queryTasksByUser(user) {
-    if (!supabase || !user?.id) {
-        return [];
+    if (!container) {
+        return;
     }
 
-    const results = [];
+    container.innerHTML = `
+        <div class="jobs-loading-card">
+            <div class="loading-spinner"></div>
+            <span>Looking for available work...</span>
+        </div>
+    `;
+}
 
-    const directColumns = [
-        "assigned_to",
-        "assigned_user_id",
-        "worker_id",
-        "user_id"
-    ];
+// ------------------------------------------------------------
+// ERROR
+// ------------------------------------------------------------
 
-    for (const column of directColumns) {
-        try {
-            const { data, error } = await supabase
-                .from("tasks")
-                .select("*")
-                .eq(column, user.id)
-                .order("created_at", {
-                    ascending: false
-                })
-                .limit(100);
+function renderJobsError(message) {
+    const container = getJobsContainer();
 
-            if (!error && Array.isArray(data)) {
-                results.push(...data);
-                break;
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="no-jobs-card error">
+            <div class="no-jobs-icon">
+                ⚠️
+            </div>
+
+            <div class="no-jobs-title">
+                We could not load the jobs
+            </div>
+
+            <div class="no-jobs-text">
+                ${escapeHTML(message)}
+            </div>
+
+            <button
+                type="button"
+                class="secondary-btn"
+                id="retryJobsButton"
+            >
+                Try again
+            </button>
+        </div>
+    `;
+
+    $("retryJobsButton")?.addEventListener(
+        "click",
+        () => {
+            loadAvailableJobs();
+        }
+    );
+}
+
+// ------------------------------------------------------------
+// JOB CARD
+// ------------------------------------------------------------
+
+function renderJobCard(task) {
+    const item = normalizeTask(task);
+
+    const workType =
+        item.work_type
+            ? workTypeLabel(item.work_type)
+            : "Annotation";
+
+    const role =
+        item.work_role
+            ? roleLabel(item.work_role)
+            : "Available role";
+
+    const duration =
+        formatDuration(item.expected_minutes);
+
+    const pay =
+        item.pay_amount !== null &&
+        item.pay_amount !== undefined
+            ? formatMoney(item.pay_amount)
+            : "Pay not set";
+
+    const title =
+        escapeHTML(item.title);
+
+    const taskId =
+        escapeHTML(item.id);
+
+    return `
+        <article
+            class="job-card"
+            data-task-id="${taskId}"
+        >
+            <div class="job-card-header">
+                <div class="job-card-title">
+                    ${title}
+                </div>
+
+                <div class="job-card-status">
+                    Available
+                </div>
+            </div>
+
+            <div class="job-card-details">
+
+                <div class="job-card-detail">
+                    <span class="job-card-label">
+                        Work type
+                    </span>
+
+                    <strong>
+                        ${escapeHTML(workType)}
+                    </strong>
+                </div>
+
+                <div class="job-card-detail">
+                    <span class="job-card-label">
+                        Role
+                    </span>
+
+                    <strong>
+                        ${escapeHTML(role)}
+                    </strong>
+                </div>
+
+                <div class="job-card-detail">
+                    <span class="job-card-label">
+                        Expected duration
+                    </span>
+
+                    <strong>
+                        ${escapeHTML(duration)}
+                    </strong>
+                </div>
+
+                <div class="job-card-detail">
+                    <span class="job-card-label">
+                        Pay
+                    </span>
+
+                    <strong class="job-card-pay">
+                        ${escapeHTML(pay)}
+                    </strong>
+                </div>
+
+            </div>
+
+            <div class="job-card-footer">
+                <button
+                    type="button"
+                    class="job-open-button"
+                    data-open-task="${taskId}"
+                >
+                    Start work
+                </button>
+            </div>
+        </article>
+    `;
+}
+
+// ------------------------------------------------------------
+// RENDER JOBS
+// ------------------------------------------------------------
+
+function renderJobs() {
+    const container = getJobsContainer();
+
+    if (!container) {
+        return;
+    }
+
+    if (!homeState.jobs.length) {
+        renderNoJobs();
+        return;
+    }
+
+    container.innerHTML =
+        homeState.jobs
+            .map(renderJobCard)
+            .join("");
+
+    bindJobButtons();
+}
+
+// ------------------------------------------------------------
+// BIND JOB BUTTONS
+// ------------------------------------------------------------
+
+function bindJobButtons() {
+    qsa("[data-open-task]").forEach(button => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+
+        button.dataset.bound = "true";
+
+        button.addEventListener("click", async event => {
+            event.preventDefault();
+
+            const taskId =
+                button.dataset.openTask;
+
+            if (!taskId) {
+                return;
             }
-        } catch (_) {
-            // Try the next possible column.
-        }
-    }
 
-    return results;
-}
-
-
-// ============================================================
-// AVAILABLE TASK QUERY
-// ============================================================
-
-async function queryAvailableTasks() {
-    if (!supabase) {
-        return [];
-    }
-
-    const attempts = [
-        {
-            column: "status",
-            values: [
-                "available",
-                "open",
-                "pending"
-            ]
-        }
-    ];
-
-    for (const attempt of attempts) {
-        for (const value of attempt.values) {
-            try {
-                const { data, error } = await supabase
-                    .from("tasks")
-                    .select("*")
-                    .eq(attempt.column, value)
-                    .order("created_at", {
-                        ascending: false
-                    })
-                    .limit(100);
-
-                if (!error && Array.isArray(data)) {
-                    return data;
-                }
-            } catch (_) {
-                // Try the next status.
-            }
-        }
-    }
-
-    // Last attempt: return recent tasks if the
-    // project does not use a status column.
-    try {
-        const { data, error } = await supabase
-            .from("tasks")
-            .select("*")
-            .order("created_at", {
-                ascending: false
-            })
-            .limit(100);
-
-        if (!error && Array.isArray(data)) {
-            return data;
-        }
-    } catch (_) {
-        // Ignore database errors here.
-    }
-
-    return [];
-}
-
-
-// ============================================================
-// REMOVE DUPLICATES
-// ============================================================
-
-function deduplicateTasks(tasks) {
-    const map = new Map();
-
-    if (!Array.isArray(tasks)) {
-        return [];
-    }
-
-    tasks.forEach(task => {
-        const id =
-            task?.id ||
-            task?.task_id ||
-            `${getTaskTitle(task)}_${task?.created_at || ""}`;
-
-        const key = String(id);
-
-        if (!map.has(key)) {
-            map.set(key, task);
-        }
+            await openTask(taskId);
+        });
     });
-
-    return Array.from(map.values());
 }
 
+// ------------------------------------------------------------
+// LOAD AVAILABLE JOBS
+// ------------------------------------------------------------
 
-// ============================================================
-// LOAD DASHBOARD JOBS
-// ============================================================
+async function loadAvailableJobs() {
+    const client = getSupabase();
 
-export async function loadDashboardJobs() {
-    if (homeState.loading) {
-        return homeState.jobs;
+    if (!client) {
+        renderJobsError(
+            "Supabase is not configured."
+        );
+        return [];
+    }
+
+    if (!isLoggedIn()) {
+        homeState.jobs = [];
+        return [];
+    }
+
+    // A kicked/pending user must not receive jobs.
+    if (isPendingApproval()) {
+        homeState.jobs = [];
+        renderNoJobs();
+        return [];
     }
 
     homeState.loading = true;
+    homeState.error = null;
+
+    renderJobsLoading();
 
     try {
-        const user =
-            homeState.user ||
-            await getCurrentUser();
+        const role = normalizeRole(
+            getRole()
+        );
 
-        homeState.user = user;
+        homeState.role = role;
 
-        if (!user) {
-            homeState.jobs = [];
-            renderAvailableJobs();
-            updateDashboardStats();
-            return [];
+        let query = client
+            .from(APP_CONFIG.tables.tasks)
+            .select("*")
+            .eq("status", "available");
+
+        // Customers see customer-uploaded work.
+        // Coworkers only see work matching their exact annotation role.
+        // Staff/reviewer/admin can see available work.
+        if (isCoworker()) {
+            query = query.eq(
+                "work_role",
+                role
+            );
+        } else if (
+            !isAdmin() &&
+            !isStaff() &&
+            !isReviewer()
+        ) {
+            // Customer jobs are normally waiting for a worker.
+            // Keep customer access conservative.
+            query = query.or(
+                "assigned_to.is.null,assigned_to.eq." +
+                homeState.user?.id
+            );
         }
 
-        updateUserUI(user);
+        const {
+            data,
+            error
+        } = await query
+            .order(
+                "created_at",
+                {
+                    ascending: true
+                }
+            )
+            .limit(50);
 
-        const role = normalizeRole(user);
-
-        let tasks = [];
-
-        // Staff, reviewer, admin and worker users
-        // can see available work.
-        if (
-            role === "admin" ||
-            role === "staff" ||
-            role === "reviewer" ||
-            role === "worker" ||
-            role === "coworker"
-        ) {
-            const available =
-                await queryAvailableTasks();
-
-            const assigned =
-                await queryTasksByUser(user);
-
-            tasks = deduplicateTasks([
-                ...assigned,
-                ...available
-            ]);
-        } else {
-            tasks =
-                await queryTasksByUser(user);
-
-            if (!tasks.length) {
-                tasks =
-                    await queryAvailableTasks();
-            }
+        if (error) {
+            throw error;
         }
 
         homeState.jobs =
-            deduplicateTasks(tasks);
+            (data || [])
+                .map(normalizeTask)
+                .filter(task => {
+                    if (!task) {
+                        return false;
+                    }
 
-        renderAvailableJobs();
+                    if (
+                        isCoworker() &&
+                        normalizeRole(task.work_role) !== role
+                    ) {
+                        return false;
+                    }
 
-        updateDashboardStats();
+                    return true;
+                });
+
+        homeState.lastLoadedAt =
+            new Date();
+
+        renderJobs();
+
+        emitHomeEvent(
+            "jobsLoaded",
+            {
+                jobs: homeState.jobs
+            }
+        );
 
         return homeState.jobs;
     } catch (error) {
         console.error(
-            "Unable to load dashboard jobs:",
+            "Could not load available jobs:",
             error
         );
 
+        homeState.error = error;
         homeState.jobs = [];
 
-        renderAvailableJobs();
-        updateDashboardStats();
+        renderJobsError(
+            error?.message ||
+            "Unable to load available jobs."
+        );
 
         return [];
     } finally {
@@ -588,785 +707,401 @@ export async function loadDashboardJobs() {
     }
 }
 
-
-// ============================================================
-// RENDER LOADING
-// ============================================================
-
-function renderJobsLoading(container) {
-    if (!container) {
-        return;
-    }
-
-    container.innerHTML = `
-        <div class="jobs-loading">
-            <div class="jobs-loading-spinner"></div>
-            <div>Loading available work...</div>
-        </div>
-    `;
-}
-
-
-// ============================================================
-// RENDER NO JOBS
-// ============================================================
-
-function renderNoJobs(container) {
-    if (!container) {
-        return;
-    }
-
-    container.innerHTML = `
-        <div class="jobs-empty">
-            <div class="jobs-empty-icon">□</div>
-
-            <div class="jobs-empty-title">
-                No tasks available
-            </div>
-
-            <div class="jobs-empty-text">
-                New tasks will appear here when they become available.
-            </div>
-        </div>
-    `;
-}
-
-
-// ============================================================
-// RENDER TASK CARD
-// ============================================================
-
-function renderTaskCard(task) {
-    const id =
-        task?.id ||
-        task?.task_id ||
-        "";
-
-    const title =
-        escapeHTML(
-            getTaskTitle(task)
-        );
-
-    const status =
-        getTaskStatus(task);
-
-    const shape =
-        escapeHTML(
-            getTaskShape(task)
-        );
-
-    const pay =
-        getTaskPay(task);
-
-    const duration =
-        getTaskDuration(task);
-
-    const media =
-        getTaskMedia(task);
-
-    const created =
-        task?.created_at ||
-        task?.createdAt ||
-        null;
-
-    return `
-        <article
-            class="available-job-card"
-            data-task-id="${escapeHTML(id)}"
-        >
-
-            <div class="available-job-card-header">
-
-                <div class="available-job-title">
-                    ${title}
-                </div>
-
-                <span
-                    class="task-status ${statusClass(status)}"
-                >
-                    ${escapeHTML(
-                        statusLabel(status)
-                    )}
-                </span>
-
-            </div>
-
-            <div class="available-job-meta">
-
-                <span class="job-shape">
-                    ${shape}
-                </span>
-
-                ${
-                    duration !== ""
-                        ? `
-                            <span class="job-duration">
-                                ${escapeHTML(duration)}
-                                ${
-                                    Number(duration) === 1
-                                        ? "min"
-                                        : "mins"
-                                }
-                            </span>
-                        `
-                        : ""
-                }
-
-                ${
-                    pay !== ""
-                        ? `
-                            <span class="job-pay">
-                                ${escapeHTML(pay)}
-                            </span>
-                        `
-                        : ""
-                }
-
-            </div>
-
-            ${
-                created
-                    ? `
-                        <div class="available-job-date">
-                            ${escapeHTML(
-                                formatDate(created)
-                            )}
-                            ·
-                            ${escapeHTML(
-                                formatTime(created)
-                            )}
-                        </div>
-                    `
-                    : ""
-            }
-
-            ${
-                media
-                    ? `
-                        <div class="available-job-media">
-                            Media available
-                        </div>
-                    `
-                    : ""
-            }
-
-            <div class="available-job-actions">
-
-                <button
-                    type="button"
-                    class="open-task-btn"
-                    data-task-id="${escapeHTML(id)}"
-                >
-                    Open task
-                </button>
-
-            </div>
-
-        </article>
-    `;
-}
-
-
-// ============================================================
-// RENDER AVAILABLE JOBS
-// ============================================================
-
-export function renderAvailableJobs() {
-    const container =
-        $("availableJobs") ||
-        $("jobsList") ||
-        $("availableJobsList");
-
-    if (!container) {
-        return;
-    }
-
-    if (homeState.loading) {
-        renderJobsLoading(container);
-        return;
-    }
-
-    if (!homeState.jobs.length) {
-        renderNoJobs(container);
-        return;
-    }
-
-    container.innerHTML =
-        homeState.jobs
-            .map(renderTaskCard)
-            .join("");
-
-    bindTaskCards(container);
-}
-
-
-// ============================================================
-// TASK CARD EVENTS
-// ============================================================
-
-function bindTaskCards(container) {
-    if (!container) {
-        return;
-    }
-
-    container
-        .querySelectorAll(".open-task-btn")
-        .forEach(button => {
-            button.addEventListener(
-                "click",
-                event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    const taskId =
-                        button.dataset.taskId;
-
-                    openTask(taskId);
-                }
-            );
-        });
-
-    container
-        .querySelectorAll(".available-job-card")
-        .forEach(card => {
-            card.addEventListener(
-                "dblclick",
-                () => {
-                    const taskId =
-                        card.dataset.taskId;
-
-                    openTask(taskId);
-                }
-            );
-        });
-}
-
-
-// ============================================================
+// ------------------------------------------------------------
 // OPEN TASK
-// ============================================================
+// ------------------------------------------------------------
 
-export function openTask(taskId) {
+async function openTask(taskId) {
     if (!taskId) {
-        return;
+        return null;
     }
 
-    window.dispatchEvent(
-        new CustomEvent(
-            "home:openTask",
+    const task =
+        homeState.jobs.find(
+            item =>
+                String(item.id) ===
+                String(taskId)
+        );
+
+    try {
+        const selected =
+            await selectTask(
+                taskId
+            );
+
+        homeState.currentTask =
+            selected || task || null;
+
+        emitHomeEvent(
+            "homeTaskOpened",
             {
-                detail: {
-                    taskId
-                }
+                task:
+                    homeState.currentTask,
+                taskId
             }
-        )
-    );
+        );
 
-    // Compatibility with tasks.js.
-    try {
-        if (
-            typeof window.loadTask ===
-            "function"
-        ) {
-            window.loadTask(taskId);
-            return;
-        }
+        // Let the workspace/annotation modules decide
+        // how the actual workspace becomes visible.
+        document.body.classList.add(
+            "workspace-active"
+        );
 
-        if (
-            typeof window.openTask ===
-            "function"
-        ) {
-            // Avoid recursively calling this
-            // function.
-            if (
-                window.openTask !==
-                openTask
-            ) {
-                window.openTask(taskId);
-                return;
-            }
-        }
+        const workspace =
+            $("workspace") ||
+            $("workspaceView") ||
+            $("annotationWorkspace");
 
-        if (
-            typeof window.selectTask ===
-            "function"
-        ) {
-            window.selectTask(taskId);
-            return;
-        }
+        workspace?.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+        });
+
+        return selected;
     } catch (error) {
-        console.warn(
-            "Unable to open task:",
+        console.error(
+            "Could not open task:",
             error
         );
+
+        const message =
+            error?.message ||
+            "This task could not be opened.";
+
+        if (
+            message.toLowerCase().includes(
+                "claimed"
+            )
+        ) {
+            await loadAvailableJobs();
+        }
+
+        if (typeof window.showToast === "function") {
+            window.showToast(
+                message,
+                "error"
+            );
+        }
+
+        return null;
     }
 }
 
+// ------------------------------------------------------------
+// REFRESH CURRENT TASK
+// ------------------------------------------------------------
 
-// ============================================================
-// REFRESH DASHBOARD
-// ============================================================
-
-export async function refreshDashboard() {
-    const button =
-        $("refreshDashboardJobs");
-
-    if (button) {
-        button.disabled = true;
-        button.classList.add("loading");
-    }
-
+function refreshCurrentTask() {
     try {
-        return await loadDashboardJobs();
-    } finally {
-        if (button) {
-            button.disabled = false;
-            button.classList.remove("loading");
-        }
-    }
-}
-
-
-// ============================================================
-// DASHBOARD STATS
-// ============================================================
-
-export function updateDashboardStats() {
-    const jobs =
-        homeState.jobs || [];
-
-    const availableCount =
-        jobs.filter(task => {
-            const status =
-                getTaskStatus(task);
-
-            return [
-                "available",
-                "open",
-                "pending"
-            ].includes(status);
-        }).length;
-
-    const assignedCount =
-        jobs.filter(task => {
-            const status =
-                getTaskStatus(task);
-
-            return [
-                "assigned",
-                "in_progress",
-                "in-progress",
-                "working"
-            ].includes(status);
-        }).length;
-
-    const completedCount =
-        jobs.filter(task => {
-            const status =
-                getTaskStatus(task);
-
-            return [
-                "completed",
-                "approved",
-                "submitted"
-            ].includes(status);
-        }).length;
-
-    const mappings = {
-        availableCount,
-        assignedCount,
-        completedCount,
-        totalJobs: jobs.length
-    };
-
-    Object.entries(mappings)
-        .forEach(
-            ([id, value]) => {
-                const element = $(id);
-
-                if (element) {
-                    element.textContent =
-                        String(value);
-                }
-            }
+        homeState.currentTask =
+            getCurrentTask();
+    } catch (error) {
+        console.debug(
+            "Current task could not be refreshed."
         );
-}
-
-
-// ============================================================
-// REFRESH BUTTON
-// ============================================================
-
-function bindRefreshButton() {
-    const button =
-        $("refreshDashboardJobs");
-
-    if (
-        !button ||
-        button.dataset.homeBound ===
-            "true"
-    ) {
-        return;
     }
-
-    button.dataset.homeBound =
-        "true";
-
-    button.addEventListener(
-        "click",
-        event => {
-            event.preventDefault();
-
-            refreshDashboard();
-        }
-    );
 }
 
+// ------------------------------------------------------------
+// DASHBOARD VISIBILITY
+// ------------------------------------------------------------
 
-// ============================================================
-// COWORKER DASHBOARD
-// ============================================================
-
-function setupCoworkerDashboard(user) {
+function showDashboard() {
     const dashboard =
-        $("coworkerDashboard");
+        $("homeScreen") ||
+        $("homePage") ||
+        $("dashboard") ||
+        $("dashboardView");
 
-    if (!dashboard) {
-        return;
-    }
+    dashboard?.classList.remove(
+        "hidden"
+    );
 
-    const role =
-        normalizeRole(user);
-
-    const coworkerRoles = [
-        "coworker",
-        "staff",
-        "reviewer",
-        "admin",
-        "worker"
-    ];
-
-    if (
-        coworkerRoles.includes(role)
-    ) {
-        dashboard.hidden = false;
-        dashboard.style.display = "";
-    }
+    document.body.classList.add(
+        "dashboard-visible"
+    );
 }
 
+function hideDashboard() {
+    const dashboard =
+        $("homeScreen") ||
+        $("homePage") ||
+        $("dashboard") ||
+        $("dashboardView");
 
-// ============================================================
-// COWORKER WORKBENCH
-// ============================================================
+    dashboard?.classList.add(
+        "hidden"
+    );
 
-function bindCoworkerWorkbench() {
-    const workbench =
-        $("coworkerWorkbench");
-
-    if (!workbench) {
-        return;
-    }
-
-    if (
-        workbench.dataset.homeBound ===
-        "true"
-    ) {
-        return;
-    }
-
-    workbench.dataset.homeBound =
-        "true";
-
-    const upload =
-        $("workbenchUpload");
-
-    const ai =
-        $("workbenchAI");
-
-    if (upload) {
-        upload.addEventListener(
-            "click",
-            () => {
-                const mediaInput =
-                    $("mediaInput");
-
-                if (mediaInput) {
-                    mediaInput.click();
-                }
-            }
-        );
-    }
-
-    if (ai) {
-        ai.addEventListener(
-            "click",
-            () => {
-                window.dispatchEvent(
-                    new CustomEvent(
-                        "home:runAI"
-                    )
-                );
-
-                if (
-                    typeof window.runAutoAnnotate ===
-                    "function"
-                ) {
-                    window.runAutoAnnotate();
-                } else if (
-                    typeof window.autoAnnotate ===
-                    "function"
-                ) {
-                    window.autoAnnotate();
-                }
-            }
-        );
-    }
+    document.body.classList.remove(
+        "dashboard-visible"
+    );
 }
 
+// ------------------------------------------------------------
+// PENDING APPROVAL SCREEN
+// ------------------------------------------------------------
 
-// ============================================================
-// AUTH EVENTS
-// ============================================================
+function renderPendingApproval() {
+    const container =
+        $("approvalWaiting") ||
+        $("pendingApproval") ||
+        $("approvalScreen");
 
-function bindAuthEvents() {
-    if (
-        window.__homeAuthEventsBound ===
-        true
-    ) {
+    if (!container) {
         return;
     }
 
-    window.__homeAuthEventsBound =
-        true;
+    container.innerHTML = `
+        <div class="approval-waiting-card">
+            <div class="approval-waiting-icon">
+                ⏳
+            </div>
+
+            <h2>
+                Waiting for admin approval
+            </h2>
+
+            <p>
+                Your account has been created successfully.
+                Please wait for an administrator to grant
+                you access to work.
+            </p>
+
+            <div class="approval-status">
+                Account status:
+                <strong>Pending approval</strong>
+            </div>
+        </div>
+    `;
+
+    container.classList.remove(
+        "hidden"
+    );
+}
+
+// ------------------------------------------------------------
+// HOME EVENT SYSTEM
+// ------------------------------------------------------------
+
+function emitHomeEvent(name, detail = {}) {
+    window.dispatchEvent(
+        new CustomEvent(name, {
+            detail
+        })
+    );
+}
+
+// ------------------------------------------------------------
+// EVENT LISTENERS
+// ------------------------------------------------------------
+
+function bindHomeEvents() {
+    if (homeState.eventsBound) {
+        return;
+    }
+
+    homeState.eventsBound = true;
 
     window.addEventListener(
-        "auth:login",
-        event => {
-            const user =
-                event.detail?.user ||
-                null;
+        "authChanged",
+        async event => {
+            const detail =
+                event.detail || {};
 
-            homeState.user = user;
-
-            if (user) {
-                updateUserUI(user);
-                setupCoworkerDashboard(
-                    user
-                );
-            }
-
-            showHome();
-
-            loadDashboardJobs();
-        }
-    );
-
-    window.addEventListener(
-        "auth:session",
-        event => {
-            const session =
-                event.detail?.session ||
-                null;
-
-            if (session?.user) {
-                homeState.user =
-                    session.user;
-
-                updateUserUI(
-                    session.user
-                );
-
-                setupCoworkerDashboard(
-                    session.user
-                );
-
-                showHome();
-
-                loadDashboardJobs();
-            }
-        }
-    );
-
-    window.addEventListener(
-        "auth:logout",
-        () => {
-            homeState.user = null;
-            homeState.jobs = [];
-
-            const container =
-                $("availableJobs") ||
-                $("jobsList") ||
-                $("availableJobsList");
-
-            if (container) {
-                renderNoJobs(container);
-            }
-
-            updateDashboardStats();
-
-            hideHome();
-        }
-    );
-}
-
-
-// ============================================================
-// TASK EVENTS
-// ============================================================
-
-function bindTaskEvents() {
-    if (
-        window.__homeTaskEventsBound ===
-        true
-    ) {
-        return;
-    }
-
-    window.__homeTaskEventsBound =
-        true;
-
-    const events = [
-        "task:created",
-        "task:updated",
-        "task:submitted",
-        "task:completed",
-        "task:approved",
-        "task:rejected",
-        "task:skipped"
-    ];
-
-    events.forEach(
-        eventName => {
-            window.addEventListener(
-                eventName,
-                () => {
-                    setTimeout(
-                        () => {
-                            refreshDashboard();
-                        },
-                        250
-                    );
-                }
-            );
-        }
-    );
-}
-
-
-// ============================================================
-// GLOBAL COMPATIBILITY
-// ============================================================
-
-function exposeGlobals() {
-    window.loadDashboardJobs =
-        loadDashboardJobs;
-
-    window.renderAvailableJobs =
-        renderAvailableJobs;
-
-    window.refreshDashboard =
-        refreshDashboard;
-
-    window.openDashboardTask =
-        openTask;
-
-    window.showHome =
-        showHome;
-
-    window.hideHome =
-        hideHome;
-
-    window.updateDashboardStats =
-        updateDashboardStats;
-}
-
-
-// ============================================================
-// INITIALIZATION
-// ============================================================
-
-export async function initializeHome() {
-    if (homeState.initialized) {
-        return;
-    }
-
-    homeState.initialized =
-        true;
-
-    exposeGlobals();
-
-    bindRefreshButton();
-    bindCoworkerWorkbench();
-    bindAuthEvents();
-    bindTaskEvents();
-
-    try {
-        const sessionResult =
-            await getCurrentSession();
-
-        // The corrected supabase.js returns:
-        // { session, error }
-        const session =
-            sessionResult?.session ||
-            null;
-
-        if (session?.user) {
             homeState.user =
-                session.user;
+                detail.user ||
+                getCurrentUser();
 
-            updateUserUI(
-                session.user
-            );
+            homeState.profile =
+                detail.profile ||
+                getProfile();
 
-            setupCoworkerDashboard(
-                session.user
-            );
+            homeState.role =
+                normalizeRole(
+                    detail.role ||
+                    getRole()
+                );
 
-            showHome();
+            renderGreeting();
+            renderTimeline();
 
-            await loadDashboardJobs();
+            if (
+                detail.loggedIn &&
+                !isPendingApproval()
+            ) {
+                await loadAvailableJobs();
+            } else {
+                homeState.jobs = [];
+                renderNoJobs();
+            }
         }
-    } catch (error) {
-        console.warn(
-            "Home initialization failed:",
-            error
-        );
-    }
+    );
+
+    window.addEventListener(
+        "taskSelected",
+        event => {
+            homeState.currentTask =
+                event.detail?.task ||
+                event.detail ||
+                getCurrentTask();
+
+            hideDashboard();
+        }
+    );
+
+    window.addEventListener(
+        "taskCleared",
+        async () => {
+            homeState.currentTask = null;
+
+            showDashboard();
+
+            if (isLoggedIn()) {
+                await loadAvailableJobs();
+            }
+        }
+    );
+
+    window.addEventListener(
+        "taskSubmitted",
+        async () => {
+            homeState.currentTask = null;
+
+            showDashboard();
+
+            await loadAvailableJobs();
+        }
+    );
+
+    window.addEventListener(
+        "taskSkipped",
+        async () => {
+            homeState.currentTask = null;
+
+            showDashboard();
+
+            await loadAvailableJobs();
+        }
+    );
+
+    window.addEventListener(
+        "profileUpdated",
+        async event => {
+            homeState.profile =
+                event.detail?.profile ||
+                getProfile();
+
+            homeState.role =
+                normalizeRole(
+                    homeState.profile?.role ||
+                    getRole()
+                );
+
+            renderGreeting();
+            renderTimeline();
+
+            if (isLoggedIn()) {
+                await loadAvailableJobs();
+            }
+        }
+    );
+
+    window.addEventListener(
+        "roleChanged",
+        async event => {
+            homeState.role =
+                normalizeRole(
+                    event.detail?.role ||
+                    getRole()
+                );
+
+            renderGreeting();
+            renderTimeline();
+
+            if (isLoggedIn()) {
+                await loadAvailableJobs();
+            }
+        }
+    );
 }
 
+// ------------------------------------------------------------
+// INITIALIZE
+// ------------------------------------------------------------
 
-// ============================================================
+async function initializeHome() {
+    if (homeState.initialized) {
+        return homeState;
+    }
+
+    homeState.initialized = true;
+
+    homeState.user =
+        getCurrentUser();
+
+    homeState.profile =
+        getProfile();
+
+    homeState.role =
+        normalizeRole(
+            getRole()
+        );
+
+    bindHomeEvents();
+
+    renderGreeting();
+    renderTimeline();
+
+    if (!isLoggedIn()) {
+        homeState.jobs = [];
+        return homeState;
+    }
+
+    if (isPendingApproval()) {
+        renderPendingApproval();
+        renderNoJobs();
+        return homeState;
+    }
+
+    await loadAvailableJobs();
+
+    return homeState;
+}
+
+// ------------------------------------------------------------
+// PUBLIC API
+// ------------------------------------------------------------
+
+window.homeState = homeState;
+window.loadAvailableJobs = loadAvailableJobs;
+window.refreshAvailableJobs =
+    loadAvailableJobs;
+window.openAnnotationTask = openTask;
+
+export {
+    homeState,
+    initializeHome,
+    loadAvailableJobs,
+    openTask,
+    renderGreeting,
+    renderTimeline,
+    renderJobs,
+    renderNoJobs
+};
+
+// ------------------------------------------------------------
 // AUTO INITIALIZE
-// ============================================================
+// ------------------------------------------------------------
 
-if (
-    document.readyState ===
-    "loading"
-) {
+if (document.readyState === "loading") {
     document.addEventListener(
         "DOMContentLoaded",
         () => {
             initializeHome();
         },
-        {
-            once: true
-        }
+        { once: true }
     );
 } else {
     initializeHome();
 }
-
-
-// ============================================================
-// EXPORT STATE
-// ============================================================
-
-export {
-    homeState,
-    getTaskTitle,
-    getTaskStatus,
-    getTaskShape,
-    getTaskPay,
-    getTaskDuration,
-    getTaskMedia
-};
