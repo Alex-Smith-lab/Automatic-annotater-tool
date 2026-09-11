@@ -1,78 +1,86 @@
-/* ============================================================
-   ANNOTATION AI
-   SUPABASE CONNECTION
-   File: js/supabase.js
-============================================================ */
+// ============================================================
+// ANNOTATION AI - SUPABASE CLIENT
+// ============================================================
 
-import {
-    createClient
-} from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from
+    "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-import {
-    APP_CONFIG
-} from "./config.js";
+import { APP_CONFIG } from "./config.js";
 
 
 // ============================================================
-// CONFIGURATION CHECK
+// SUPABASE CONFIGURATION
 // ============================================================
 
-const hasValidConfig =
-    Boolean(
-        APP_CONFIG.supabaseUrl &&
-        APP_CONFIG.supabaseAnonKey &&
-        APP_CONFIG.supabaseUrl !==
-            "YOUR_SUPABASE_PROJECT_URL" &&
-        APP_CONFIG.supabaseAnonKey !==
-            "YOUR_SUPABASE_ANON_KEY"
-    );
+const SUPABASE_URL =
+    APP_CONFIG.supabaseUrl;
+
+const SUPABASE_KEY =
+    APP_CONFIG.supabaseAnonKey;
 
 
-if (!hasValidConfig) {
+// ============================================================
+// CLIENT
+// ============================================================
 
-    console.warn(
-        "[Annotation AI] Supabase is not configured."
+let supabase = null;
+
+let supabaseReady = false;
+
+let supabaseError = null;
+
+
+try {
+
+    if (
+        SUPABASE_URL &&
+        SUPABASE_KEY
+    ) {
+
+        supabase =
+            createClient(
+                SUPABASE_URL,
+                SUPABASE_KEY,
+                {
+                    auth: {
+                        persistSession:
+                            APP_CONFIG.auth.persistSession,
+
+                        autoRefreshToken:
+                            APP_CONFIG.auth.autoRefreshToken,
+
+                        detectSessionInUrl:
+                            APP_CONFIG.auth.detectSessionInUrl,
+
+                        storageKey:
+                            APP_CONFIG.auth.storageKey,
+
+                        flowType:
+                            APP_CONFIG.auth.flowType
+                    }
+                }
+            );
+
+        supabaseReady = true;
+
+    } else {
+
+        supabaseError =
+            new Error(
+                "Supabase URL or publishable key is missing."
+            );
+    }
+
+} catch (error) {
+
+    supabaseError =
+        error;
+
+    console.error(
+        "Supabase initialization failed:",
+        error
     );
 }
-
-
-// ============================================================
-// SUPABASE CLIENT
-// ============================================================
-
-export const supabase =
-    hasValidConfig
-        ? createClient(
-            APP_CONFIG.supabaseUrl,
-            APP_CONFIG.supabaseAnonKey,
-            {
-                auth: {
-                    persistSession:
-                        APP_CONFIG.auth.persistSession,
-
-                    autoRefreshToken:
-                        APP_CONFIG.auth.autoRefreshToken,
-
-                    detectSessionInUrl:
-                        APP_CONFIG.auth.detectSessionInUrl,
-
-                    storageKey:
-                        APP_CONFIG.auth.storageKey,
-
-                    flowType:
-                        APP_CONFIG.auth.flowType
-                }
-            }
-        )
-        : null;
-
-
-// ============================================================
-// GLOBAL COMPATIBILITY
-// ============================================================
-
-window.supabaseClient =
-    supabase;
 
 
 // ============================================================
@@ -86,35 +94,46 @@ export function getSupabase() {
 
 
 // ============================================================
-// READY CHECK
+// DIRECT EXPORT
+// ============================================================
+
+export {
+    supabase
+};
+
+
+// ============================================================
+// CHECK SUPABASE READY
 // ============================================================
 
 export function isSupabaseReady() {
 
-    return Boolean(
-        supabase
+    return (
+        Boolean(supabase) &&
+        supabaseReady
     );
 }
 
 
 // ============================================================
-// CONNECTION TEST
+// CONNECTION CHECK
 // ============================================================
 
 export async function checkSupabaseConnection() {
 
-    if (!supabase) {
+    if (
+        !isSupabaseReady()
+    ) {
 
         return {
-            connected: false,
-
+            ok: false,
             error:
+                supabaseError ||
                 new Error(
-                    "Supabase configuration is missing."
+                    "Supabase is not initialized."
                 )
         };
     }
-
 
     try {
 
@@ -122,33 +141,30 @@ export async function checkSupabaseConnection() {
             data,
             error
         } =
-            await supabase.auth.getSession();
-
+            await supabase
+                .from(
+                    APP_CONFIG.tables.profiles
+                )
+                .select("id")
+                .limit(1);
 
         if (error) {
 
             return {
-                connected: false,
+                ok: false,
                 error
             };
         }
 
-
         return {
-
-            connected: true,
-
-            session:
-                data?.session ||
-                null
+            ok: true,
+            data
         };
 
     } catch (error) {
 
         return {
-
-            connected: false,
-
+            ok: false,
             error
         };
     }
@@ -161,11 +177,11 @@ export async function checkSupabaseConnection() {
 
 export async function getSession() {
 
-    if (!supabase) {
-
+    if (
+        !isSupabaseReady()
+    ) {
         return null;
     }
-
 
     try {
 
@@ -175,17 +191,15 @@ export async function getSession() {
         } =
             await supabase.auth.getSession();
 
-
         if (error) {
 
-            console.warn(
-                "[Supabase] getSession:",
+            console.error(
+                "Unable to get Supabase session:",
                 error
             );
 
             return null;
         }
-
 
         return (
             data?.session ||
@@ -195,7 +209,7 @@ export async function getSession() {
     } catch (error) {
 
         console.error(
-            "[Supabase] getSession error:",
+            "getSession error:",
             error
         );
 
@@ -206,60 +220,12 @@ export async function getSession() {
 
 // ============================================================
 // GET CURRENT SESSION
-// ============================================================
-//
-// auth.js expects:
-// {
-//     session,
-//     error
-// }
+// Compatibility alias
 // ============================================================
 
 export async function getCurrentSession() {
 
-    if (!supabase) {
-
-        return {
-
-            session: null,
-
-            error:
-                new Error(
-                    "Supabase is not configured."
-                )
-        };
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await supabase.auth.getSession();
-
-
-        return {
-
-            session:
-                data?.session ||
-                null,
-
-            error:
-                error ||
-                null
-        };
-
-    } catch (error) {
-
-        return {
-
-            session: null,
-
-            error
-        };
-    }
+    return await getSession();
 }
 
 
@@ -272,7 +238,6 @@ export async function getCurrentUser() {
     const session =
         await getSession();
 
-
     return (
         session?.user ||
         null
@@ -282,33 +247,28 @@ export async function getCurrentUser() {
 
 // ============================================================
 // SAVE LOCAL SESSION
+// Compatibility helper
 // ============================================================
 
 export function saveLocalSession(
     session
 ) {
 
+    if (!session) {
+        return;
+    }
+
     try {
 
-        if (!session) {
-
-            return;
-        }
-
-
         localStorage.setItem(
-
-            APP_CONFIG.sessionKey,
-
-            JSON.stringify(
-                session
-            )
+            `${APP_CONFIG.auth.storageKey}:session`,
+            JSON.stringify(session)
         );
 
     } catch (error) {
 
         console.warn(
-            "[Supabase] Could not save local session:",
+            "Unable to save local session:",
             error
         );
     }
@@ -324,13 +284,13 @@ export function clearLocalSession() {
     try {
 
         localStorage.removeItem(
-            APP_CONFIG.sessionKey
+            `${APP_CONFIG.auth.storageKey}:session`
         );
 
     } catch (error) {
 
         console.warn(
-            "[Supabase] Could not clear local session:",
+            "Unable to clear local session:",
             error
         );
     }
@@ -338,39 +298,92 @@ export function clearLocalSession() {
 
 
 // ============================================================
-// CLOUD STATUS
+// UPDATE CLOUD STATUS
 // ============================================================
 
-export function updateCloudStatus(
-    message,
-    online = false
+export async function updateCloudStatus(
+    status,
+    metadata = {}
 ) {
 
-    const element =
-        document.getElementById(
-            "cloudStatus"
-        );
+    const user =
+        await getCurrentUser();
 
-
-    if (!element) {
-
-        return;
+    if (
+        !user ||
+        !isSupabaseReady()
+    ) {
+        return {
+            ok: false
+        };
     }
 
+    try {
 
-    element.textContent =
-        message ||
-        (
-            online
-                ? "Cloud connected"
-                : "Not signed in"
+        const updates = {
+            last_seen_at:
+                new Date().toISOString()
+        };
+
+        // Keep optional metadata available
+        // without forcing unsupported columns
+        // into the profiles table.
+        if (
+            metadata &&
+            typeof metadata === "object"
+        ) {
+
+            if (
+                metadata.full_name !== undefined
+            ) {
+
+                updates.full_name =
+                    metadata.full_name;
+            }
+        }
+
+        const {
+            error
+        } =
+            await supabase
+                .from(
+                    APP_CONFIG.tables.profiles
+                )
+                .update(updates)
+                .eq(
+                    "id",
+                    user.id
+                );
+
+        if (error) {
+
+            console.warn(
+                "Unable to update cloud status:",
+                error
+            );
+
+            return {
+                ok: false,
+                error
+            };
+        }
+
+        return {
+            ok: true
+        };
+
+    } catch (error) {
+
+        console.warn(
+            "updateCloudStatus error:",
+            error
         );
 
-
-    element.dataset.status =
-        online
-            ? "online"
-            : "offline";
+        return {
+            ok: false,
+            error
+        };
+    }
 }
 
 
@@ -380,19 +393,16 @@ export function updateCloudStatus(
 
 export async function signOutUser() {
 
-    if (!supabase) {
+    if (
+        !isSupabaseReady()
+    ) {
+
+        clearLocalSession();
 
         return {
-
-            success: false,
-
-            error:
-                new Error(
-                    "Supabase is not configured."
-                )
+            success: true
         };
     }
-
 
     try {
 
@@ -401,34 +411,36 @@ export async function signOutUser() {
         } =
             await supabase.auth.signOut();
 
+        clearLocalSession();
 
         if (error) {
 
+            console.error(
+                "Sign out failed:",
+                error
+            );
+
             return {
-
                 success: false,
-
                 error
             };
         }
 
-
-        clearLocalSession();
-
-
         return {
-
-            success: true,
-
-            error: null
+            success: true
         };
 
     } catch (error) {
 
+        console.error(
+            "signOutUser error:",
+            error
+        );
+
+        clearLocalSession();
+
         return {
-
             success: false,
-
             error
         };
     }
@@ -443,26 +455,315 @@ export function onAuthStateChange(
     callback
 ) {
 
-    if (!supabase) {
+    if (
+        !isSupabaseReady() ||
+        typeof callback !== "function"
+    ) {
 
         return {
-
             data: {
-
                 subscription: {
-
                     unsubscribe() {}
                 }
             }
         };
     }
 
+    const {
+        data
+    } =
+        supabase.auth.onAuthStateChange(
+            async (
+                event,
+                session
+            ) => {
+
+                try {
+
+                    if (session) {
+
+                        saveLocalSession(
+                            session
+                        );
+
+                    } else {
+
+                        clearLocalSession();
+                    }
+
+                    await callback(
+                        event,
+                        session
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        "Auth state callback error:",
+                        error
+                    );
+                }
+            }
+        );
+
+    return data;
+}
+
+
+// ============================================================
+// AUTH EVENT HELPERS
+// ============================================================
+
+export function getAuthEventName(
+    event
+) {
+
+    const names = {
+
+        INITIAL_SESSION:
+            "Initial session",
+
+        SIGNED_IN:
+            "Signed in",
+
+        SIGNED_OUT:
+            "Signed out",
+
+        PASSWORD_RECOVERY:
+            "Password recovery",
+
+        TOKEN_REFRESHED:
+            "Token refreshed",
+
+        USER_UPDATED:
+            "User updated"
+    };
 
     return (
-        supabase.auth.onAuthStateChange(
-            callback
-        )
+        names[event] ||
+        event ||
+        "Unknown"
     );
+}
+
+
+// ============================================================
+// DATABASE HELPERS
+// ============================================================
+
+export async function getProfileByUserId(
+    userId
+) {
+
+    if (
+        !userId ||
+        !isSupabaseReady()
+    ) {
+        return null;
+    }
+
+    try {
+
+        const {
+            data,
+            error
+        } =
+            await supabase
+                .from(
+                    APP_CONFIG.tables.profiles
+                )
+                .select("*")
+                .eq(
+                    "id",
+                    userId
+                )
+                .maybeSingle();
+
+        if (error) {
+
+            console.error(
+                "Unable to load profile:",
+                error
+            );
+
+            return null;
+        }
+
+        return data || null;
+
+    } catch (error) {
+
+        console.error(
+            "getProfileByUserId error:",
+            error
+        );
+
+        return null;
+    }
+}
+
+
+export async function getCurrentProfile() {
+
+    const user =
+        await getCurrentUser();
+
+    if (!user) {
+        return null;
+    }
+
+    return await getProfileByUserId(
+        user.id
+    );
+}
+
+
+// ============================================================
+// ACTIVITY LOGGER
+// ============================================================
+
+export async function logActivity(
+    eventType,
+    metadata = {}
+) {
+
+    if (
+        !isSupabaseReady()
+    ) {
+        return null;
+    }
+
+    const user =
+        await getCurrentUser();
+
+    if (!user) {
+        return null;
+    }
+
+    try {
+
+        const row = {
+            user_id:
+                user.id,
+
+            event_type:
+                eventType,
+
+            metadata:
+                metadata || {},
+
+            created_at:
+                new Date().toISOString()
+        };
+
+        const {
+            data,
+            error
+        } =
+            await supabase
+                .from(
+                    APP_CONFIG.tables.activityLogs
+                )
+                .insert(row)
+                .select()
+                .maybeSingle();
+
+        if (error) {
+
+            console.warn(
+                "Activity log failed:",
+                error
+            );
+
+            return null;
+        }
+
+        return data || null;
+
+    } catch (error) {
+
+        console.warn(
+            "logActivity error:",
+            error
+        );
+
+        return null;
+    }
+}
+
+
+// ============================================================
+// WORKFLOW EVENT LOGGER
+// ============================================================
+
+export async function logWorkflowEvent(
+    taskId,
+    eventType,
+    metadata = {}
+) {
+
+    if (
+        !taskId ||
+        !isSupabaseReady()
+    ) {
+        return null;
+    }
+
+    const user =
+        await getCurrentUser();
+
+    try {
+
+        const row = {
+            task_id:
+                taskId,
+
+            event_type:
+                eventType,
+
+            user_id:
+                user?.id || null,
+
+            metadata:
+                metadata || {},
+
+            created_at:
+                new Date().toISOString()
+        };
+
+        const {
+            data,
+            error
+        } =
+            await supabase
+                .from(
+                    APP_CONFIG.tables.workflowEvents
+                )
+                .insert(row)
+                .select()
+                .maybeSingle();
+
+        if (error) {
+
+            console.warn(
+                "Workflow event failed:",
+                error
+            );
+
+            return null;
+        }
+
+        return data || null;
+
+    } catch (error) {
+
+        console.warn(
+            "logWorkflowEvent error:",
+            error
+        );
+
+        return null;
+    }
 }
 
 
@@ -470,8 +771,17 @@ export function onAuthStateChange(
 // GLOBAL COMPATIBILITY
 // ============================================================
 
+window.supabase =
+    supabase;
+
 window.getSupabase =
     getSupabase;
+
+window.isSupabaseReady =
+    isSupabaseReady;
+
+window.getSession =
+    getSession;
 
 window.getCurrentSession =
     getCurrentSession;
@@ -479,5 +789,23 @@ window.getCurrentSession =
 window.getCurrentUser =
     getCurrentUser;
 
-window.isSupabaseReady =
-    isSupabaseReady;
+window.getCurrentProfile =
+    getCurrentProfile;
+
+window.checkSupabaseConnection =
+    checkSupabaseConnection;
+
+window.signOutUser =
+    signOutUser;
+
+window.onAuthStateChange =
+    onAuthStateChange;
+
+window.updateCloudStatus =
+    updateCloudStatus;
+
+window.logActivity =
+    logActivity;
+
+window.logWorkflowEvent =
+    logWorkflowEvent;
