@@ -1,6 +1,25 @@
 /* ============================================================
    AUTH.JS
-   Authentication, session, roles and profile management
+   ------------------------------------------------------------
+   Authentication, session management, profiles, roles,
+   approval status and authorization helpers.
+
+   Compatibility exports included for:
+   - app.js
+   - annotation.js
+   - admin.js
+   - profile.js
+   - home.js
+   - history.js
+   - media.js
+   - tasks.js
+   - workspace.js
+
+   IMPORTANT:
+   - Normal signup = customer + inactive/pending
+   - Default administrator is always protected
+   - Admin email is not displayed to normal users
+   - Supabase remains the source of authentication
    ============================================================ */
 
 import {
@@ -16,7 +35,7 @@ import {
 import {
     supabase,
     getSupabase,
-    getCurrentUser,
+    getCurrentUser as getSupabaseCurrentUser,
     getCurrentSession,
     saveLocalSession,
     clearLocalSession,
@@ -26,6 +45,7 @@ import {
     getProfileByUserId
 } from "./supabase.js";
 
+
 /* ============================================================
    STATE
    ============================================================ */
@@ -33,27 +53,46 @@ import {
 const authState = {
     initialized: false,
     loading: false,
+
     authenticated: false,
+
     user: null,
     session: null,
     profile: null,
+
     role: "customer",
+
     active: false,
     pendingApproval: false,
+
     listeners: new Set()
 };
 
+window.authState = authState;
+
+
+/* ============================================================
+   CONSTANTS
+   ============================================================ */
+
 const ADMIN_EMAIL = String(
-    APP_CONFIG.adminEmail || "antonymbali96@gmail.com"
-).trim().toLowerCase();
+    APP_CONFIG?.adminEmail ||
+    "antonymbali96@gmail.com"
+)
+    .trim()
+    .toLowerCase();
+
 
 /* ============================================================
    BASIC HELPERS
    ============================================================ */
 
 function cleanEmail(email) {
-    return String(email || "").trim().toLowerCase();
+    return String(email || "")
+        .trim()
+        .toLowerCase();
 }
+
 
 function cleanName(name, email = "") {
     const value = String(name || "").trim();
@@ -62,10 +101,12 @@ function cleanName(name, email = "") {
         return value;
     }
 
-    const fallback = cleanEmail(email).split("@")[0];
+    const fallback = cleanEmail(email)
+        .split("@")[0];
 
     return fallback || "User";
 }
+
 
 function getErrorMessage(
     error,
@@ -88,17 +129,27 @@ function getErrorMessage(
     );
 }
 
+
 function isAdminEmail(email) {
-    return cleanEmail(email) === ADMIN_EMAIL;
+    return (
+        cleanEmail(email) ===
+        ADMIN_EMAIL
+    );
 }
 
+
 function isRealAuthenticatedUser(user) {
-    return !!(
+    return Boolean(
         user &&
         user.id &&
         user.email
     );
 }
+
+
+/* ============================================================
+   PROFILE NORMALIZATION
+   ============================================================ */
 
 function normalizeProfile(
     profile,
@@ -117,9 +168,8 @@ function normalizeProfile(
     );
 
     /*
-     * The configured administrator is always treated as admin.
-     * This protects the admin account from accidentally losing
-     * its role because of an old profile record.
+     * The protected administrator can never accidentally become
+     * a normal user because of a stale profile record.
      */
     if (isAdminEmail(email)) {
         role = "admin";
@@ -128,8 +178,8 @@ function normalizeProfile(
     let active = profile?.active;
 
     /*
-     * If active is missing/null, fall back to status where the
-     * older database structure may still be in use.
+     * Compatibility with older databases that may have used
+     * a textual status column.
      */
     if (
         active === undefined ||
@@ -139,10 +189,9 @@ function normalizeProfile(
             profile?.status !== undefined &&
             profile?.status !== null
         ) {
-            const status =
-                String(
-                    profile.status
-                ).toLowerCase();
+            const status = String(
+                profile.status
+            ).toLowerCase();
 
             active = [
                 "active",
@@ -156,7 +205,7 @@ function normalizeProfile(
     }
 
     /*
-     * The default administrator is always active.
+     * Default administrator is always active.
      */
     if (isAdminEmail(email)) {
         active = true;
@@ -186,8 +235,9 @@ function normalizeProfile(
     };
 }
 
+
 /* ============================================================
-   EVENT SYSTEM
+   AUTH EVENT SYSTEM
    ============================================================ */
 
 function emitAuthChange(
@@ -231,8 +281,48 @@ function emitAuthChange(
         );
     }
 
+    /*
+     * Compatibility events used by older modules.
+     */
+    if (
+        reason === "login" ||
+        reason === "signed_in"
+    ) {
+        try {
+            window.dispatchEvent(
+                new CustomEvent(
+                    "auth:login",
+                    {
+                        detail: snapshot
+                    }
+                )
+            );
+        } catch {}
+    }
+
+    if (
+        reason === "logout" ||
+        reason === "supabaseSignedOut"
+    ) {
+        try {
+            window.dispatchEvent(
+                new CustomEvent(
+                    "auth:logout",
+                    {
+                        detail: snapshot
+                    }
+                )
+            );
+        } catch {}
+    }
+
     return snapshot;
 }
+
+
+/* ============================================================
+   LISTENER
+   ============================================================ */
 
 export function onAuthStateChange(
     listener
@@ -254,6 +344,7 @@ export function onAuthStateChange(
         );
     };
 }
+
 
 /* ============================================================
    STATE GETTERS
@@ -290,6 +381,11 @@ export function getAuthState() {
     };
 }
 
+
+/* ============================================================
+   BASIC USER GETTERS
+   ============================================================ */
+
 export function isLoggedIn() {
     return Boolean(
         authState.authenticated &&
@@ -297,28 +393,21 @@ export function isLoggedIn() {
     );
 }
 
+
 export function getUser() {
     return authState.user;
 }
+
 
 export function getSession() {
     return authState.session;
 }
 
+
 export function getProfile() {
     return authState.profile;
 }
 
-/*
- * IMPORTANT COMPATIBILITY EXPORT
- *
- * annotation.js, admin.js and other modules may use
- * getCurrentProfile(). The main profile getter is
- * getProfile(), so expose the same function under both
- * names instead of changing module functionality.
- */
-export const getCurrentProfile =
-    getProfile;
 
 export function getRole() {
     return normalizeRole(
@@ -327,11 +416,74 @@ export function getRole() {
     );
 }
 
+
+export function getUserId() {
+    return (
+        authState.user?.id ||
+        null
+    );
+}
+
+
+export function getUserEmail() {
+    return (
+        authState.user?.email ||
+        authState.profile?.email ||
+        ""
+    );
+}
+
+
+export function getUserName() {
+    return (
+        authState.profile?.full_name ||
+        authState.user?.user_metadata?.full_name ||
+        authState.user?.user_metadata?.name ||
+        cleanName(
+            "",
+            authState.user?.email
+        )
+    );
+}
+
+
+/* ============================================================
+   IMPORTANT COMPATIBILITY ALIASES
+   ------------------------------------------------------------
+   These are the exports that were missing and caused:
+
+   "The requested module './auth.js' does not provide an export
+   named 'getCurrentUser'"
+
+   annotation.js also imports getCurrentProfile.
+   ============================================================ */
+
+export function getCurrentUser() {
+    return (
+        authState.user ||
+        null
+    );
+}
+
+
+export function getCurrentProfile() {
+    return (
+        authState.profile ||
+        null
+    );
+}
+
+
+/* ============================================================
+   ROLE CHECKS
+   ============================================================ */
+
 export function isAdmin() {
     return isAdminRole(
         getRole()
     );
 }
+
 
 export function isStaff() {
     return isStaffRole(
@@ -339,11 +491,13 @@ export function isStaff() {
     );
 }
 
+
 export function isReviewer() {
     return isReviewerRole(
         getRole()
     );
 }
+
 
 export function isCoworker() {
     return isCoworkerRole(
@@ -351,17 +505,20 @@ export function isCoworker() {
     );
 }
 
+
 export function canAnnotate() {
     return canAnnotateRole(
         getRole()
     );
 }
 
+
 export function isActiveUser() {
     return Boolean(
         authState.active
     );
 }
+
 
 export function isPendingApproval() {
     return Boolean(
@@ -371,35 +528,6 @@ export function isPendingApproval() {
     );
 }
 
-export function getUserId() {
-    return (
-        authState.user?.id ||
-        null
-    );
-}
-
-export function getUserEmail() {
-    return (
-        authState.user?.email ||
-        ""
-    );
-}
-
-export function getUserName() {
-    return (
-        authState.profile?.full_name ||
-        authState.user
-            ?.user_metadata
-            ?.full_name ||
-        authState.user
-            ?.user_metadata
-            ?.name ||
-        cleanName(
-            "",
-            authState.user?.email
-        )
-    );
-}
 
 /* ============================================================
    SUPABASE CLIENT
@@ -418,6 +546,7 @@ function getClient() {
 
     return client;
 }
+
 
 /* ============================================================
    PROFILE LOADING
@@ -444,6 +573,9 @@ export async function loadProfile(
 
     let profile = null;
 
+    /*
+     * First use the shared Supabase helper.
+     */
     try {
         if (
             typeof getProfileByUserId ===
@@ -462,9 +594,7 @@ export async function loadProfile(
     }
 
     /*
-     * Direct fallback query.
-     * This is useful if the helper was changed or the profile
-     * did not exist yet.
+     * Direct Supabase fallback.
      */
     if (!profile) {
         try {
@@ -474,26 +604,22 @@ export async function loadProfile(
             const {
                 data,
                 error
-            } =
-                await client
-                    .from(
-                        APP_CONFIG
-                            .tables
-                            .profiles
-                    )
-                    .select("*")
-                    .eq(
-                        "id",
-                        user.id
-                    )
-                    .maybeSingle();
+            } = await client
+                .from(
+                    APP_CONFIG.tables.profiles
+                )
+                .select("*")
+                .eq(
+                    "id",
+                    user.id
+                )
+                .maybeSingle();
 
             if (
                 !error &&
                 data
             ) {
-                profile =
-                    data;
+                profile = data;
             }
         } catch (error) {
             console.warn(
@@ -503,284 +629,213 @@ export async function loadProfile(
         }
     }
 
-    /*
-     * If a profile still does not exist, create a safe local
-     * representation. The database trigger should normally
-     * create this row automatically.
-     */
-    if (!profile) {
-        profile = {
-            id: user.id,
-            email:
-                user.email || "",
-            full_name:
-                user
-                    ?.user_metadata
-                    ?.full_name ||
-                user
-                    ?.user_metadata
-                    ?.name ||
-                cleanName(
-                    "",
-                    user.email
-                ),
-            role:
-                isAdminEmail(
-                    user.email
-                )
-                    ? "admin"
-                    : "customer",
-            active:
-                isAdminEmail(
-                    user.email
-                )
-                    ? true
-                    : false
-        };
-    }
-
-    profile =
+    const normalized =
         normalizeProfile(
             profile,
             user
         );
 
+
+    /* ----------------------------------------------------------
+       PROTECTED ADMIN SYNCHRONIZATION
+       ---------------------------------------------------------- */
+
+    if (
+        isAdminEmail(
+            user.email
+        )
+    ) {
+        normalized.role =
+            "admin";
+
+        normalized.active =
+            true;
+
+        try {
+            const client =
+                getClient();
+
+            await client
+                .from(
+                    APP_CONFIG.tables.profiles
+                )
+                .upsert(
+                    {
+                        id:
+                            user.id,
+
+                        email:
+                            cleanEmail(
+                                user.email
+                            ),
+
+                        full_name:
+                            normalized.full_name,
+
+                        role:
+                            "admin",
+
+                        active:
+                            true
+                    },
+                    {
+                        onConflict:
+                            "id"
+                    }
+                );
+        } catch (error) {
+            /*
+             * Never prevent the protected administrator from
+             * entering because a profile synchronization failed.
+             */
+            console.warn(
+                "Admin profile synchronization failed:",
+                error
+            );
+        }
+    }
+
+
+    /* ----------------------------------------------------------
+       SAVE AUTH STATE
+       ---------------------------------------------------------- */
+
     authState.profile =
-        profile;
+        normalized;
 
     authState.role =
-        profile.role;
+        normalizeRole(
+            normalized.role
+        );
 
     authState.active =
         Boolean(
-            profile.active
+            normalized.active
         );
 
     authState.pendingApproval =
-        Boolean(
-            isRealAuthenticatedUser(
-                user
-            ) &&
-            !isAdminEmail(
-                user.email
-            ) &&
-            !authState.active
-        );
+        !isAdmin() &&
+        !authState.active;
 
-    return profile;
+    return normalized;
 }
 
+
 /* ============================================================
-   AUTH UI HELPERS
+   APPLY SESSION
    ============================================================ */
 
-function getAuthStatusElement() {
-    return (
-        document.getElementById(
-            "authStatus"
-        ) ||
-        document.getElementById(
-            "loginStatus"
-        ) ||
-        document.getElementById(
-            "signupStatus"
-        )
-    );
-}
-
-function setAuthStatus(
-    message,
-    isError = false
+async function applySession(
+    session,
+    reason = "session"
 ) {
-    const element =
-        getAuthStatusElement();
+    authState.session =
+        session || null;
 
-    if (!element) {
-        return;
+    authState.user =
+        session?.user || null;
+
+    authState.authenticated =
+        Boolean(
+            session?.user
+        );
+
+
+    /*
+     * Logged out.
+     */
+    if (!authState.user) {
+        authState.profile =
+            null;
+
+        authState.role =
+            "customer";
+
+        authState.active =
+            false;
+
+        authState.pendingApproval =
+            false;
+
+        try {
+            clearLocalSession();
+        } catch (error) {
+            console.warn(
+                "Could not clear local session:",
+                error
+            );
+        }
+
+        emitAuthChange(
+            reason
+        );
+
+        return getAuthState();
     }
 
-    element.textContent =
-        message || "";
 
-    element.classList.toggle(
-        "error",
-        Boolean(isError)
+    /*
+     * Save session locally.
+     */
+    try {
+        saveLocalSession(
+            session
+        );
+    } catch (error) {
+        console.warn(
+            "Could not save local session:",
+            error
+        );
+    }
+
+
+    /*
+     * Load profile and role.
+     */
+    await loadProfile(
+        authState.user
     );
 
-    element.classList.toggle(
-        "success",
-        !isError &&
-        Boolean(message)
+
+    /*
+     * Cloud status.
+     */
+    try {
+        updateCloudStatus({
+            authenticated:
+                true,
+
+            userId:
+                authState.user.id,
+
+            email:
+                authState.user.email ||
+                "",
+
+            role:
+                authState.role,
+
+            active:
+                authState.active
+        });
+    } catch (error) {
+        console.warn(
+            "Could not update cloud status:",
+            error
+        );
+    }
+
+
+    emitAuthChange(
+        reason
     );
+
+    return getAuthState();
 }
 
-function showAuthPage() {
-    const authPage =
-        document.getElementById(
-            "authPage"
-        );
-
-    const loginPanel =
-        document.getElementById(
-            "loginPanel"
-        );
-
-    const signupPanel =
-        document.getElementById(
-            "signupPanel"
-        );
-
-    if (authPage) {
-        authPage.hidden =
-            false;
-
-        authPage.style.display =
-            "";
-    }
-
-    if (loginPanel) {
-        loginPanel.hidden =
-            false;
-
-        loginPanel.style.display =
-            "";
-    }
-
-    if (signupPanel) {
-        signupPanel.hidden =
-            true;
-
-        signupPanel.style.display =
-            "none";
-    }
-
-    document.body.dataset.auth =
-        "logged-out";
-}
-
-function showSignupPage() {
-    const authPage =
-        document.getElementById(
-            "authPage"
-        );
-
-    const loginPanel =
-        document.getElementById(
-            "loginPanel"
-        );
-
-    const signupPanel =
-        document.getElementById(
-            "signupPanel"
-        );
-
-    if (authPage) {
-        authPage.hidden =
-            false;
-
-        authPage.style.display =
-            "";
-    }
-
-    if (loginPanel) {
-        loginPanel.hidden =
-            true;
-
-        loginPanel.style.display =
-            "none";
-    }
-
-    if (signupPanel) {
-        signupPanel.hidden =
-            false;
-
-        signupPanel.style.display =
-            "";
-    }
-
-    document.body.dataset.auth =
-        "signup";
-}
-
-function hideAuthPage() {
-    const authPage =
-        document.getElementById(
-            "authPage"
-        );
-
-    if (authPage) {
-        authPage.hidden =
-            true;
-
-        authPage.style.display =
-            "none";
-    }
-
-    document.body.dataset.auth =
-        "logged-in";
-}
-
-function showPendingApprovalPage() {
-    const approvalPage =
-        document.getElementById(
-            "approvalPage"
-        );
-
-    const authPage =
-        document.getElementById(
-            "authPage"
-        );
-
-    const mainContent =
-        document.getElementById(
-            "mainContent"
-        );
-
-    if (authPage) {
-        authPage.hidden =
-            true;
-
-        authPage.style.display =
-            "none";
-    }
-
-    if (mainContent) {
-        mainContent.hidden =
-            true;
-
-        mainContent.style.display =
-            "none";
-    }
-
-    if (approvalPage) {
-        approvalPage.hidden =
-            false;
-
-        approvalPage.style.display =
-            "";
-    }
-
-    document.body.dataset.auth =
-        "pending";
-}
-
-function hidePendingApprovalPage() {
-    const approvalPage =
-        document.getElementById(
-            "approvalPage"
-        );
-
-    if (approvalPage) {
-        approvalPage.hidden =
-            true;
-
-        approvalPage.style.display =
-            "none";
-    }
-}
 
 /* ============================================================
-   LOGIN
+   SIGN IN
    ============================================================ */
 
 export async function signIn(
@@ -805,8 +860,8 @@ export async function signIn(
     authState.loading =
         true;
 
-    setAuthStatus(
-        "Signing in..."
+    emitAuthChange(
+        "loginStarted"
     );
 
     try {
@@ -819,7 +874,9 @@ export async function signIn(
         } =
             await client.auth
                 .signInWithPassword({
-                    email: clean,
+                    email:
+                        clean,
+
                     password
                 });
 
@@ -827,71 +884,36 @@ export async function signIn(
             throw error;
         }
 
-        const session =
-            data?.session ||
-            null;
-
-        const user =
-            data?.user ||
-            session?.user ||
-            null;
-
-        if (!user) {
+        if (
+            !data?.session ||
+            !data?.user
+        ) {
             throw new Error(
-                "Login succeeded but no authenticated user was returned."
+                "Login succeeded but no session was returned."
             );
         }
 
-        authState.session =
-            session;
-
-        authState.user =
-            user;
-
-        authState.authenticated =
-            true;
-
-        await loadProfile(
-            user
+        await applySession(
+            data.session,
+            "login"
         );
 
-        saveLocalSession?.(
-            session
-        );
-
-        updateCloudStatus?.(
-            session
-        );
 
         /*
-         * Admin account is always active.
-         */
-        if (
-            isAdminEmail(
-                user.email
-            )
-        ) {
-            authState.role =
-                "admin";
-
-            authState.active =
-                true;
-
-            authState.pendingApproval =
-                false;
-        }
-
-        /*
-         * Log successful login.
+         * Activity logging must never break login.
          */
         try {
             await logActivity(
                 "login",
                 {
                     user_id:
-                        user.id,
+                        data.user.id,
+
                     email:
-                        user.email
+                        clean,
+
+                    role:
+                        authState.role
                 }
             );
         } catch (error) {
@@ -901,109 +923,70 @@ export async function signIn(
             );
         }
 
-        emitAuthChange(
-            "login"
-        );
 
         try {
-            window.dispatchEvent(
-                new CustomEvent(
-                    "auth:login",
-                    {
-                        detail: {
-                            user,
-                            session,
-                            profile:
-                                authState.profile,
-                            role:
-                                authState.role
-                        }
-                    }
-                )
+            await logWorkflowEvent(
+                "login",
+                {
+                    user_id:
+                        data.user.id,
+
+                    role:
+                        authState.role
+                }
             );
-        } catch {
-            // Ignore UI event failures.
+        } catch (error) {
+            console.warn(
+                "Login workflow event failed:",
+                error
+            );
         }
 
-        /*
-         * Pending accounts are allowed to authenticate but are
-         * not allowed into the actual workspace until approved.
-         */
-        if (
-            isPendingApproval()
-        ) {
-            showPendingApprovalPage();
-
-            setAuthStatus(
-                "Your account is waiting for admin approval."
-            );
-
-            return {
-                session,
-                user,
-                profile:
-                    authState.profile,
-                pendingApproval:
-                    true
-            };
-        }
-
-        hidePendingApprovalPage();
-        hideAuthPage();
-
-        setAuthStatus(
-            ""
-        );
 
         return {
-            session,
-            user,
+            success:
+                true,
+
+            user:
+                authState.user,
+
+            session:
+                authState.session,
+
             profile:
                 authState.profile,
+
+            role:
+                authState.role,
+
+            active:
+                authState.active,
+
             pendingApproval:
-                false
+                authState.pendingApproval
         };
     } catch (error) {
         console.error(
-            "Sign-in error:",
+            "Sign in failed:",
             error
         );
 
-        authState.session =
-            null;
-
-        authState.user =
-            null;
-
-        authState.authenticated =
-            false;
-
-        authState.profile =
-            null;
-
-        authState.role =
-            "customer";
-
-        authState.active =
-            false;
-
-        authState.pendingApproval =
-            false;
-
-        setAuthStatus(
+        throw new Error(
             getErrorMessage(
                 error,
-                "Unable to sign in."
-            ),
-            true
+                "Unable to sign in. Please check your details."
+            )
         );
-
-        throw error;
     } finally {
         authState.loading =
             false;
+
+        emitAuthChange(
+            "loginFinished"
+        );
     }
 }
+
 
 /* ============================================================
    SIGN UP
@@ -1013,17 +996,19 @@ export async function signUp(
     fullName,
     email,
     password,
-    passwordConfirm
+    passwordConfirm = password
 ) {
     const name =
-        String(
-            fullName || ""
-        ).trim();
+        cleanName(
+            fullName
+        );
 
     const clean =
-        cleanEmail(email);
+        cleanEmail(
+            email
+        );
 
-    if (name.length < 2) {
+    if (!name) {
         throw new Error(
             "Please enter your full name."
         );
@@ -1043,18 +1028,16 @@ export async function signUp(
 
     if (
         password.length <
-        8
+        6
     ) {
         throw new Error(
-            "Password must be at least 8 characters."
+            "Password must be at least 6 characters."
         );
     }
 
     if (
-        passwordConfirm !==
-        undefined &&
-        passwordConfirm !==
-        password
+        password !==
+        passwordConfirm
     ) {
         throw new Error(
             "Passwords do not match."
@@ -1064,29 +1047,84 @@ export async function signUp(
     authState.loading =
         true;
 
-    setAuthStatus(
-        "Creating your account..."
+    emitAuthChange(
+        "signupStarted"
     );
 
     try {
         const client =
             getClient();
 
+
         /*
-         * New public registrations are always customers and
-         * remain inactive until an administrator approves them.
+         * ALL normal signups start as:
+         *
+         * customer
+         * inactive
+         * pending approval
          */
+        const metadata = {
+            full_name:
+                name,
+
+            role:
+                "customer",
+
+            active:
+                false,
+
+            approval_status:
+                "pending"
+        };
+
+
         const {
             data,
             error
         } =
             await client.auth
                 .signUp({
-                    email: clean,
+                    email:
+                        clean,
+
                     password,
 
                     options: {
-                        data: {
+                        data:
+                            metadata
+                    }
+                });
+
+        if (error) {
+            throw error;
+        }
+
+        const user =
+            data?.user ||
+            null;
+
+        const session =
+            data?.session ||
+            null;
+
+
+        /*
+         * Explicit profile synchronization.
+         */
+        if (user) {
+            try {
+                await client
+                    .from(
+                        APP_CONFIG.tables.profiles
+                    )
+                    .upsert(
+                        {
+                            id:
+                                user.id,
+
+                            email:
+                                clean,
+
                             full_name:
                                 name,
 
@@ -1095,108 +1133,83 @@ export async function signUp(
 
                             active:
                                 false
+                        },
+                        {
+                            onConflict:
+                                "id"
                         }
-                    }
-                });
-
-        if (error) {
-            throw error;
+                    );
+            } catch (profileError) {
+                console.warn(
+                    "Signup profile creation failed:",
+                    profileError
+                );
+            }
         }
+
 
         /*
-         * If Supabase returns a session immediately, load it.
-         * If email confirmation is enabled, session may be null.
+         * If email confirmation is disabled,
+         * Supabase may provide a session immediately.
          */
-        if (
-            data?.session &&
-            data?.user
-        ) {
-            authState.session =
-                data.session;
-
-            authState.user =
-                data.user;
-
-            authState.authenticated =
-                true;
-
-            await loadProfile(
-                data.user
-            );
-
-            authState.role =
-                "customer";
-
-            authState.active =
-                false;
-
-            authState.pendingApproval =
-                true;
-
-            saveLocalSession?.(
-                data.session
-            );
-
-            emitAuthChange(
+        if (session) {
+            await applySession(
+                session,
                 "signup"
-            );
-
-            try {
-                window.dispatchEvent(
-                    new CustomEvent(
-                        "auth:signup",
-                        {
-                            detail: {
-                                user:
-                                    data.user,
-                                session:
-                                    data.session,
-                                profile:
-                                    authState.profile
-                            }
-                        }
-                    )
-                );
-            } catch {
-                // Ignore event failures.
-            }
-
-            showPendingApprovalPage();
-        } else {
-            /*
-             * Email-confirmation flow.
-             * Do not pretend the user is approved.
-             */
-            setAuthStatus(
-                "Account created. Please confirm your email, then wait for admin approval."
             );
         }
 
+
         return {
-            ...data,
+            success:
+                true,
+
+            user,
+
+            session,
+
+            requiresEmailConfirmation:
+                Boolean(
+                    user &&
+                    !session
+                ),
+
             pendingApproval:
-                true
+                true,
+
+            role:
+                "customer",
+
+            active:
+                false,
+
+            message:
+                session
+                    ? "Account created. Your account is waiting for administrator approval."
+                    : "Account created. Please confirm your email, then wait for administrator approval."
         };
     } catch (error) {
         console.error(
-            "Sign-up error:",
+            "Signup failed:",
             error
         );
 
-        setAuthStatus(
+        throw new Error(
             getErrorMessage(
                 error,
                 "Unable to create your account."
-            ),
-            true
+            )
         );
-
-        throw error;
     } finally {
         authState.loading =
             false;
+
+        emitAuthChange(
+            "signupFinished"
+        );
     }
 }
+
 
 /* ============================================================
    PASSWORD RESET
@@ -1214,27 +1227,68 @@ export async function requestPasswordReset(
         );
     }
 
-    const client =
-        getClient();
+    try {
+        const client =
+            getClient();
 
-    const {
-        error
-    } =
-        await client.auth
-            .resetPasswordForEmail(
-                clean,
+        const redirectTo =
+            APP_CONFIG?.passwordResetUrl ||
+            `${window.location.origin}${window.location.pathname}`;
+
+        const {
+            error
+        } =
+            await client.auth
+                .resetPasswordForEmail(
+                    clean,
+                    {
+                        redirectTo
+                    }
+                );
+
+        if (error) {
+            throw error;
+        }
+
+
+        try {
+            await logActivity(
+                "password_reset_requested",
                 {
-                    redirectTo:
-                        window.location.href
+                    email:
+                        clean
                 }
             );
+        } catch (error) {
+            console.warn(
+                "Password reset activity log failed:",
+                error
+            );
+        }
 
-    if (error) {
-        throw error;
+
+        return {
+            success:
+                true,
+
+            message:
+                "If an account exists for that email, password reset instructions have been sent."
+        };
+    } catch (error) {
+        console.error(
+            "Password reset request failed:",
+            error
+        );
+
+        throw new Error(
+            getErrorMessage(
+                error,
+                "Unable to send the password reset email."
+            )
+        );
     }
-
-    return true;
 }
+
 
 /* ============================================================
    UPDATE PASSWORD
@@ -1243,66 +1297,80 @@ export async function requestPasswordReset(
 export async function updatePassword(
     newPassword
 ) {
-    if (
-        !newPassword ||
-        newPassword.length <
-        8
-    ) {
+    if (!newPassword) {
         throw new Error(
-            "Password must be at least 8 characters."
+            "Please enter a new password."
         );
     }
 
-    const client =
-        getClient();
-
-    const {
-        data,
-        error
-    } =
-        await client.auth
-            .updateUser({
-                password:
-                    newPassword
-            });
-
-    if (error) {
-        throw error;
+    if (
+        newPassword.length <
+        6
+    ) {
+        throw new Error(
+            "Password must be at least 6 characters."
+        );
     }
 
-    /*
-     * Keep profile flag synchronized where supported.
-     */
-    if (
-        authState.user?.id
-    ) {
+    try {
+        const client =
+            getClient();
+
+        const {
+            data,
+            error
+        } =
+            await client.auth
+                .updateUser({
+                    password:
+                        newPassword
+                });
+
+        if (error) {
+            throw error;
+        }
+
+
         try {
-            await client
-                .from(
-                    APP_CONFIG
-                        .tables
-                        .profiles
-                )
-                .update({
-                    must_change_password:
-                        false,
-                    updated_at:
-                        new Date().toISOString()
-                })
-                .eq(
-                    "id",
-                    authState.user.id
-                );
+            await logActivity(
+                "password_updated",
+                {
+                    user_id:
+                        authState.user?.id ||
+                        null
+                }
+            );
         } catch (error) {
             console.warn(
-                "Could not clear must_change_password:",
+                "Password update activity log failed:",
                 error
             );
         }
-    }
 
-    return data;
+
+        return {
+            success:
+                true,
+
+            user:
+                data?.user ||
+                authState.user
+        };
+    } catch (error) {
+        console.error(
+            "Password update failed:",
+            error
+        );
+
+        throw new Error(
+            getErrorMessage(
+                error,
+                "Unable to update your password."
+            )
+        );
+    }
 }
+
 
 /* ============================================================
    UPDATE USER PROFILE
@@ -1311,522 +1379,594 @@ export async function updatePassword(
 export async function updateUserProfile(
     updates = {}
 ) {
-    const user =
-        authState.user ||
-        await getCurrentUser();
-
-    if (!user?.id) {
+    if (!authState.user?.id) {
         throw new Error(
-            "You must be signed in to update your profile."
+            "You must be logged in to update your profile."
         );
     }
 
     const client =
         getClient();
 
-    const payload = {};
+    const name =
+        String(
+            updates.full_name ||
+            updates.name ||
+            ""
+        ).trim();
 
-    if (
-        Object.prototype.hasOwnProperty.call(
-            updates,
-            "full_name"
+
+    /*
+     * Never permit this function to modify:
+     * - role
+     * - active
+     * - approval
+     *
+     * Those belong to admin controls.
+     */
+    const metadata = {
+        ...(
+            authState.user
+                .user_metadata ||
+            {}
         )
-    ) {
-        const name =
-            String(
-                updates.full_name ||
-                ""
-            ).trim();
+    };
 
-        if (name.length < 2) {
-            throw new Error(
-                "Name must contain at least 2 characters."
-            );
-        }
-
-        if (
-            name.length >
-            120
-        ) {
-            throw new Error(
-                "Name is too long."
-            );
-        }
-
-        payload.full_name =
+    if (name) {
+        metadata.full_name =
             name;
     }
 
+
     /*
-     * Email and role are deliberately not accepted here.
-     * Role is controlled by the administrator.
+     * Update Supabase Auth metadata.
      */
     const {
-        data,
-        error
+        data:
+            authData,
+        error:
+            authError
     } =
-        await client
-            .from(
-                APP_CONFIG
-                    .tables
-                    .profiles
-            )
-            .update({
-                ...payload,
-                updated_at:
-                    new Date().toISOString()
-            })
-            .eq(
-                "id",
-                user.id
-            )
-            .select("*")
-            .maybeSingle();
+        await client.auth
+            .updateUser({
+                data:
+                    metadata
+            });
 
-    if (error) {
-        throw error;
+    if (authError) {
+        throw authError;
     }
 
-    if (data) {
-        authState.profile =
-            normalizeProfile(
-                data,
-                user
-            );
-
-        authState.role =
-            authState.profile.role;
-
-        authState.active =
-            Boolean(
-                authState.profile.active
-            );
-
-        authState.pendingApproval =
-            Boolean(
-                !authState.active &&
-                !isAdmin()
-            );
-    }
 
     /*
-     * Synchronize full name to Auth metadata when possible.
+     * Update profiles table.
      */
-    if (
-        payload.full_name
-    ) {
+    if (name) {
         try {
-            await client.auth
-                .updateUser({
-                    data: {
+            const {
+                error:
+                    profileError
+            } =
+                await client
+                    .from(
+                        APP_CONFIG.tables.profiles
+                    )
+                    .update({
                         full_name:
-                            payload.full_name,
+                            name,
 
-                        role:
-                            authState.role
-                    }
-                });
+                        updated_at:
+                            new Date()
+                                .toISOString()
+                    })
+                    .eq(
+                        "id",
+                        authState.user.id
+                    );
+
+            if (profileError) {
+                console.warn(
+                    "Profile table update failed:",
+                    profileError
+                );
+            }
         } catch (error) {
             console.warn(
-                "Auth metadata profile update failed:",
+                "Profile table update failed:",
                 error
             );
         }
-
-        if (
-            authState.user
-        ) {
-            authState.user = {
-                ...authState.user,
-
-                user_metadata: {
-                    ...(
-                        authState.user
-                            .user_metadata ||
-                        {}
-                    ),
-
-                    full_name:
-                        payload.full_name
-                }
-            };
-        }
     }
 
-    emitAuthChange(
-        "profile_updated"
+
+    authState.user =
+        authData?.user ||
+        authState.user;
+
+
+    await loadProfile(
+        authState.user
     );
 
-    try {
-        window.dispatchEvent(
-            new CustomEvent(
-                "profileUpdated",
-                {
-                    detail: {
-                        profile:
-                            authState.profile,
-                        user:
-                            authState.user
-                    }
-                }
-            )
-        );
-    } catch {
-        // Ignore UI event failures.
-    }
 
-    return {
-        data:
-            data ||
-            authState.profile,
+    emitAuthChange(
+        "profileUpdated"
+    );
 
-        error:
-            null
-    };
+
+    return authState.profile;
 }
 
+
 /* ============================================================
-   UPDATE AVATAR
+   AVATAR UPDATE
+   ------------------------------------------------------------
+   Accepts either:
+   1. a complete URL/string
+   2. a File object
    ============================================================ */
 
 export async function updateAvatar(
-    avatarUrl
+    avatarInput
 ) {
-    const user =
-        authState.user ||
-        await getCurrentUser();
-
-    if (!user?.id) {
+    if (!authState.user?.id) {
         throw new Error(
-            "You must be signed in to update your profile picture."
-        );
-    }
-
-    const url =
-        String(
-            avatarUrl || ""
-        ).trim();
-
-    if (!url) {
-        throw new Error(
-            "A valid profile picture URL is required."
+            "You must be logged in to update your profile picture."
         );
     }
 
     const client =
         getClient();
 
-    const {
-        data,
-        error
-    } =
+    let avatarUrl = null;
+
+
+    /* ----------------------------------------------------------
+       FILE UPLOAD
+       ---------------------------------------------------------- */
+
+    if (
+        avatarInput instanceof File ||
+        (
+            avatarInput &&
+            typeof avatarInput ===
+                "object" &&
+            avatarInput.name &&
+            avatarInput.size !== undefined
+        )
+    ) {
+        const file =
+            avatarInput;
+
+        if (
+            !String(
+                file.type || ""
+            ).startsWith(
+                "image/"
+            )
+        ) {
+            throw new Error(
+                "Please choose an image file."
+            );
+        }
+
+        if (
+            Number(file.size || 0) >
+            5 * 1024 * 1024
+        ) {
+            throw new Error(
+                "Profile picture must be 5 MB or smaller."
+            );
+        }
+
+        const bucket =
+            APP_CONFIG?.buckets
+                ?.avatars ||
+            APP_CONFIG?.buckets
+                ?.profilePictures ||
+            "avatars";
+
+
+        const extension =
+            file.name?.includes(".")
+                ? file.name
+                    .split(".")
+                    .pop()
+                    .toLowerCase()
+                : "jpg";
+
+
+        const path =
+            `${authState.user.id}/profile-${Date.now()}.${extension}`;
+
+
+        const {
+            error:
+                uploadError
+        } =
+            await client.storage
+                .from(bucket)
+                .upload(
+                    path,
+                    file,
+                    {
+                        upsert:
+                            true,
+
+                        contentType:
+                            file.type ||
+                            "image/jpeg"
+                    }
+                );
+
+
+        if (uploadError) {
+            throw uploadError;
+        }
+
+
+        /*
+         * Try public URL.
+         */
+        try {
+            const {
+                data
+            } =
+                client.storage
+                    .from(bucket)
+                    .getPublicUrl(
+                        path
+                    );
+
+            avatarUrl =
+                data?.publicUrl ||
+                null;
+        } catch {
+            avatarUrl =
+                null;
+        }
+
+
+        /*
+         * Private bucket fallback.
+         */
+        if (!avatarUrl) {
+            try {
+                const {
+                    data
+                } =
+                    await client
+                        .storage
+                        .from(bucket)
+                        .createSignedUrl(
+                            path,
+                            60 * 60 * 24 * 365
+                        );
+
+                avatarUrl =
+                    data?.signedUrl ||
+                    null;
+            } catch {
+                avatarUrl =
+                    null;
+            }
+        }
+
+
+        if (!avatarUrl) {
+            throw new Error(
+                "Unable to create profile picture URL."
+            );
+        }
+    }
+
+
+    /* ----------------------------------------------------------
+       EXISTING URL
+       ---------------------------------------------------------- */
+
+    else {
+        avatarUrl =
+            String(
+                avatarInput ||
+                ""
+            ).trim();
+
+        if (!avatarUrl) {
+            throw new Error(
+                "A valid profile picture URL is required."
+            );
+        }
+    }
+
+
+    /* ----------------------------------------------------------
+       DATABASE
+       ---------------------------------------------------------- */
+
+    try {
         await client
             .from(
-                APP_CONFIG
-                    .tables
-                    .profiles
+                APP_CONFIG.tables.profiles
             )
             .update({
                 avatar_url:
-                    url,
+                    avatarUrl,
 
                 updated_at:
-                    new Date().toISOString()
+                    new Date()
+                        .toISOString()
             })
             .eq(
                 "id",
-                user.id
-            )
-            .select("*")
-            .maybeSingle();
-
-    if (error) {
-        throw error;
-    }
-
-    if (data) {
-        authState.profile =
-            normalizeProfile(
-                data,
-                user
+                authState.user.id
             );
-    } else if (
-        authState.profile
-    ) {
-        authState.profile = {
-            ...authState.profile,
-            avatar_url:
-                url
-        };
-    }
-
-    try {
-        await client.auth
-            .updateUser({
-                data: {
-                    avatar_url:
-                        url
-                }
-            });
     } catch (error) {
         console.warn(
-            "Auth avatar metadata update failed:",
+            "Profile avatar database update failed:",
             error
         );
     }
 
-    emitAuthChange(
-        "avatar_updated"
+
+    /* ----------------------------------------------------------
+       AUTH METADATA
+       ---------------------------------------------------------- */
+
+    try {
+        const metadata = {
+            ...(
+                authState.user
+                    .user_metadata ||
+                {}
+            ),
+
+            avatar_url:
+                avatarUrl
+        };
+
+        const {
+            data,
+            error
+        } =
+            await client.auth
+                .updateUser({
+                    data:
+                        metadata
+                });
+
+        if (!error) {
+            authState.user =
+                data?.user ||
+                authState.user;
+        }
+    } catch (error) {
+        console.warn(
+            "Auth avatar update failed:",
+            error
+        );
+    }
+
+
+    await loadProfile(
+        authState.user
     );
 
-    return {
-        data:
-            authState.profile,
 
-        avatar_url:
-            url,
+    emitAuthChange(
+        "avatarUpdated"
+    );
 
-        url,
 
-        error:
-            null
-    };
+    return avatarUrl;
 }
 
+
 /* ============================================================
-   SIGN OUT
+   LOGOUT
    ============================================================ */
 
 export async function signOut() {
-    const currentUser =
-        authState.user;
+    const userId =
+        authState.user?.id ||
+        null;
 
-    try {
-        if (
-            currentUser?.id
-        ) {
-            try {
-                await logActivity(
-                    "logout",
-                    {
-                        user_id:
-                            currentUser.id,
-                        email:
-                            currentUser.email
-                    }
-                );
-            } catch (error) {
-                console.warn(
-                    "Logout activity log failed:",
-                    error
-                );
-            }
-        }
 
-        const client =
-            getClient();
+    /*
+     * Log before clearing authentication state.
+     */
+    if (userId) {
+        try {
+            await logActivity(
+                "logout",
+                {
+                    user_id:
+                        userId,
 
-        if (client) {
-            const {
+                    email:
+                        authState.user?.email ||
+                        "",
+
+                    role:
+                        authState.role
+                }
+            );
+        } catch (error) {
+            console.warn(
+                "Logout activity log failed:",
                 error
-            } =
-                await client.auth
-                    .signOut();
-
-            if (error) {
-                throw error;
-            }
+            );
         }
-    } catch (error) {
-        console.error(
-            "Sign-out error:",
-            error
-        );
-    } finally {
-        clearLocalSession?.();
 
-        authState.user =
-            null;
-
-        authState.session =
-            null;
-
-        authState.profile =
-            null;
-
-        authState.role =
-            "customer";
-
-        authState.active =
-            false;
-
-        authState.pendingApproval =
-            false;
-
-        authState.authenticated =
-            false;
-
-        hidePendingApprovalPage();
-
-        showAuthPage();
-
-        updateCloudStatus?.(
-            null
-        );
-
-        emitAuthChange(
-            "logout"
-        );
 
         try {
-            window.dispatchEvent(
-                new CustomEvent(
-                    "auth:logout"
-                )
+            await logWorkflowEvent(
+                "logout",
+                {
+                    user_id:
+                        userId,
+
+                    role:
+                        authState.role
+                }
             );
-        } catch {
-            // Ignore event failures.
+        } catch (error) {
+            console.warn(
+                "Logout workflow event failed:",
+                error
+            );
         }
     }
 
-    return true;
+
+    /*
+     * Supabase sign out.
+     *
+     * Failure here must not leave the UI looking logged in.
+     */
+    try {
+        const client =
+            getClient();
+
+        const {
+            error
+        } =
+            await client.auth
+                .signOut();
+
+        if (error) {
+            console.warn(
+                "Supabase signout error:",
+                error
+            );
+        }
+    } catch (error) {
+        console.warn(
+            "Supabase signout failed:",
+            error
+        );
+    }
+
+
+    /* ----------------------------------------------------------
+       CLEAR LOCAL AUTH STATE
+       ---------------------------------------------------------- */
+
+    authState.session =
+        null;
+
+    authState.user =
+        null;
+
+    authState.profile =
+        null;
+
+    authState.role =
+        "customer";
+
+    authState.active =
+        false;
+
+    authState.pendingApproval =
+        false;
+
+    authState.authenticated =
+        false;
+
+
+    try {
+        clearLocalSession();
+    } catch (error) {
+        console.warn(
+            "Could not clear local session:",
+            error
+        );
+    }
+
+
+    try {
+        updateCloudStatus({
+            authenticated:
+                false,
+
+            userId:
+                null,
+
+            email:
+                "",
+
+            role:
+                "customer",
+
+            active:
+                false
+        });
+    } catch (error) {
+        console.warn(
+            "Could not clear cloud status:",
+            error
+        );
+    }
+
+
+    emitAuthChange(
+        "logout"
+    );
+
+
+    return {
+        success:
+            true
+    };
 }
+
 
 /* ============================================================
    SESSION STARTUP
    ============================================================ */
 
 export async function loadSessionOnStartup() {
+    if (
+        authState.loading
+    ) {
+        return getAuthState();
+    }
+
     authState.loading =
         true;
 
+    emitAuthChange(
+        "startupStarted"
+    );
+
     try {
+        const client =
+            getClient();
+
+        const {
+            data,
+            error
+        } =
+            await client.auth
+                .getSession();
+
+        if (error) {
+            throw error;
+        }
+
         const session =
-            await getCurrentSession();
+            data?.session ||
+            null;
 
-        if (
-            !session?.user
-        ) {
-            authState.session =
-                null;
-
-            authState.user =
-                null;
-
-            authState.authenticated =
-                false;
-
-            authState.profile =
-                null;
-
-            authState.role =
-                "customer";
-
-            authState.active =
-                false;
-
-            authState.pendingApproval =
-                false;
-
-            showAuthPage();
-
-            updateCloudStatus?.(
-                null
-            );
-
-            return null;
-        }
-
-        authState.session =
-            session;
-
-        authState.user =
-            session.user;
-
-        authState.authenticated =
-            true;
-
-        await loadProfile(
-            session.user
-        );
-
-        /*
-         * Protected administrator always gets access.
-         */
-        if (
-            isAdminEmail(
-                session.user.email
-            )
-        ) {
-            authState.role =
-                "admin";
-
-            authState.active =
-                true;
-
-            authState.pendingApproval =
-                false;
-
-            if (
-                authState.profile
-            ) {
-                authState.profile =
-                    {
-                        ...authState.profile,
-                        role:
-                            "admin",
-                        active:
-                            true
-                    };
-            }
-        }
-
-        saveLocalSession?.(
-            session
-        );
-
-        updateCloudStatus?.(
-            session
-        );
-
-        if (
-            isPendingApproval()
-        ) {
-            showPendingApprovalPage();
-        } else {
-            hidePendingApprovalPage();
-            hideAuthPage();
-        }
-
-        emitAuthChange(
+        await applySession(
+            session,
             "startup"
         );
 
-        try {
-            window.dispatchEvent(
-                new CustomEvent(
-                    "auth:session",
-                    {
-                        detail: {
-                            session,
-                            user:
-                                session.user,
-                            profile:
-                                authState.profile,
-                            role:
-                                authState.role
-                        }
-                    }
-                )
-            );
-        } catch {
-            // Ignore event failures.
-        }
-
-        return session;
+        return getAuthState();
     } catch (error) {
-        console.warn(
-            "Session startup failed:",
+        console.error(
+            "Could not load authentication session:",
             error
         );
 
@@ -1835,9 +1975,6 @@ export async function loadSessionOnStartup() {
 
         authState.user =
             null;
-
-        authState.authenticated =
-            false;
 
         authState.profile =
             null;
@@ -1851,196 +1988,161 @@ export async function loadSessionOnStartup() {
         authState.pendingApproval =
             false;
 
-        showAuthPage();
+        authState.authenticated =
+            false;
 
-        updateCloudStatus?.(
-            null
-        );
-
-        return null;
+        return getAuthState();
     } finally {
         authState.loading =
             false;
+
+        authState.initialized =
+            true;
+
+        emitAuthChange(
+            "startupFinished"
+        );
     }
 }
 
+
 /* ============================================================
-   AUTH STATE LISTENER
+   SUPABASE AUTH LISTENER
    ============================================================ */
 
-function bindSupabaseAuthListener() {
-    const client =
-        getSupabase?.() ||
-        supabase;
+let authSubscription =
+    null;
 
-    if (
-        !client ||
-        !client.auth
-    ) {
-        return;
+
+function setupSupabaseAuthListener() {
+    if (authSubscription) {
+        return authSubscription;
     }
 
-    client.auth.onAuthStateChange(
-        async (
-            event,
-            session
-        ) => {
-            /*
-             * Supabase may emit INITIAL_SESSION immediately.
-             */
-            if (
-                session?.user
-            ) {
-                authState.session =
-                    session;
+    try {
+        const client =
+            getClient();
 
-                authState.user =
-                    session.user;
+        const {
+            data
+        } =
+            client.auth
+                .onAuthStateChange(
+                    (
+                        event,
+                        session
+                    ) => {
 
-                authState.authenticated =
-                    true;
+                        /*
+                         * INITIAL_SESSION is already handled by
+                         * loadSessionOnStartup().
+                         */
+                        if (
+                            event ===
+                            "INITIAL_SESSION"
+                        ) {
+                            return;
+                        }
 
-                /*
-                 * Avoid unnecessary recursive work during token
-                 * refreshes, but always make sure a profile exists.
-                 */
-                if (
-                    event ===
-                    "SIGNED_IN" ||
-                    event ===
-                    "INITIAL_SESSION" ||
-                    !authState.profile
-                ) {
-                    try {
-                        await loadProfile(
-                            session.user
-                        );
-                    } catch (error) {
-                        console.warn(
-                            "Auth listener profile load failed:",
-                            error
-                        );
-                    }
-                }
 
-                if (
-                    isAdminEmail(
-                        session.user.email
-                    )
-                ) {
-                    authState.role =
-                        "admin";
+                        if (
+                            event ===
+                                "SIGNED_IN" ||
+                            event ===
+                                "TOKEN_REFRESHED" ||
+                            event ===
+                                "USER_UPDATED"
+                        ) {
 
-                    authState.active =
-                        true;
+                            /*
+                             * Defer profile query so that Supabase
+                             * authentication locks are not blocked.
+                             */
+                            setTimeout(
+                                async () => {
+                                    try {
+                                        await applySession(
+                                            session,
 
-                    authState.pendingApproval =
-                        false;
-                }
+                                            event
+                                                .toLowerCase()
+                                        );
+                                    } catch (error) {
+                                        console.error(
+                                            "Auth state update failed:",
+                                            error
+                                        );
+                                    }
+                                },
+                                0
+                            );
 
-                saveLocalSession?.(
-                    session
-                );
+                            return;
+                        }
 
-                updateCloudStatus?.(
-                    session
-                );
 
-                if (
-                    isPendingApproval()
-                ) {
-                    showPendingApprovalPage();
-                } else {
-                    hidePendingApprovalPage();
-                    hideAuthPage();
-                }
+                        if (
+                            event ===
+                            "SIGNED_OUT"
+                        ) {
+                            authState.session =
+                                null;
 
-                emitAuthChange(
-                    event.toLowerCase()
-                );
+                            authState.user =
+                                null;
 
-                try {
-                    window.dispatchEvent(
-                        new CustomEvent(
-                            "auth:session",
-                            {
-                                detail: {
-                                    event,
-                                    session,
-                                    user:
-                                        session.user,
-                                    profile:
-                                        authState.profile,
-                                    role:
-                                        authState.role
-                                }
+                            authState.profile =
+                                null;
+
+                            authState.role =
+                                "customer";
+
+                            authState.active =
+                                false;
+
+                            authState.pendingApproval =
+                                false;
+
+                            authState.authenticated =
+                                false;
+
+
+                            try {
+                                clearLocalSession();
+                            } catch (error) {
+                                console.warn(
+                                    "Could not clear local session:",
+                                    error
+                                );
                             }
-                        )
-                    );
-                } catch {
-                    // Ignore event failures.
-                }
 
-                return;
-            }
 
-            /*
-             * No authenticated session.
-             */
-            if (
-                event ===
-                "SIGNED_OUT"
-            ) {
-                authState.session =
-                    null;
-
-                authState.user =
-                    null;
-
-                authState.authenticated =
-                    false;
-
-                authState.profile =
-                    null;
-
-                authState.role =
-                    "customer";
-
-                authState.active =
-                    false;
-
-                authState.pendingApproval =
-                    false;
-
-                clearLocalSession?.();
-
-                showAuthPage();
-                hidePendingApprovalPage();
-
-                updateCloudStatus?.(
-                    null
+                            emitAuthChange(
+                                "supabaseSignedOut"
+                            );
+                        }
+                    }
                 );
 
-                emitAuthChange(
-                    "signed_out"
-                );
 
-                try {
-                    window.dispatchEvent(
-                        new CustomEvent(
-                            "auth:logout"
-                        )
-                    );
-                } catch {
-                    // Ignore event failures.
-                }
-            }
-        }
-    );
+        authSubscription =
+            data?.subscription ||
+            null;
+
+        return authSubscription;
+    } catch (error) {
+        console.error(
+            "Could not initialize Supabase auth listener:",
+            error
+        );
+
+        return null;
+    }
 }
 
+
 /* ============================================================
-   INITIALIZATION
+   INITIALIZE AUTH
    ============================================================ */
 
 export async function initializeAuth() {
@@ -2050,342 +2152,41 @@ export async function initializeAuth() {
         return getAuthState();
     }
 
-    authState.initialized =
-        true;
+    setupSupabaseAuthListener();
 
-    bindSupabaseAuthListener();
-
-    /*
-     * Bind login form.
-     */
-    const loginForm =
-        document.getElementById(
-            "loginForm"
-        );
-
-    if (
-        loginForm &&
-        !loginForm.dataset.authBound
-    ) {
-        loginForm.dataset.authBound =
-            "true";
-
-        loginForm.addEventListener(
-            "submit",
-            async event => {
-                event.preventDefault();
-
-                const email =
-                    document.getElementById(
-                        "loginEmail"
-                    )?.value || "";
-
-                const password =
-                    document.getElementById(
-                        "loginPassword"
-                    )?.value || "";
-
-                const button =
-                    document.getElementById(
-                        "signInBtn"
-                    );
-
-                if (button) {
-                    button.disabled =
-                        true;
-                }
-
-                try {
-                    await signIn(
-                        email,
-                        password
-                    );
-                } catch {
-                    // Error already displayed.
-                } finally {
-                    if (button) {
-                        button.disabled =
-                            false;
-                    }
-                }
-            }
-        );
-    }
-
-    /*
-     * Bind signup form.
-     */
-    const signupForm =
-        document.getElementById(
-            "signupForm"
-        );
-
-    if (
-        signupForm &&
-        !signupForm.dataset.authBound
-    ) {
-        signupForm.dataset.authBound =
-            "true";
-
-        signupForm.addEventListener(
-            "submit",
-            async event => {
-                event.preventDefault();
-
-                const name =
-                    document.getElementById(
-                        "signupName"
-                    )?.value || "";
-
-                const email =
-                    document.getElementById(
-                        "signupEmail"
-                    )?.value || "";
-
-                const password =
-                    document.getElementById(
-                        "signupPassword"
-                    )?.value || "";
-
-                const confirm =
-                    document.getElementById(
-                        "signupPasswordConfirm"
-                    )?.value ||
-                    password;
-
-                const button =
-                    document.getElementById(
-                        "signUpBtn"
-                    );
-
-                if (button) {
-                    button.disabled =
-                        true;
-                }
-
-                try {
-                    await signUp(
-                        name,
-                        email,
-                        password,
-                        confirm
-                    );
-                } catch {
-                    // Error already displayed.
-                } finally {
-                    if (button) {
-                        button.disabled =
-                            false;
-                    }
-                }
-            }
-        );
-    }
-
-    /*
-     * Login/signup switching.
-     */
-    const showSignupButton =
-        document.getElementById(
-            "showSignupButton"
-        );
-
-    if (
-        showSignupButton &&
-        !showSignupButton.dataset.authBound
-    ) {
-        showSignupButton.dataset.authBound =
-            "true";
-
-        showSignupButton.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
-                showSignupPage();
-            }
-        );
-    }
-
-    const showLoginButton =
-        document.getElementById(
-            "showLoginButton"
-        );
-
-    if (
-        showLoginButton &&
-        !showLoginButton.dataset.authBound
-    ) {
-        showLoginButton.dataset.authBound =
-            "true";
-
-        showLoginButton.addEventListener(
-            "click",
-            event => {
-                event.preventDefault();
-                showAuthPage();
-            }
-        );
-    }
-
-    /*
-     * Forgot password.
-     */
-    const forgotButton =
-        document.getElementById(
-            "forgotPasswordButton"
-        );
-
-    if (
-        forgotButton &&
-        !forgotButton.dataset.authBound
-    ) {
-        forgotButton.dataset.authBound =
-            "true";
-
-        forgotButton.addEventListener(
-            "click",
-            async event => {
-                event.preventDefault();
-
-                const email =
-                    document.getElementById(
-                        "loginEmail"
-                    )?.value || "";
-
-                if (!email.trim()) {
-                    setAuthStatus(
-                        "Enter your email address first.",
-                        true
-                    );
-
-                    document
-                        .getElementById(
-                            "loginEmail"
-                        )
-                        ?.focus();
-
-                    return;
-                }
-
-                try {
-                    forgotButton.disabled =
-                        true;
-
-                    setAuthStatus(
-                        "Sending password reset instructions..."
-                    );
-
-                    await requestPasswordReset(
-                        email
-                    );
-
-                    setAuthStatus(
-                        "Password reset instructions have been sent."
-                    );
-                } catch (error) {
-                    setAuthStatus(
-                        getErrorMessage(
-                            error,
-                            "Unable to send password reset instructions."
-                        ),
-                        true
-                    );
-                } finally {
-                    forgotButton.disabled =
-                        false;
-                }
-            }
-        );
-    }
-
-    /*
-     * Logout button.
-     */
-    const logoutButton =
-        document.getElementById(
-            "logoutBtn"
-        );
-
-    if (
-        logoutButton &&
-        !logoutButton.dataset.authBound
-    ) {
-        logoutButton.dataset.authBound =
-            "true";
-
-        logoutButton.addEventListener(
-            "click",
-            async event => {
-                event.preventDefault();
-                await signOut();
-            }
-        );
-    }
-
-    /*
-     * Load any existing session.
-     */
-    await loadSessionOnStartup();
-
-    return getAuthState();
+    return await loadSessionOnStartup();
 }
 
+
 /* ============================================================
-   REFRESH PROFILE STATUS
+   REFRESH PROFILE / APPROVAL STATUS
    ============================================================ */
 
 export async function refreshProfileStatus() {
-    const user =
-        authState.user ||
-        await getCurrentUser();
-
-    if (!user?.id) {
+    if (!authState.user?.id) {
         return null;
     }
 
     try {
-        const profile =
-            await loadProfile(
-                user
-            );
-
-        if (
-            isAdminEmail(
-                user.email
-            )
-        ) {
-            authState.role =
-                "admin";
-
-            authState.active =
-                true;
-
-            authState.pendingApproval =
-                false;
-        }
-
-        if (
-            isPendingApproval()
-        ) {
-            showPendingApprovalPage();
-        } else {
-            hidePendingApprovalPage();
-        }
-
-        emitAuthChange(
-            "profile_status_refreshed"
+        await loadProfile(
+            authState.user
         );
 
-        return profile;
+        emitAuthChange(
+            "profileStatusRefreshed"
+        );
+
+        return authState.profile;
     } catch (error) {
-        console.warn(
-            "Profile status refresh failed:",
+        console.error(
+            "Could not refresh profile status:",
             error
         );
 
         return authState.profile;
     }
 }
+
 
 /* ============================================================
    ROLE HELPERS
@@ -2396,41 +2197,53 @@ export function hasRole(
 ) {
     return (
         normalizeRole(
-            getRole()
-        ) ===
-        normalizeRole(
             role
-        )
+        ) ===
+        getRole()
     );
 }
+
 
 export function hasAnyRole(
     roles = []
 ) {
-    const current =
-        normalizeRole(
-            getRole()
-        );
+    if (
+        !Array.isArray(
+            roles
+        )
+    ) {
+        return false;
+    }
+
+    const currentRole =
+        getRole();
 
     return roles.some(
         role =>
             normalizeRole(
                 role
-            ) === current
+            ) ===
+            currentRole
     );
 }
+
 
 export function isRoleAtLeastAdmin() {
     return isAdmin();
 }
 
+
 export function isPrivilegedUser() {
     return (
         isAdmin() ||
-        isStaff() ||
-        isReviewer()
+        isStaff()
     );
 }
+
+
+/* ============================================================
+   MANAGEMENT PERMISSIONS
+   ============================================================ */
 
 export function canManageUsers() {
     return (
@@ -2439,6 +2252,7 @@ export function canManageUsers() {
     );
 }
 
+
 export function canManageTasks() {
     return (
         isAdmin() ||
@@ -2446,17 +2260,55 @@ export function canManageTasks() {
     );
 }
 
+
 export function canManagePayments() {
-    return (
+    return isAdmin();
+}
+
+
+/* ============================================================
+   WORKSPACE ACCESS
+   ============================================================ */
+
+export function canAccessWorkspace() {
+    if (!isLoggedIn()) {
+        return false;
+    }
+
+    /*
+     * Admin/staff bypass approval.
+     */
+    if (
         isAdmin() ||
         isStaff()
+    ) {
+        return true;
+    }
+
+    /*
+     * Normal workers/reviewers/customers need approval.
+     */
+    return Boolean(
+        authState.active
     );
 }
 
-export function canAccessWorkspace() {
-    if (
-        !isLoggedIn()
-    ) {
+
+/* ============================================================
+   ADMIN CENTER ACCESS
+   ============================================================ */
+
+export function canAccessAdminCenter() {
+    return isAdmin();
+}
+
+
+/* ============================================================
+   CUSTOMER MEDIA UPLOAD
+   ============================================================ */
+
+export function canUploadCustomerMedia() {
+    if (!isLoggedIn()) {
         return false;
     }
 
@@ -2467,51 +2319,27 @@ export function canAccessWorkspace() {
         return true;
     }
 
-    return isActiveUser();
-}
-
-export function canAccessAdminCenter() {
     return (
-        isAdmin() ||
-        isStaff()
+        getRole() ===
+        "customer"
     );
 }
 
-export function canUploadCustomerMedia() {
-    if (
-        !isLoggedIn()
-    ) {
-        return false;
-    }
 
-    /*
-     * Customers can upload.
-     * Staff/admin also have full access.
-     * Coworkers/reviewers do not get customer upload controls.
-     */
-    return (
-        hasRole("customer") ||
-        isAdmin() ||
-        isStaff()
-    );
-}
+/* ============================================================
+   MANUAL ANNOTATION ACCESS
+   ============================================================ */
 
 export function canUseManualAnnotationTools() {
-    if (
-        !isLoggedIn() ||
-        !isActiveUser()
-    ) {
+    if (!isLoggedIn()) {
         return false;
     }
 
     /*
-     * Coworkers must use the automatically assigned workflow.
-     * They should not be given the manual annotation-type
-     * selector intended for unrestricted users.
+     * Coworkers must use their assigned workflow.
+     * They must not receive the customer manual selector.
      */
-    if (
-        isCoworker()
-    ) {
+    if (isCoworker()) {
         return false;
     }
 
@@ -2519,132 +2347,188 @@ export function canUseManualAnnotationTools() {
         isAdmin() ||
         isStaff() ||
         isReviewer() ||
-        hasRole("customer")
+        getRole() ===
+            "customer"
     );
 }
 
+
 /* ============================================================
-   PUBLIC USER
+   SAFE PUBLIC USER
    ============================================================ */
 
 export function getPublicUser() {
-    const user =
-        authState.user;
-
-    const profile =
-        authState.profile;
-
-    if (!user) {
+    if (!authState.user) {
         return null;
     }
 
     return {
         id:
-            user.id,
+            authState.user.id ||
+            null,
 
         email:
-            user.email || "",
+            authState.user.email ||
+            "",
 
         full_name:
-            profile?.full_name ||
-            user
-                ?.user_metadata
-                ?.full_name ||
-            user
-                ?.user_metadata
-                ?.name ||
-            cleanName(
-                "",
-                user.email
-            ),
+            getUserName(),
 
         role:
-            normalizeRole(
-                authState.role ||
-                profile?.role ||
-                "customer"
-            ),
+            getRole(),
 
         active:
             Boolean(
                 authState.active
             ),
 
-        avatar_url:
-            profile?.avatar_url ||
-            user
-                ?.user_metadata
-                ?.avatar_url ||
-            null
+        pendingApproval:
+            Boolean(
+                authState.pendingApproval
+            )
     };
 }
+
+
+/* ============================================================
+   DEFAULT EXPORT
+   ============================================================ */
+
+const authAPI = {
+    isLoggedIn,
+
+    getAuthState,
+
+    getUser,
+
+    getCurrentUser,
+
+    getSession,
+
+    getProfile,
+
+    getCurrentProfile,
+
+    getRole,
+
+    getUserId,
+
+    getUserEmail,
+
+    getUserName,
+
+    getPublicUser,
+
+    isAdmin,
+
+    isStaff,
+
+    isReviewer,
+
+    isCoworker,
+
+    canAnnotate,
+
+    isActiveUser,
+
+    isPendingApproval,
+
+    signIn,
+
+    signUp,
+
+    signOut,
+
+    requestPasswordReset,
+
+    updatePassword,
+
+    updateUserProfile,
+
+    updateAvatar,
+
+    loadProfile,
+
+    refreshProfileStatus,
+
+    loadSessionOnStartup,
+
+    initializeAuth,
+
+    hasRole,
+
+    hasAnyRole,
+
+    isRoleAtLeastAdmin,
+
+    isPrivilegedUser,
+
+    canAccessWorkspace,
+
+    canAccessAdminCenter,
+
+    canUploadCustomerMedia,
+
+    canUseManualAnnotationTools,
+
+    canManageUsers,
+
+    canManageTasks,
+
+    canManagePayments,
+
+    onAuthStateChange
+};
+
+
+export default authAPI;
+
 
 /* ============================================================
    WINDOW COMPATIBILITY
    ============================================================ */
 
-window.auth = {
-    state:
-        authState,
+window.auth = authAPI;
 
-    getState:
-        getAuthState,
+window.authState =
+    authState;
 
-    getUser,
-    getSession,
-    getProfile,
+window.getCurrentUser =
+    getCurrentUser;
 
-    /*
-     * Compatibility alias.
-     */
-    getCurrentProfile,
+window.getCurrentProfile =
+    getCurrentProfile;
 
-    getRole,
-    getUserId,
-    getUserEmail,
-    getUserName,
+window.getUser =
+    getUser;
 
-    isLoggedIn,
-    isAdmin,
-    isStaff,
-    isReviewer,
-    isCoworker,
+window.getProfile =
+    getProfile;
 
-    canAnnotate,
-    isActiveUser,
-    isPendingApproval,
+window.getRole =
+    getRole;
 
-    signIn,
-    signUp,
-    signOut,
+window.isLoggedIn =
+    isLoggedIn;
 
-    requestPasswordReset,
-    updatePassword,
+window.isAdmin =
+    isAdmin;
 
-    updateUserProfile,
-    updateAvatar,
+window.isStaff =
+    isStaff;
 
-    loadProfile,
-    refreshProfileStatus,
-    loadSessionOnStartup,
-    initializeAuth,
+window.isReviewer =
+    isReviewer;
 
-    hasRole,
-    hasAnyRole,
+window.isCoworker =
+    isCoworker;
 
-    canAccessWorkspace,
-    canAccessAdminCenter,
-    canUploadCustomerMedia,
-    canUseManualAnnotationTools,
+window.canAnnotate =
+    canAnnotate;
 
-    canManageUsers,
-    canManageTasks,
-    canManagePayments,
+window.isPendingApproval =
+    isPendingApproval;
 
-    getPublicUser,
-
-    onAuthStateChange
-};
 
 /* ============================================================
    AUTO INITIALIZATION
@@ -2672,7 +2556,8 @@ if (
                     );
             },
             {
-                once: true
+                once:
+                    true
             }
         );
     } else {
@@ -2688,92 +2573,10 @@ if (
     }
 }
 
+
 /* ============================================================
-   EXPORTS
+   MODULE LOADED
    ============================================================ */
-
-export default {
-    isLoggedIn,
-
-    getAuthState,
-
-    getUser,
-
-    getSession,
-
-    getProfile,
-
-    /*
-     * Compatibility alias required by annotation.js.
-     */
-    getCurrentProfile,
-
-    getRole,
-
-    getUserId,
-
-    getUserEmail,
-
-    getUserName,
-
-    getPublicUser,
-
-    isAdmin,
-
-    isStaff,
-
-    isReviewer,
-
-    isCoworker,
-
-    canAnnotate,
-
-    isActiveUser,
-
-    isPendingApproval,
-
-    signIn,
-
-    signUp,
-
-    signOut,
-
-    requestPasswordReset,
-
-    updatePassword,
-
-    updateUserProfile,
-
-    updateAvatar,
-
-    loadProfile,
-
-    refreshProfileStatus,
-
-    loadSessionOnStartup,
-
-    initializeAuth,
-
-    hasRole,
-
-    hasAnyRole,
-
-    canAccessWorkspace,
-
-    canAccessAdminCenter,
-
-    canUploadCustomerMedia,
-
-    canUseManualAnnotationTools,
-
-    canManageUsers,
-
-    canManageTasks,
-
-    canManagePayments,
-
-    onAuthStateChange
-};
 
 console.log(
     "Auth module loaded."
