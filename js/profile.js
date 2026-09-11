@@ -1,2038 +1,1780 @@
 /* ============================================================
    PROFILE.JS
-   ANNOTATION AI
-
+   ------------------------------------------------------------
    Handles:
    - Profile modal
-   - Profile information
-   - Avatar
-   - Settings action
-   - Work history action
-   - Sign out action
-   - Password reset modal
-   - Profile UI refresh
-============================================================ */
+   - Full name
+   - Email display
+   - Role display
+   - Profile picture upload
+   - Avatar preview
+   - Saving profile changes
+   - Keeping admin identity protected
+   - Supabase profile synchronization
+   ============================================================ */
 
 import {
-    getSupabase,
-    getCurrentUser,
-    getCurrentSession
-} from "./supabase.js";
+  APP_CONFIG,
+  normalizeRole,
+  roleLabel,
+  isAdminRole,
+} from "./config.js";
 
 import {
-    signOut
+  getCurrentUser,
+  getCurrentProfile,
+  getRole,
+  getUserName,
+  updateUserProfile,
+  updateAvatar,
+  signOut,
 } from "./auth.js";
 
-
-/* ============================================================
-   SUPABASE
-============================================================ */
-
-const supabase =
-    typeof getSupabase === "function"
-        ? getSupabase()
-        : null;
-
-
-/* ============================================================
-   DOM
-============================================================ */
-
-const $ = id =>
-    document.getElementById(id);
-
-
-/* ------------------------------------------------------------
-   Navigation / Profile
------------------------------------------------------------- */
-
-const profileButton =
-    $("profileButton");
-
-const profileModal =
-    $("profileModal");
-
-const closeProfileModal =
-    $("closeProfileModal");
-
-const profileLargeAvatar =
-    $("profileLargeAvatar");
-
-const profileScreenName =
-    $("profileScreenName");
-
-const profileScreenRole =
-    $("profileScreenRole");
-
-const profileScreenEmail =
-    $("profileScreenEmail");
-
-const profileHistoryAction =
-    $("profileHistoryAction");
-
-const profileSettingsAction =
-    $("profileSettingsAction");
-
-const profileSignOutAction =
-    $("profileSignOutAction");
-
-
-/* ------------------------------------------------------------
-   Login profile elements
------------------------------------------------------------- */
-
-const profileAvatar =
-    $("profileAvatar");
-
-const profileName =
-    $("profileName");
-
-const profileRole =
-    $("profileRole");
-
-const changeAvatarButton =
-    $("changeAvatarBtn");
-
-const avatarInput =
-    $("avatarInput");
-
-
-/* ------------------------------------------------------------
-   Password reset
------------------------------------------------------------- */
-
-const passwordResetModal =
-    $("passwordResetModal");
-
-const newPassword =
-    $("newPassword");
-
-const confirmPassword =
-    $("confirmPassword");
-
-const saveNewPassword =
-    $("saveNewPassword");
-
-const passwordResetStatus =
-    $("passwordResetStatus");
-
+import {
+  getSupabase,
+  getCurrentUser as getSupabaseUser,
+  logActivity,
+} from "./supabase.js";
 
 /* ============================================================
    STATE
-============================================================ */
+   ============================================================ */
 
-const profileState = {
+export const profileState = {
+  initialized: false,
 
-    initialized:
-        false,
+  user: null,
+  profile: null,
+  role: null,
 
-    user:
-        null,
+  originalName: "",
+  originalEmail: "",
 
-    profile:
-        null,
+  avatarUrl: null,
 
-    avatarURL:
-        null,
+  saving: false,
+  uploadingAvatar: false,
 
-    passwordResetOpen:
-        false
+  modalOpen: false,
 };
-
-
-/* ============================================================
-   ROLE LABELS
-============================================================ */
-
-const ROLE_LABELS = {
-
-    customer:
-        "Customer",
-
-    reviewer:
-        "Reviewer",
-
-    staff:
-        "Staff",
-
-    admin:
-        "Admin",
-
-    coworker:
-        "Coworker",
-
-    coworker_2d_box:
-        "Coworker — 2D Box",
-
-    coworker_polygon:
-        "Coworker — Polygon",
-
-    coworker_segmentation:
-        "Coworker — Segmentation"
-};
-
-
-/* ============================================================
-   ESCAPE HTML
-============================================================ */
-
-function escapeHTML(
-    value
-) {
-
-    return String(
-        value ??
-        ""
-    )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
-}
-
-
-/* ============================================================
-   GET USER
-============================================================ */
-
-async function loadProfileUser() {
-
-    try {
-
-        /*
-         * Prefer the authenticated user helper.
-         */
-
-        const user =
-            await getCurrentUser();
-
-        profileState.user =
-            user ||
-            null;
-
-        return user ||
-            null;
-
-    } catch (error) {
-
-        console.warn(
-            "Could not load current user:",
-            error
-        );
-
-        /*
-         * Fallback to the current session
-         * if getCurrentUser() fails.
-         */
-
-        try {
-
-            const result =
-                await getCurrentSession();
-
-            const session =
-                result?.session ||
-                result ||
-                null;
-
-            const user =
-                session?.user ||
-                null;
-
-            profileState.user =
-                user;
-
-            return user;
-
-        } catch (sessionError) {
-
-            console.warn(
-                "Could not load current session:",
-                sessionError
-            );
-
-            profileState.user =
-                null;
-
-            return null;
-        }
-    }
-}
-
-
-/* ============================================================
-   GET ROLE
-============================================================ */
-
-function getUserRole(
-    user
-) {
-
-    if (!user) {
-        return "customer";
-    }
-
-
-    const metadata =
-        user.user_metadata ||
-        {};
-
-    const appMetadata =
-        user.app_metadata ||
-        {};
-
-
-    const role =
-        metadata.role ||
-        appMetadata.role ||
-        window.currentUserRole ||
-        window.CLOUD?.profile?.role ||
-        "customer";
-
-
-    return String(
-        role
-    )
-        .trim()
-        .toLowerCase();
-}
-
-
-/* ============================================================
-   GET DISPLAY NAME
-============================================================ */
-
-function getDisplayName(
-    user
-) {
-
-    if (!user) {
-        return "User";
-    }
-
-
-    const metadata =
-        user.user_metadata ||
-        {};
-
-
-    return (
-        metadata.full_name ||
-        metadata.name ||
-        metadata.display_name ||
-        metadata.screen_name ||
-        user.email?.split("@")[0] ||
-        "User"
-    );
-}
-
-
-/* ============================================================
-   GET AVATAR
-============================================================ */
-
-function getAvatarURL(
-    user
-) {
-
-    if (!user) {
-        return null;
-    }
-
-
-    const metadata =
-        user.user_metadata ||
-        {};
-
-
-    return (
-        metadata.avatar_url ||
-        metadata.avatar ||
-        metadata.picture ||
-        window.CLOUD?.profile?.avatar_url ||
-        window.CLOUD?.profile?.avatar ||
-        null
-    );
-}
-
-
-/* ============================================================
-   AVATAR FALLBACK
-============================================================ */
-
-function avatarFallback(
-    name
-) {
-
-    const clean =
-        String(
-            name ||
-            "U"
-        )
-            .trim();
-
-
-    if (!clean) {
-        return "U";
-    }
-
-
-    const parts =
-        clean.split(
-            /\s+/
-        );
-
-
-    if (
-        parts.length >= 2
-    ) {
-
-        return (
-            parts[0][0] +
-            parts[
-                parts.length - 1
-            ][0]
-        )
-            .toUpperCase();
-    }
-
-
-    return clean[0]
-        .toUpperCase();
-}
-
-
-/* ============================================================
-   SET AVATAR ELEMENT
-============================================================ */
-
-function setAvatarElement(
-    element,
-    avatarURL,
-    name
-) {
-
-    if (!element) {
-        return;
-    }
-
-
-    if (avatarURL) {
-
-        const safeURL =
-            String(
-                avatarURL
-            )
-                .replaceAll(
-                    '"',
-                    "%22"
-                );
-
-
-        element.style.backgroundImage =
-            `url("${safeURL}")`;
-
-        element.style.backgroundSize =
-            "cover";
-
-        element.style.backgroundPosition =
-            "center";
-
-        element.dataset.avatar =
-            avatarURL;
-
-
-        /*
-         * If this is an <img>, also set src.
-         */
-
-        if (
-            element.tagName ===
-            "IMG"
-        ) {
-
-            element.src =
-                avatarURL;
-
-            element.alt =
-                `${name || "User"} avatar`;
-        }
-
-
-        /*
-         * Hide text fallback when possible.
-         */
-
-        if (
-            "textContent" in
-            element &&
-            element.tagName !==
-            "IMG"
-        ) {
-
-            element.textContent =
-                "";
-        }
-
-        return;
-    }
-
-
-    /*
-     * Remove background image.
-     */
-
-    element.style.backgroundImage =
-        "";
-
-
-    if (
-        element.tagName ===
-        "IMG"
-    ) {
-
-        element.removeAttribute(
-            "src"
-        );
-
-        element.alt =
-            `${name || "User"} avatar`;
-
-        return;
-    }
-
-
-    element.textContent =
-        avatarFallback(
-            name
-        );
-}
-
-
-/* ============================================================
-   REFRESH PROFILE UI
-============================================================ */
-
-async function refreshProfileUI() {
-
-    const user =
-        await loadProfileUser();
-
-
-    if (!user) {
-
-        profileState.avatarURL =
-            null;
-
-
-        if (profileName) {
-
-            profileName.textContent =
-                "Guest";
-        }
-
-
-        if (profileRole) {
-
-            profileRole.textContent =
-                "";
-        }
-
-
-        if (profileScreenName) {
-
-            profileScreenName.textContent =
-                "Guest";
-        }
-
-
-        if (profileScreenRole) {
-
-            profileScreenRole.textContent =
-                "";
-        }
-
-
-        if (profileScreenEmail) {
-
-            profileScreenEmail.textContent =
-                "";
-        }
-
-
-        setAvatarElement(
-            profileAvatar,
-            null,
-            "Guest"
-        );
-
-
-        setAvatarElement(
-            profileLargeAvatar,
-            null,
-            "Guest"
-        );
-
-
-        return null;
-    }
-
-
-    const name =
-        getDisplayName(
-            user
-        );
-
-    const role =
-        getUserRole(
-            user
-        );
-
-    const roleLabel =
-        ROLE_LABELS[
-            role
-        ] ||
-        role;
-
-    const email =
-        user.email ||
-        "";
-
-    const avatarURL =
-        getAvatarURL(
-            user
-        );
-
-
-    profileState.avatarURL =
-        avatarURL;
-
-
-    /* --------------------------------------------------------
-       Header / account profile
-    -------------------------------------------------------- */
-
-    if (profileName) {
-
-        profileName.textContent =
-            name;
-    }
-
-
-    if (profileRole) {
-
-        profileRole.textContent =
-            roleLabel;
-    }
-
-
-    setAvatarElement(
-        profileAvatar,
-        avatarURL,
-        name
-    );
-
-
-    /* --------------------------------------------------------
-       Profile modal
-    -------------------------------------------------------- */
-
-    if (profileScreenName) {
-
-        profileScreenName.textContent =
-            name;
-    }
-
-
-    if (profileScreenRole) {
-
-        profileScreenRole.textContent =
-            roleLabel;
-    }
-
-
-    if (profileScreenEmail) {
-
-        profileScreenEmail.textContent =
-            email;
-    }
-
-
-    setAvatarElement(
-        profileLargeAvatar,
-        avatarURL,
-        name
-    );
-
-
-    /*
-     * Make profile information available
-     * to the rest of the application.
-     */
-
-    window.currentUser =
-        user;
-
-    window.currentUserRole =
-        role;
-
-
-    return user;
-}
-
-
-/* ============================================================
-   OPEN PROFILE
-============================================================ */
-
-async function openProfile() {
-
-    const user =
-        await refreshProfileUI();
-
-
-    if (!user) {
-
-        return false;
-    }
-
-
-    if (profileModal) {
-
-        profileModal.style.display =
-            "flex";
-
-        profileModal.classList.add(
-            "open"
-        );
-
-        profileModal.setAttribute(
-            "aria-hidden",
-            "false"
-        );
-    }
-
-
-    return true;
-}
-
-
-/* ============================================================
-   CLOSE PROFILE
-============================================================ */
-
-function closeProfile() {
-
-    if (!profileModal) {
-        return;
-    }
-
-
-    profileModal.classList.remove(
-        "open"
-    );
-
-
-    profileModal.style.display =
-        "none";
-
-
-    profileModal.setAttribute(
-        "aria-hidden",
-        "true"
-    );
-}
-
-
-/* ============================================================
-   OPEN PASSWORD RESET
-============================================================ */
-
-function openPasswordReset() {
-
-    if (!passwordResetModal) {
-        return;
-    }
-
-
-    profileState.passwordResetOpen =
-        true;
-
-
-    passwordResetModal.style.display =
-        "flex";
-
-
-    passwordResetModal.classList.add(
-        "open"
-    );
-
-
-    passwordResetModal.setAttribute(
-        "aria-hidden",
-        "false"
-    );
-
-
-    if (passwordResetStatus) {
-
-        passwordResetStatus.textContent =
-            "";
-
-        passwordResetStatus.dataset.type =
-            "";
-    }
-
-
-    if (newPassword) {
-
-        newPassword.value =
-            "";
-    }
-
-
-    if (confirmPassword) {
-
-        confirmPassword.value =
-            "";
-    }
-
-
-    setTimeout(
-        () => {
-
-            newPassword?.focus();
-
-        },
-        50
-    );
-}
-
-
-/* ============================================================
-   CLOSE PASSWORD RESET
-============================================================ */
-
-function closePasswordReset() {
-
-    if (!passwordResetModal) {
-        return;
-    }
-
-
-    profileState.passwordResetOpen =
-        false;
-
-
-    passwordResetModal.classList.remove(
-        "open"
-    );
-
-
-    passwordResetModal.style.display =
-        "none";
-
-
-    passwordResetModal.setAttribute(
-        "aria-hidden",
-        "true"
-    );
-}
-
-
-/* ============================================================
-   PASSWORD STATUS
-============================================================ */
-
-function setPasswordStatus(
-    message,
-    type = "info"
-) {
-
-    if (!passwordResetStatus) {
-        return;
-    }
-
-
-    passwordResetStatus.textContent =
-        message || "";
-
-
-    passwordResetStatus.dataset.type =
-        type;
-}
-
-
-/* ============================================================
-   CHANGE PASSWORD
-============================================================ */
-
-async function changePassword() {
-
-    const client =
-        typeof getSupabase ===
-        "function"
-            ? getSupabase()
-            : supabase;
-
-
-    if (!client) {
-
-        setPasswordStatus(
-            "Supabase is not configured.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    const password =
-        newPassword?.value ||
-        "";
-
-    const confirmation =
-        confirmPassword?.value ||
-        "";
-
-
-    if (
-        password.length <
-        6
-    ) {
-
-        setPasswordStatus(
-            "Password must contain at least 6 characters.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    if (
-        password !==
-        confirmation
-    ) {
-
-        setPasswordStatus(
-            "Passwords do not match.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    setPasswordStatus(
-        "Saving password...",
-        "info"
-    );
-
-
-    try {
-
-        const {
-            error
-        } =
-            await client.auth
-                .updateUser({
-                    password
-                });
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        setPasswordStatus(
-            "Password changed successfully.",
-            "success"
-        );
-
-
-        if (
-            typeof window.showToast ===
-            "function"
-        ) {
-
-            window.showToast(
-                "Password changed successfully."
-            );
-        }
-
-
-        setTimeout(
-            () => {
-
-                closePasswordReset();
-
-            },
-            1200
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Password change failed:",
-            error
-        );
-
-
-        setPasswordStatus(
-            error?.message ||
-            "Could not change password.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   AVATAR FILE VALIDATION
-============================================================ */
-
-function validateAvatarFile(
-    file
-) {
-
-    if (!file) {
-        return false;
-    }
-
-
-    if (
-        !String(
-            file.type ||
-            ""
-        ).startsWith(
-            "image/"
-        )
-    ) {
-
-        return false;
-    }
-
-
-    /*
-     * Maximum avatar size: 5 MB.
-     */
-
-    const maxSize =
-        5 *
-        1024 *
-        1024;
-
-
-    if (
-        file.size >
-        maxSize
-    ) {
-
-        return false;
-    }
-
-
-    return true;
-}
-
-
-/* ============================================================
-   LOCAL AVATAR PREVIEW
-============================================================ */
-
-function previewAvatar(
-    file
-) {
-
-    if (
-        !validateAvatarFile(
-            file
-        )
-    ) {
-
-        if (
-            typeof window.showToast ===
-            "function"
-        ) {
-
-            window.showToast(
-                "Please select an image smaller than 5 MB."
-            );
-        }
-
-
-        return false;
-    }
-
-
-    const url =
-        URL.createObjectURL(
-            file
-        );
-
-
-    profileState.avatarURL =
-        url;
-
-
-    const user =
-        profileState.user;
-
-
-    const name =
-        getDisplayName(
-            user
-        );
-
-
-    setAvatarElement(
-        profileAvatar,
-        url,
-        name
-    );
-
-
-    setAvatarElement(
-        profileLargeAvatar,
-        url,
-        name
-    );
-
-
-    return true;
-}
-
-
-/* ============================================================
-   UPLOAD AVATAR TO SUPABASE STORAGE
-============================================================ */
-
-async function uploadAvatar(
-    file
-) {
-
-    const user =
-        profileState.user ||
-        await loadProfileUser();
-
-
-    if (!user) {
-
-        throw new Error(
-            "You must be signed in."
-        );
-    }
-
-
-    if (
-        !validateAvatarFile(
-            file
-        )
-    ) {
-
-        throw new Error(
-            "Invalid avatar image."
-        );
-    }
-
-
-    const client =
-        typeof getSupabase ===
-        "function"
-            ? getSupabase()
-            : supabase;
-
-
-    if (!client) {
-
-        throw new Error(
-            "Supabase is not configured."
-        );
-    }
-
-
-    /*
-     * Use configured avatar bucket when
-     * available, otherwise use "avatars".
-     */
-
-    const bucket =
-        window.APP_AVATAR_BUCKET ||
-        "avatars";
-
-
-    const extension =
-        String(
-            file.name ||
-            ""
-        )
-            .split(".")
-            .pop()
-            ?.toLowerCase() ||
-        "jpg";
-
-
-    const path =
-        `${user.id}/avatar-${Date.now()}.${extension}`;
-
-
-    const {
-        error: uploadError
-    } =
-        await client.storage
-            .from(
-                bucket
-            )
-            .upload(
-                path,
-                file,
-                {
-                    cacheControl:
-                        "3600",
-
-                    upsert:
-                        true,
-
-                    contentType:
-                        file.type
-                }
-            );
-
-
-    if (uploadError) {
-        throw uploadError;
-    }
-
-
-    const {
-        data
-    } =
-        client.storage
-            .from(
-                bucket
-            )
-            .getPublicUrl(
-                path
-            );
-
-
-    const publicURL =
-        data?.publicUrl ||
-        null;
-
-
-    if (!publicURL) {
-
-        throw new Error(
-            "Avatar uploaded but no public URL was returned."
-        );
-    }
-
-
-    /*
-     * Save avatar URL in Supabase Auth metadata.
-     */
-
-    const {
-        error: updateError
-    } =
-        await client.auth
-            .updateUser({
-                data: {
-                    avatar_url:
-                        publicURL
-                }
-            });
-
-
-    if (updateError) {
-        throw updateError;
-    }
-
-
-    profileState.avatarURL =
-        publicURL;
-
-
-    /*
-     * Update local profile UI.
-     */
-
-    const name =
-        getDisplayName(
-            user
-        );
-
-
-    setAvatarElement(
-        profileAvatar,
-        publicURL,
-        name
-    );
-
-
-    setAvatarElement(
-        profileLargeAvatar,
-        publicURL,
-        name
-    );
-
-
-    return publicURL;
-}
-
-
-/* ============================================================
-   HANDLE AVATAR CHANGE
-============================================================ */
-
-async function handleAvatarChange(
-    file
-) {
-
-    if (!file) {
-        return false;
-    }
-
-
-    /*
-     * Show immediate preview.
-     */
-
-    const previewOK =
-        previewAvatar(
-            file
-        );
-
-
-    if (!previewOK) {
-        return false;
-    }
-
-
-    try {
-
-        const url =
-            await uploadAvatar(
-                file
-            );
-
-
-        if (
-            typeof window.showToast ===
-            "function"
-        ) {
-
-            window.showToast(
-                "Profile picture updated."
-            );
-        }
-
-
-        return url;
-
-    } catch (error) {
-
-        console.error(
-            "Avatar upload failed:",
-            error
-        );
-
-
-        if (
-            typeof window.showToast ===
-            "function"
-        ) {
-
-            window.showToast(
-                error?.message ||
-                "Could not update profile picture."
-            );
-        }
-
-
-        /*
-         * Restore the saved avatar if
-         * the upload failed.
-         */
-
-        await refreshProfileUI();
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   SETTINGS ACTION
-============================================================ */
-
-function openSettings() {
-
-    /*
-     * The main app may already provide a settings
-     * implementation. Use it if available.
-     */
-
-    const candidates = [
-        window.openSettings,
-        window.showSettings,
-        window.openAppSettings
-    ];
-
-
-    const handler =
-        candidates.find(
-            fn =>
-                typeof fn ===
-                "function" &&
-                fn !== openSettings
-        );
-
-
-    if (handler) {
-
-        handler();
-
-        return true;
-    }
-
-
-    /*
-     * Fall back to the existing settings button.
-     */
-
-    const settingsButton =
-        $("settingsButton");
-
-
-    if (
-        settingsButton &&
-        settingsButton !==
-            profileSettingsAction
-    ) {
-
-        settingsButton.click();
-
-        return true;
-    }
-
-
-    return false;
-}
-
-
-/* ============================================================
-   WORK HISTORY ACTION
-============================================================ */
-
-function openWorkHistory() {
-
-    /*
-     * Prefer existing global history functions.
-     */
-
-    const candidates = [
-        window.openWorkHistory,
-        window.showWorkHistory,
-        window.openHistory
-    ];
-
-
-    const handler =
-        candidates.find(
-            fn =>
-                typeof fn ===
-                "function" &&
-                fn !== openWorkHistory
-        );
-
-
-    if (handler) {
-
-        handler();
-
-        return true;
-    }
-
-
-    /*
-     * Fall back to existing navigation button.
-     */
-
-    const historyButton =
-        $("workHistoryButton");
-
-
-    if (
-        historyButton &&
-        historyButton !==
-            profileHistoryAction
-    ) {
-
-        historyButton.click();
-
-        return true;
-    }
-
-
-    return false;
-}
-
-
-/* ============================================================
-   SIGN OUT
-============================================================ */
-
-async function profileSignOut() {
-
-    try {
-
-        /*
-         * signOut is owned by auth.js.
-         */
-
-        if (
-            typeof signOut !==
-            "function"
-        ) {
-
-            throw new Error(
-                "Authentication sign-out function is unavailable."
-            );
-        }
-
-
-        await signOut();
-
-
-        closeProfile();
-
-
-        /*
-         * Let the auth system and other modules
-         * know that authentication changed.
-         */
-
-        window.dispatchEvent(
-            new CustomEvent(
-                "auth:changed",
-                {
-                    detail: {
-                        user:
-                            null
-                    }
-                }
-            )
-        );
-
-
-        window.dispatchEvent(
-            new CustomEvent(
-                "authChanged",
-                {
-                    detail: {
-                        user:
-                            null
-                    }
-                }
-            )
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Sign out failed:",
-            error
-        );
-
-
-        if (
-            typeof window.showToast ===
-            "function"
-        ) {
-
-            window.showToast(
-                error?.message ||
-                "Could not sign out."
-            );
-        }
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   CLICK OUTSIDE PROFILE MODAL
-============================================================ */
-
-function handleProfileModalClick(
-    event
-) {
-
-    if (
-        event.target ===
-        profileModal
-    ) {
-
-        closeProfile();
-    }
-
-
-    if (
-        event.target ===
-        passwordResetModal
-    ) {
-
-        closePasswordReset();
-    }
-}
-
-
-/* ============================================================
-   KEYBOARD
-============================================================ */
-
-function handleProfileKeyboard(
-    event
-) {
-
-    if (
-        event.key !==
-        "Escape"
-    ) {
-        return;
-    }
-
-
-    if (
-        profileState.passwordResetOpen
-    ) {
-
-        closePasswordReset();
-
-        return;
-    }
-
-
-    if (
-        profileModal?.classList.contains(
-            "open"
-        )
-    ) {
-
-        closeProfile();
-    }
-}
-
-
-/* ============================================================
-   AUTH CHANGE
-============================================================ */
-
-async function handleAuthChanged(
-    event
-) {
-
-    const user =
-        event?.detail?.user;
-
-
-    if (
-        user ===
-        null
-    ) {
-
-        profileState.user =
-            null;
-
-        profileState.profile =
-            null;
-
-        profileState.avatarURL =
-            null;
-
-        closeProfile();
-
-        return;
-    }
-
-
-    await refreshProfileUI();
-}
-
-
-/* ============================================================
-   EVENT BINDING
-============================================================ */
-
-function bindProfileEvents() {
-
-    if (
-        profileState.initialized
-    ) {
-        return;
-    }
-
-
-    profileState.initialized =
-        true;
-
-
-    /* --------------------------------------------------------
-       PROFILE BUTTON
-    -------------------------------------------------------- */
-
-    profileButton?.addEventListener(
-        "click",
-        async event => {
-
-            event.preventDefault();
-
-            await openProfile();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       CLOSE PROFILE
-    -------------------------------------------------------- */
-
-    closeProfileModal?.addEventListener(
-        "click",
-        event => {
-
-            event.preventDefault();
-
-            closeProfile();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       PROFILE MODAL
-    -------------------------------------------------------- */
-
-    profileModal?.addEventListener(
-        "click",
-        handleProfileModalClick
-    );
-
-
-    /* --------------------------------------------------------
-       CHANGE AVATAR BUTTON
-    -------------------------------------------------------- */
-
-    changeAvatarButton?.addEventListener(
-        "click",
-        event => {
-
-            event.preventDefault();
-
-            avatarInput?.click();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       AVATAR INPUT
-    -------------------------------------------------------- */
-
-    avatarInput?.addEventListener(
-        "change",
-        async event => {
-
-            const file =
-                event.target
-                    ?.files?.[0];
-
-
-            if (!file) {
-                return;
-            }
-
-
-            await handleAvatarChange(
-                file
-            );
-
-
-            /*
-             * Allow selecting the same file again.
-             */
-
-            event.target.value =
-                "";
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       WORK HISTORY
-    -------------------------------------------------------- */
-
-    profileHistoryAction?.addEventListener(
-        "click",
-        event => {
-
-            event.preventDefault();
-
-            closeProfile();
-
-            openWorkHistory();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       SETTINGS
-    -------------------------------------------------------- */
-
-    profileSettingsAction?.addEventListener(
-        "click",
-        event => {
-
-            event.preventDefault();
-
-            closeProfile();
-
-            openSettings();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       SIGN OUT
-    -------------------------------------------------------- */
-
-    profileSignOutAction?.addEventListener(
-        "click",
-        async event => {
-
-            event.preventDefault();
-
-            await profileSignOut();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       PASSWORD RESET
-    -------------------------------------------------------- */
-
-    saveNewPassword?.addEventListener(
-        "click",
-        async event => {
-
-            event.preventDefault();
-
-            await changePassword();
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       ENTER TO SAVE PASSWORD
-    -------------------------------------------------------- */
-
-    passwordResetModal?.addEventListener(
-        "keydown",
-        async event => {
-
-            if (
-                event.key ===
-                "Enter"
-            ) {
-
-                event.preventDefault();
-
-                await changePassword();
-            }
-        }
-    );
-
-
-    /* --------------------------------------------------------
-       KEYBOARD
-    -------------------------------------------------------- */
-
-    document.addEventListener(
-        "keydown",
-        handleProfileKeyboard
-    );
-
-
-    /* --------------------------------------------------------
-       AUTH EVENTS
-    -------------------------------------------------------- */
-
-    window.addEventListener(
-        "auth:changed",
-        handleAuthChanged
-    );
-
-
-    window.addEventListener(
-        "authChanged",
-        handleAuthChanged
-    );
-
-
-    /*
-     * Some auth modules dispatch a custom
-     * "user:changed" event.
-     */
-
-    window.addEventListener(
-        "user:changed",
-        handleAuthChanged
-    );
-}
-
-
-/* ============================================================
-   INITIALIZE PROFILE
-============================================================ */
-
-async function initializeProfile() {
-
-    bindProfileEvents();
-
-    await refreshProfileUI();
-
-    return true;
-}
-
-
-/* ============================================================
-   PUBLIC API
-============================================================ */
-
-export {
-
-    profileState,
-
-    ROLE_LABELS,
-
-    initializeProfile,
-
-    refreshProfileUI,
-
-    openProfile,
-
-    closeProfile,
-
-    openPasswordReset,
-
-    closePasswordReset,
-
-    changePassword,
-
-    uploadAvatar,
-
-    handleAvatarChange,
-
-    openSettings,
-
-    openWorkHistory,
-
-    profileSignOut
-};
-
-
-/* ============================================================
-   GLOBAL COMPATIBILITY
-============================================================ */
 
 window.profileState =
-    profileState;
-
-window.refreshProfileUI =
-    refreshProfileUI;
-
-window.openProfile =
-    openProfile;
-
-window.closeProfile =
-    closeProfile;
-
-window.openPasswordReset =
-    openPasswordReset;
-
-window.closePasswordReset =
-    closePasswordReset;
-
-window.changePassword =
-    changePassword;
-
-window.uploadAvatar =
-    uploadAvatar;
-
-window.openSettings =
-    window.openSettings ||
-    openSettings;
-
-window.openWorkHistory =
-    window.openWorkHistory ||
-    openWorkHistory;
-
-window.profileSignOut =
-    profileSignOut;
-
+  profileState;
 
 /* ============================================================
-   STARTUP
-============================================================ */
+   HELPERS
+   ============================================================ */
 
-if (
-    document.readyState ===
-    "loading"
+const $ = (id) =>
+  document.getElementById(id);
+
+function getClient() {
+  return (
+    getSupabase?.() ||
+    window.supabaseClient ||
+    null
+  );
+}
+
+function text(
+  value,
+  fallback = ""
 ) {
+  return value == null ||
+    value === ""
+    ? fallback
+    : String(value);
+}
 
-    document.addEventListener(
-        "DOMContentLoaded",
-        () => {
+function escapeHTML(value) {
+  return String(
+    value ?? ""
+  )
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
-            initializeProfile();
+function showElement(
+  element,
+  show = true
+) {
+  if (!element) return;
 
-        },
-        {
-            once:
-                true
-        }
+  element.hidden = !show;
+
+  if (show) {
+    element.style.display = "";
+  } else {
+    element.style.display =
+      "none";
+  }
+}
+
+function toast(
+  message,
+  type = "info"
+) {
+  if (
+    typeof window.showToast ===
+    "function"
+  ) {
+    window.showToast(
+      message,
+      type
     );
 
-} else {
+    return;
+  }
 
-    initializeProfile();
+  const container =
+    $("toastContainer");
+
+  if (!container) {
+    console.log(
+      `[${type}] ${message}`
+    );
+
+    return;
+  }
+
+  const item =
+    document.createElement(
+      "div"
+    );
+
+  item.className =
+    `toast toast-${type}`;
+
+  item.textContent =
+    message;
+
+  container.appendChild(
+    item
+  );
+
+  setTimeout(() => {
+    item.remove();
+  }, 4000);
 }
+
+function currentAdminEmail() {
+  return String(
+    APP_CONFIG?.adminEmail ||
+      "antonymbali96@gmail.com"
+  ).toLowerCase();
+}
+
+/* ============================================================
+   REFRESH PROFILE STATE
+   ============================================================ */
+
+function refreshState() {
+  profileState.user =
+    getCurrentUser?.() ||
+    getSupabaseUser?.() ||
+    profileState.user ||
+    null;
+
+  profileState.profile =
+    getCurrentProfile?.() ||
+    profileState.profile ||
+    null;
+
+  profileState.role =
+    normalizeRole(
+      getRole?.() ||
+        profileState.profile
+          ?.role ||
+        profileState.user
+          ?.user_metadata
+          ?.role ||
+        ""
+    );
+
+  profileState.originalName =
+    text(
+      profileState.profile
+        ?.full_name ||
+        profileState.user
+          ?.user_metadata
+          ?.full_name ||
+        profileState.user
+          ?.user_metadata
+          ?.name ||
+        profileState.user
+          ?.email
+          ?.split("@")[0],
+      ""
+    );
+
+  profileState.originalEmail =
+    text(
+      profileState.user?.email ||
+        profileState.profile
+          ?.email,
+      ""
+    );
+
+  profileState.avatarUrl =
+    profileState.profile
+      ?.avatar_url ||
+    profileState.user
+      ?.user_metadata
+      ?.avatar_url ||
+    null;
+}
+
+/* ============================================================
+   INITIALIZATION
+   ============================================================ */
+
+export function initializeProfile() {
+  if (
+    profileState.initialized
+  ) {
+    refreshState();
+    return profileState;
+  }
+
+  profileState.initialized =
+    true;
+
+  refreshState();
+
+  bindProfileModal();
+  bindProfileForm();
+  bindAvatarUpload();
+  bindLogoutButton();
+  bindAuthEvents();
+
+  updateNavigationProfile();
+  updateDashboardProfile();
+
+  return profileState;
+}
+
+/* ============================================================
+   MODAL
+   ============================================================ */
+
+function bindProfileModal() {
+  $("profileButton")
+    ?.addEventListener(
+      "click",
+      openProfile
+    );
+
+  $("closeProfileModal")
+    ?.addEventListener(
+      "click",
+      closeProfile
+    );
+
+  $("profileModal")
+    ?.addEventListener(
+      "click",
+      (event) => {
+        if (
+          event.target ===
+          $("profileModal")
+        ) {
+          closeProfile();
+        }
+      }
+    );
+}
+
+export function openProfile() {
+  refreshState();
+
+  if (!profileState.user) {
+    toast(
+      "Please sign in first.",
+      "warning"
+    );
+
+    return false;
+  }
+
+  const modal =
+    $("profileModal");
+
+  if (!modal) {
+    toast(
+      "Profile window was not found.",
+      "error"
+    );
+
+    return false;
+  }
+
+  profileState.modalOpen =
+    true;
+
+  populateProfileForm();
+
+  showElement(
+    modal,
+    true
+  );
+
+  modal.classList.add(
+    "profile-modal-open"
+  );
+
+  document.body.classList.add(
+    "profile-open"
+  );
+
+  return true;
+}
+
+export function closeProfile() {
+  profileState.modalOpen =
+    false;
+
+  const modal =
+    $("profileModal");
+
+  if (modal) {
+    showElement(
+      modal,
+      false
+    );
+
+    modal.classList.remove(
+      "profile-modal-open"
+    );
+  }
+
+  document.body.classList.remove(
+    "profile-open"
+  );
+}
+
+/* ============================================================
+   POPULATE PROFILE
+   ============================================================ */
+
+function populateProfileForm() {
+  refreshState();
+
+  const nameInput =
+    $("profileFullName");
+
+  const emailInput =
+    $("profileEmail");
+
+  const roleInput =
+    $("profileRole");
+
+  if (nameInput) {
+    nameInput.value =
+      profileState.originalName;
+  }
+
+  if (emailInput) {
+    emailInput.value =
+      profileState.originalEmail;
+
+    /*
+     * Email is intentionally read-only.
+     * Changing the authentication email
+     * requires a separate verified flow.
+     */
+    emailInput.readOnly =
+      true;
+
+    emailInput.disabled =
+      false;
+  }
+
+  if (roleInput) {
+    roleInput.value =
+      roleLabel(
+        profileState.role
+      );
+
+    roleInput.readOnly =
+      true;
+
+    roleInput.disabled =
+      false;
+  }
+
+  renderAvatarPreview();
+}
+
+/* ============================================================
+   AVATAR
+   ============================================================ */
+
+function renderAvatarPreview() {
+  const preview =
+    $("profileAvatarPreview");
+
+  if (!preview) return;
+
+  const avatar =
+    profileState.avatarUrl;
+
+  if (avatar) {
+    preview.innerHTML = `
+      <img
+        src="${escapeHTML(
+          avatar
+        )}"
+        alt="Profile picture"
+        class="profile-avatar-image"
+      >
+    `;
+
+    return;
+  }
+
+  const name =
+    profileState.originalName ||
+    profileState.originalEmail ||
+    "U";
+
+  const initial =
+    name
+      .trim()
+      .charAt(0)
+      .toUpperCase() ||
+    "U";
+
+  preview.innerHTML = `
+    <div
+      class="profile-avatar-fallback"
+      aria-label="Profile picture placeholder"
+    >
+      ${escapeHTML(
+        initial
+      )}
+    </div>
+  `;
+}
+
+function bindAvatarUpload() {
+  const input =
+    $("avatarInput");
+
+  if (!input) return;
+
+  input.addEventListener(
+    "change",
+    async () => {
+      const file =
+        input.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      await uploadProfileAvatar(
+        file
+      );
+
+      /*
+       * Reset input so selecting the
+       * same file again triggers change.
+       */
+      input.value = "";
+    }
+  );
+
+  /*
+   * Older HTML may use
+   * profilePictureInput.
+   */
+  const legacyInput =
+    $("profilePictureInput");
+
+  if (
+    legacyInput &&
+    legacyInput !== input
+  ) {
+    legacyInput.addEventListener(
+      "change",
+      async () => {
+        const file =
+          legacyInput.files?.[0];
+
+        if (!file) {
+          return;
+        }
+
+        await uploadProfileAvatar(
+          file
+        );
+
+        legacyInput.value =
+          "";
+      }
+    );
+  }
+}
+
+async function uploadProfileAvatar(
+  file
+) {
+  if (
+    profileState.uploadingAvatar
+  ) {
+    return false;
+  }
+
+  refreshState();
+
+  if (!profileState.user) {
+    toast(
+      "Please sign in first.",
+      "warning"
+    );
+
+    return false;
+  }
+
+  /*
+   * Image-only validation.
+   */
+  if (
+    !file.type.startsWith(
+      "image/"
+    )
+  ) {
+    toast(
+      "Please choose an image file.",
+      "warning"
+    );
+
+    return false;
+  }
+
+  /*
+   * 5 MB limit.
+   */
+  const maxSize =
+    5 * 1024 * 1024;
+
+  if (
+    file.size >
+    maxSize
+  ) {
+    toast(
+      "Profile picture must be 5 MB or smaller.",
+      "warning"
+    );
+
+    return false;
+  }
+
+  profileState.uploadingAvatar =
+    true;
+
+  setAvatarUploadState(
+    true
+  );
+
+  try {
+    /*
+     * First use auth.js helper.
+     */
+    if (
+      typeof updateAvatar ===
+      "function"
+    ) {
+      const result =
+        await updateAvatar(
+          file
+        );
+
+      if (
+        result?.error
+      ) {
+        throw result.error;
+      }
+
+      /*
+       * updateAvatar implementations
+       * may return the URL directly,
+       * a profile, or an object.
+       */
+      const newUrl =
+        result?.avatar_url ||
+        result?.url ||
+        result?.data
+          ?.avatar_url ||
+        result?.data?.url ||
+        (
+          typeof result ===
+          "string"
+            ? result
+            : null
+        );
+
+      if (newUrl) {
+        profileState.avatarUrl =
+          newUrl;
+      }
+
+      refreshState();
+
+      if (
+        !profileState.avatarUrl &&
+        newUrl
+      ) {
+        profileState.avatarUrl =
+          newUrl;
+      }
+
+      renderAvatarPreview();
+      updateNavigationProfile();
+      updateDashboardProfile();
+
+      toast(
+        "Profile picture updated.",
+        "success"
+      );
+
+      return true;
+    }
+
+    /*
+     * Fallback direct Supabase upload.
+     */
+    const client =
+      getClient();
+
+    if (!client) {
+      throw new Error(
+        "Supabase connection is unavailable."
+      );
+    }
+
+    const bucket =
+      APP_CONFIG?.buckets
+        ?.avatars ||
+      APP_CONFIG?.buckets
+        ?.profilePictures ||
+      "avatars";
+
+    const extension =
+      file.name.includes(".")
+        ? file.name
+            .split(".")
+            .pop()
+            .toLowerCase()
+        : "jpg";
+
+    const path =
+      `${profileState.user.id}/profile-${Date.now()}.${extension}`;
+
+    const {
+      error:
+        uploadError,
+    } =
+      await client.storage
+        .from(bucket)
+        .upload(
+          path,
+          file,
+          {
+            upsert: true,
+            contentType:
+              file.type,
+          }
+        );
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    /*
+     * Public bucket first.
+     */
+    let avatarUrl =
+      null;
+
+    try {
+      const {
+        data,
+      } = client.storage
+        .from(bucket)
+        .getPublicUrl(
+          path
+        );
+
+      avatarUrl =
+        data?.publicUrl ||
+        null;
+    } catch {
+      avatarUrl =
+        null;
+    }
+
+    /*
+     * Private bucket fallback.
+     */
+    if (!avatarUrl) {
+      try {
+        const {
+          data,
+        } =
+          await client.storage
+            .from(bucket)
+            .createSignedUrl(
+              path,
+              60 * 60 * 24 * 365
+            );
+
+        avatarUrl =
+          data?.signedUrl ||
+          null;
+      } catch {
+        avatarUrl =
+          null;
+      }
+    }
+
+    if (!avatarUrl) {
+      throw new Error(
+        "Unable to create profile picture URL."
+      );
+    }
+
+    const {
+      error:
+        profileError,
+    } = await client
+      .from(
+        APP_CONFIG?.tables
+          ?.profiles ||
+          "profiles"
+      )
+      .update({
+        avatar_url:
+          avatarUrl,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq(
+        "id",
+        profileState.user.id
+      );
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    try {
+      await client.auth.updateUser(
+        {
+          data: {
+            avatar_url:
+              avatarUrl,
+          },
+        }
+      );
+    } catch {
+      // Profile table remains the source of truth.
+    }
+
+    profileState.avatarUrl =
+      avatarUrl;
+
+    renderAvatarPreview();
+    updateNavigationProfile();
+    updateDashboardProfile();
+
+    toast(
+      "Profile picture updated.",
+      "success"
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "uploadProfileAvatar:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to upload profile picture.",
+      "error"
+    );
+
+    return false;
+  } finally {
+    profileState.uploadingAvatar =
+      false;
+
+    setAvatarUploadState(
+      false
+    );
+  }
+}
+
+function setAvatarUploadState(
+  uploading
+) {
+  const input =
+    $("avatarInput");
+
+  if (input) {
+    input.disabled =
+      uploading;
+  }
+
+  const button =
+    document.querySelector(
+      '[for="avatarInput"]'
+    );
+
+  if (button) {
+    button.classList.toggle(
+      "uploading",
+      uploading
+    );
+  }
+}
+
+/* ============================================================
+   SAVE PROFILE
+   ============================================================ */
+
+function bindProfileForm() {
+  $("saveProfileButton")
+    ?.addEventListener(
+      "click",
+      saveProfile
+    );
+
+  $("profileFullName")
+    ?.addEventListener(
+      "keydown",
+      (event) => {
+        if (
+          event.key ===
+          "Enter"
+        ) {
+          event.preventDefault();
+
+          saveProfile();
+        }
+      }
+    );
+}
+
+export async function saveProfile() {
+  if (
+    profileState.saving
+  ) {
+    return false;
+  }
+
+  refreshState();
+
+  if (!profileState.user) {
+    toast(
+      "Please sign in first.",
+      "warning"
+    );
+
+    return false;
+  }
+
+  const nameInput =
+    $("profileFullName");
+
+  const newName =
+    nameInput?.value?.trim();
+
+  if (!newName) {
+    toast(
+      "Please enter your name.",
+      "warning"
+    );
+
+    nameInput?.focus();
+
+    return false;
+  }
+
+  if (
+    newName.length <
+    2
+  ) {
+    toast(
+      "Name must contain at least 2 characters.",
+      "warning"
+    );
+
+    nameInput?.focus();
+
+    return false;
+  }
+
+  if (
+    newName.length >
+    120
+  ) {
+    toast(
+      "Name is too long.",
+      "warning"
+    );
+
+    nameInput?.focus();
+
+    return false;
+  }
+
+  profileState.saving =
+    true;
+
+  setSaveState(
+    true
+  );
+
+  try {
+    /*
+     * Preserve the protected admin email.
+     * The profile page does not allow email
+     * changes anyway.
+     */
+    const email =
+      profileState.originalEmail;
+
+    const role =
+      normalizeRole(
+        profileState.role
+      );
+
+    /*
+     * Update profile using auth.js helper.
+     */
+    let result = null;
+
+    if (
+      typeof updateUserProfile ===
+      "function"
+    ) {
+      result =
+        await updateUserProfile({
+          full_name:
+            newName,
+        });
+
+      if (
+        result?.error
+      ) {
+        throw result.error;
+      }
+    } else {
+      const client =
+        getClient();
+
+      if (!client) {
+        throw new Error(
+          "Supabase connection is unavailable."
+        );
+      }
+
+      const {
+        error,
+      } = await client
+        .from(
+          APP_CONFIG?.tables
+            ?.profiles ||
+            "profiles"
+        )
+        .update({
+          full_name:
+            newName,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          profileState.user.id
+        );
+
+      if (error) {
+        throw error;
+      }
+    }
+
+    /*
+     * Also synchronize Supabase Auth
+     * metadata when possible.
+     *
+     * This does NOT change email or role.
+     */
+    const client =
+      getClient();
+
+    if (client) {
+      try {
+        await client.auth.updateUser(
+          {
+            data: {
+              full_name:
+                newName,
+
+              /*
+               * Keep the existing role
+               * untouched.
+               */
+              ...(role
+                ? {
+                    role,
+                  }
+                : {}),
+            },
+          }
+        );
+      } catch (error) {
+        /*
+         * The profile update already
+         * succeeded. Metadata failure
+         * should not make the user think
+         * their profile was lost.
+         */
+        console.warn(
+          "Auth metadata update:",
+          error
+        );
+      }
+    }
+
+    await logProfileActivity(
+      "profile_updated",
+      {
+        full_name:
+          newName,
+      }
+    );
+
+    profileState.originalName =
+      newName;
+
+    if (
+      profileState.profile
+    ) {
+      profileState.profile.full_name =
+        newName;
+    }
+
+    /*
+     * Refresh profile-related UI.
+     */
+    updateNavigationProfile();
+    updateDashboardProfile();
+
+    toast(
+      "Profile saved successfully.",
+      "success"
+    );
+
+    closeProfile();
+
+    /*
+     * Notify other modules.
+     */
+    window.dispatchEvent(
+      new CustomEvent(
+        "profileUpdated",
+        {
+          detail: {
+            name:
+              newName,
+            role:
+              profileState.role,
+            avatar:
+              profileState.avatarUrl,
+          },
+        }
+      )
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "saveProfile:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to save profile.",
+      "error"
+    );
+
+    return false;
+  } finally {
+    profileState.saving =
+      false;
+
+    setSaveState(
+      false
+    );
+  }
+}
+
+function setSaveState(
+  saving
+) {
+  const button =
+    $("saveProfileButton");
+
+  if (!button) return;
+
+  button.disabled =
+    saving;
+
+  if (
+    !button.dataset.originalText
+  ) {
+    button.dataset.originalText =
+      button.textContent ||
+      "Save profile";
+  }
+
+  button.textContent =
+    saving
+      ? "Saving..."
+      : button.dataset
+          .originalText;
+}
+
+/* ============================================================
+   NAVIGATION PROFILE
+   ============================================================ */
+
+export function updateNavigationProfile() {
+  refreshState();
+
+  const name =
+    profileState.originalName ||
+    profileState.originalEmail ||
+    "User";
+
+  setText(
+    $("navProfileName"),
+    name
+  );
+
+  const avatar =
+    $("navAvatar");
+
+  if (avatar) {
+    if (
+      profileState.avatarUrl
+    ) {
+      avatar.innerHTML = `
+        <img
+          src="${escapeHTML(
+            profileState.avatarUrl
+          )}"
+          alt=""
+          class="nav-avatar-image"
+        >
+      `;
+
+      avatar.classList.add(
+        "has-avatar"
+      );
+    } else {
+      avatar.textContent =
+        name
+          .charAt(0)
+          .toUpperCase();
+
+      avatar.classList.remove(
+        "has-avatar"
+      );
+    }
+  }
+
+  /*
+   * Admin icon belongs immediately
+   * after profile and is only shown
+   * to administrators.
+   */
+  const adminButton =
+    $("adminCenterButton");
+
+  if (adminButton) {
+    const email =
+      String(
+        profileState.user
+          ?.email ||
+          ""
+      ).toLowerCase();
+
+    const admin =
+      isAdminRole(
+        profileState.role
+      ) ||
+      email ===
+        currentAdminEmail();
+
+    showElement(
+      adminButton,
+      admin
+    );
+  }
+}
+
+/* ============================================================
+   DASHBOARD PROFILE
+   ============================================================ */
+
+export function updateDashboardProfile() {
+  refreshState();
+
+  const name =
+    profileState.originalName ||
+    profileState.originalEmail ||
+    "User";
+
+  setText(
+    $("dashboardUserName"),
+    name
+  );
+
+  setText(
+    $("dashboardRoleText"),
+    roleLabel(
+      profileState.role
+    )
+  );
+
+  const avatar =
+    $("dashboardAvatar");
+
+  const fallback =
+    $("dashboardAvatarFallback");
+
+  if (
+    profileState.avatarUrl
+  ) {
+    if (avatar) {
+      avatar.src =
+        profileState.avatarUrl;
+
+      showElement(
+        avatar,
+        true
+      );
+    }
+
+    if (fallback) {
+      showElement(
+        fallback,
+        false
+      );
+    }
+  } else {
+    if (avatar) {
+      showElement(
+        avatar,
+        false
+      );
+    }
+
+    if (fallback) {
+      setText(
+        fallback,
+        name
+          .charAt(0)
+          .toUpperCase()
+      );
+
+      showElement(
+        fallback,
+        true
+      );
+    }
+  }
+}
+
+/* ============================================================
+   PROFILE DATA REFRESH
+   ============================================================ */
+
+export async function refreshProfile() {
+  refreshState();
+
+  const client =
+    getClient();
+
+  if (
+    !client ||
+    !profileState.user
+  ) {
+    return profileState;
+  }
+
+  try {
+    const {
+      data,
+      error,
+    } = await client
+      .from(
+        APP_CONFIG?.tables
+          ?.profiles ||
+          "profiles"
+      )
+      .select("*")
+      .eq(
+        "id",
+        profileState.user.id
+      )
+      .maybeSingle();
+
+    if (error) {
+      console.warn(
+        "refreshProfile:",
+        error
+      );
+
+      return profileState;
+    }
+
+    if (data) {
+      profileState.profile =
+        data;
+
+      profileState.role =
+        normalizeRole(
+          data.role
+        );
+
+      profileState.originalName =
+        text(
+          data.full_name,
+          profileState.originalName
+        );
+
+      profileState.avatarUrl =
+        data.avatar_url ||
+        profileState.avatarUrl;
+    }
+
+    updateNavigationProfile();
+    updateDashboardProfile();
+
+    if (
+      profileState.modalOpen
+    ) {
+      populateProfileForm();
+    }
+  } catch (error) {
+    console.warn(
+      "refreshProfile exception:",
+      error
+    );
+  }
+
+  return profileState;
+}
+
+/* ============================================================
+   LOG PROFILE ACTIVITY
+   ============================================================ */
+
+async function logProfileActivity(
+  action,
+  metadata = {}
+) {
+  try {
+    await logActivity(
+      action,
+      {
+        user_id:
+          profileState.user?.id ||
+          null,
+        metadata,
+      }
+    );
+
+    return;
+  } catch {
+    // Use direct fallback below.
+  }
+
+  try {
+    const client =
+      getClient();
+
+    if (!client) return;
+
+    await client
+      .from(
+        APP_CONFIG?.tables
+          ?.activities ||
+          "activity_logs"
+      )
+      .insert({
+        user_id:
+          profileState.user?.id ||
+          null,
+        actor_id:
+          profileState.user?.id ||
+          null,
+        action,
+        metadata,
+        created_at:
+          new Date().toISOString(),
+      });
+  } catch (error) {
+    console.warn(
+      "Profile activity log failed:",
+      error
+    );
+  }
+}
+
+/* ============================================================
+   LOGOUT
+   ============================================================ */
+
+function bindLogoutButton() {
+  $("logoutBtn")
+    ?.addEventListener(
+      "click",
+      async (event) => {
+        event.preventDefault();
+
+        await logoutFromProfile();
+      }
+    );
+}
+
+export async function logoutFromProfile() {
+  const confirmed =
+    window.confirm(
+      "Are you sure you want to log out?"
+    );
+
+  if (!confirmed) {
+    return false;
+  }
+
+  try {
+    await logProfileActivity(
+      "logout",
+      {}
+    );
+  } catch {
+    // Do not block logout.
+  }
+
+  try {
+    await signOut();
+
+    closeProfile();
+
+    return true;
+  } catch (error) {
+    console.error(
+      "logoutFromProfile:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to log out.",
+      "error"
+    );
+
+    return false;
+  }
+}
+
+/* ============================================================
+   AUTH EVENTS
+   ============================================================ */
+
+function bindAuthEvents() {
+  window.addEventListener(
+    "authStateChanged",
+    async () => {
+      refreshState();
+
+      if (
+        !profileState.user
+      ) {
+        closeProfile();
+
+        clearProfileUI();
+
+        return;
+      }
+
+      await refreshProfile();
+    }
+  );
+
+  window.addEventListener(
+    "profileUpdated",
+    () => {
+      refreshState();
+
+      updateNavigationProfile();
+      updateDashboardProfile();
+    }
+  );
+}
+
+function clearProfileUI() {
+  setText(
+    $("navProfileName"),
+    ""
+  );
+
+  const navAvatar =
+    $("navAvatar");
+
+  if (navAvatar) {
+    navAvatar.innerHTML =
+      "";
+  }
+
+  setText(
+    $("dashboardUserName"),
+    ""
+  );
+
+  setText(
+    $("dashboardRoleText"),
+    ""
+  );
+}
+
+/* ============================================================
+   ADMIN PROTECTION
+   ============================================================ */
+
+export function isProtectedAdminProfile() {
+  refreshState();
+
+  const email =
+    String(
+      profileState.user?.email ||
+        profileState.profile?.email ||
+        ""
+    ).toLowerCase();
+
+  return (
+    isAdminRole(
+      profileState.role
+    ) ||
+    email ===
+      currentAdminEmail()
+  );
+}
+
+/*
+ * The profile page never exposes controls
+ * for changing role or email. This is
+ * especially important for the protected
+ * administrator account.
+ */
+export function canEditProfileField(
+  field
+) {
+  if (
+    field === "email" ||
+    field === "role"
+  ) {
+    return false;
+  }
+
+  if (
+    field === "full_name" ||
+    field === "avatar"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/* ============================================================
+   AVATAR URL HELPERS
+   ============================================================ */
+
+export async function getAvatarUrl(
+  path
+) {
+  if (!path) {
+    return null;
+  }
+
+  /*
+   * Already a complete URL.
+   */
+  if (
+    /^https?:\/\//i.test(
+      path
+    )
+  ) {
+    return path;
+  }
+
+  const client =
+    getClient();
+
+  if (!client) {
+    return null;
+  }
+
+  const bucket =
+    APP_CONFIG?.buckets
+      ?.avatars ||
+    APP_CONFIG?.buckets
+      ?.profilePictures ||
+    "avatars";
+
+  try {
+    const {
+      data,
+    } =
+      await client.storage
+        .from(bucket)
+        .createSignedUrl(
+          path,
+          60 * 60 * 24 * 7
+        );
+
+    return (
+      data?.signedUrl ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/* ============================================================
+   PROFILE SNAPSHOT
+   ============================================================ */
+
+export function getProfileSnapshot() {
+  refreshState();
+
+  return {
+    id:
+      profileState.user?.id ||
+      profileState.profile?.id ||
+      null,
+
+    email:
+      profileState.originalEmail,
+
+    full_name:
+      profileState.originalName,
+
+    role:
+      profileState.role,
+
+    role_label:
+      roleLabel(
+        profileState.role
+      ),
+
+    avatar_url:
+      profileState.avatarUrl,
+
+    active:
+      profileState.profile
+        ?.active !== false,
+
+    protected_admin:
+      isProtectedAdminProfile(),
+  };
+}
+
+/* ============================================================
+   WINDOW COMPATIBILITY
+   ============================================================ */
+
+window.profile = {
+  state:
+    profileState,
+
+  open:
+    openProfile,
+
+  close:
+    closeProfile,
+
+  save:
+    saveProfile,
+
+  refresh:
+    refreshProfile,
+
+  uploadAvatar:
+    uploadProfileAvatar,
+
+  updateNavigation:
+    updateNavigationProfile,
+
+  updateDashboard:
+    updateDashboardProfile,
+
+  getSnapshot:
+    getProfileSnapshot,
+
+  isProtectedAdmin:
+    isProtectedAdminProfile,
+};
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+
+function boot() {
+  initializeProfile();
+}
+
+if (
+  document.readyState ===
+  "loading"
+) {
+  document.addEventListener(
+    "DOMContentLoaded",
+    boot,
+    {
+      once: true,
+    }
+  );
+} else {
+  boot();
+}
+
+/* ============================================================
+   EXPORTS
+   ============================================================ */
+
+export {
+  uploadProfileAvatar,
+  updateNavigationProfile,
+  updateDashboardProfile,
+  refreshProfile,
+  getAvatarUrl,
+  getProfileSnapshot,
+  isProtectedAdminProfile,
+};
+
+console.log(
+  "Profile module loaded."
+);
