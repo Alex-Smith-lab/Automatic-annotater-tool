@@ -11,6 +11,10 @@ import {
 } from "./supabase.js";
 
 
+// ============================================================
+// HOME STATE
+// ============================================================
+
 const homeState = {
     initialized: false,
     loading: false,
@@ -19,18 +23,18 @@ const homeState = {
 };
 
 
-// ------------------------------------------------------------
+// ============================================================
 // DOM HELPER
-// ------------------------------------------------------------
+// ============================================================
 
 function $(id) {
     return document.getElementById(id);
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // SAFE HTML
-// ------------------------------------------------------------
+// ============================================================
 
 function escapeHTML(value) {
     return String(value ?? "")
@@ -42,12 +46,14 @@ function escapeHTML(value) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // DATE
-// ------------------------------------------------------------
+// ============================================================
 
 function formatDate(value) {
-    if (!value) return "—";
+    if (!value) {
+        return "—";
+    }
 
     const date = new Date(value);
 
@@ -63,12 +69,14 @@ function formatDate(value) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // TIME
-// ------------------------------------------------------------
+// ============================================================
 
 function formatTime(value) {
-    if (!value) return "—";
+    if (!value) {
+        return "—";
+    }
 
     const date = new Date(value);
 
@@ -83,9 +91,9 @@ function formatTime(value) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // ROLE
-// ------------------------------------------------------------
+// ============================================================
 
 function normalizeRole(user) {
     if (!user) {
@@ -106,9 +114,9 @@ function normalizeRole(user) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // TASK TITLE
-// ------------------------------------------------------------
+// ============================================================
 
 function getTaskTitle(task) {
     return (
@@ -121,9 +129,9 @@ function getTaskTitle(task) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // TASK STATUS
-// ------------------------------------------------------------
+// ============================================================
 
 function getTaskStatus(task) {
     return String(
@@ -134,49 +142,63 @@ function getTaskStatus(task) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // STATUS LABEL
-// ------------------------------------------------------------
+// ============================================================
 
 function statusLabel(status) {
+
     const labels = {
         available: "Available",
         pending: "Pending",
         assigned: "Assigned",
+
         in_progress: "In progress",
         "in-progress": "In progress",
         working: "In progress",
+
         submitted: "Submitted",
         completed: "Completed",
         approved: "Approved",
         rejected: "Rejected",
         skipped: "Skipped",
+
         cancelled: "Cancelled",
         canceled: "Cancelled"
     };
 
-    return labels[status] || status || "Available";
+    return (
+        labels[status] ||
+        status ||
+        "Available"
+    );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // STATUS CLASS
-// ------------------------------------------------------------
+// ============================================================
 
 function statusClass(status) {
-    const value = String(status || "")
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, "");
+
+    const value =
+        String(status || "")
+            .toLowerCase()
+            .replace(
+                /[^a-z0-9_-]/g,
+                ""
+            );
 
     return `status-${value || "available"}`;
 }
 
 
-// ------------------------------------------------------------
-// TASK SHAPE
-// ------------------------------------------------------------
+// ============================================================
+// TASK SHAPE / ANNOTATION TYPE
+// ============================================================
 
 function getTaskShape(task) {
+
     return (
         task?.shape ||
         task?.annotation_type ||
@@ -188,17 +210,19 @@ function getTaskShape(task) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // TASK PAY
-// ------------------------------------------------------------
+// ============================================================
 
 function getTaskPay(task) {
+
     const value =
         task?.pay ??
         task?.payment ??
         task?.reward ??
         task?.amount ??
-        task?.price;
+        task?.price ??
+        task?.pay_amount;
 
     if (
         value === null ||
@@ -212,25 +236,29 @@ function getTaskPay(task) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // TASK DURATION
-// ------------------------------------------------------------
+// ============================================================
 
 function getTaskDuration(task) {
+
     return (
-        task?.duration ||
-        task?.duration_minutes ||
-        task?.estimated_minutes ||
+        task?.expected_minutes ??
+        task?.expected_duration ??
+        task?.duration ??
+        task?.duration_minutes ??
+        task?.estimated_minutes ??
         ""
     );
 }
 
 
-// ------------------------------------------------------------
-// MEDIA
-// ------------------------------------------------------------
+// ============================================================
+// TASK MEDIA
+// ============================================================
 
 function getTaskMedia(task) {
+
     return (
         task?.media_url ||
         task?.mediaUrl ||
@@ -239,16 +267,18 @@ function getTaskMedia(task) {
         task?.source_url ||
         task?.sourceUrl ||
         task?.url ||
+        task?.media_path ||
         null
     );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // USER NAME
-// ------------------------------------------------------------
+// ============================================================
 
 function getUserName(user) {
+
     if (!user) {
         return "User";
     }
@@ -263,17 +293,22 @@ function getUserName(user) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // UPDATE USER UI
-// ------------------------------------------------------------
+// ============================================================
 
 function updateUserUI(user) {
+
     if (!user) {
         return;
     }
 
-    const name = getUserName(user);
-    const role = normalizeRole(user);
+    const name =
+        getUserName(user);
+
+    const role =
+        normalizeRole(user);
+
 
     const profileName =
         $("profileName");
@@ -290,43 +325,60 @@ function updateUserUI(user) {
     const profileScreenEmail =
         $("profileScreenEmail");
 
+
     if (profileName) {
-        profileName.textContent = name;
+        profileName.textContent =
+            name;
     }
+
 
     if (profileRole) {
-        profileRole.textContent = role;
+        profileRole.textContent =
+            role;
     }
+
 
     if (profileScreenName) {
-        profileScreenName.textContent = name;
+        profileScreenName.textContent =
+            name;
     }
 
+
     if (profileScreenRole) {
-        profileScreenRole.textContent = role;
+        profileScreenRole.textContent =
+            role;
     }
+
 
     if (profileScreenEmail) {
         profileScreenEmail.textContent =
             user.email || "";
     }
 
-    document.body.dataset.userRole = role;
+
+    document.body.dataset.userRole =
+        role;
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // SHOW HOME
-// ------------------------------------------------------------
+// ============================================================
 
 export function showHome() {
+
     const loginPage =
         $("loginPage");
 
     if (loginPage) {
-        loginPage.style.display = "none";
-        loginPage.hidden = true;
+
+        loginPage.style.display =
+            "none";
+
+        loginPage.hidden =
+            true;
     }
+
 
     const home =
         $("homePage") ||
@@ -334,300 +386,648 @@ export function showHome() {
         $("dashboard") ||
         $("coworkerDashboard");
 
+
     if (home) {
-        home.style.display = "";
-        home.hidden = false;
+
+        home.style.display =
+            "";
+
+        home.hidden =
+            false;
     }
 
+
     window.dispatchEvent(
-        new CustomEvent("home:shown")
+        new CustomEvent(
+            "home:shown"
+        )
     );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // HIDE HOME
-// ------------------------------------------------------------
+// ============================================================
 
 export function hideHome() {
+
     const home =
         $("homePage") ||
         $("home") ||
         $("dashboard");
 
+
     if (home) {
-        home.style.display = "none";
-        home.hidden = true;
+
+        home.style.display =
+            "none";
+
+        home.hidden =
+            true;
     }
 }
 
 
-// ------------------------------------------------------------
-// TASK QUERY HELPERS
-// ------------------------------------------------------------
+// ============================================================
+// QUERY TASKS BELONGING TO USER
+// ============================================================
 
 async function queryTasksByUser(user) {
-    if (!supabase || !user) {
+
+    if (
+        !supabase ||
+        !user ||
+        !user.id
+    ) {
         return [];
     }
 
+
     const results = [];
 
-    // First attempt: tasks assigned directly to the user.
+
     const directColumns = [
         "assigned_to",
         "assigned_user_id",
         "worker_id",
-        "user_id"
+        "user_id",
+        "claimed_by"
     ];
 
-    for (const column of directColumns) {
+
+    for (
+        const column of directColumns
+    ) {
+
         try {
+
             const {
                 data,
                 error
             } = await supabase
                 .from("tasks")
                 .select("*")
-                .eq(column, user.id)
-                .order("created_at", {
-                    ascending: false
-                })
+                .eq(
+                    column,
+                    user.id
+                )
+                .order(
+                    "created_at",
+                    {
+                        ascending: false
+                    }
+                )
                 .limit(100);
+
 
             if (
                 !error &&
                 Array.isArray(data)
             ) {
-                results.push(...data);
+
+                results.push(
+                    ...data
+                );
+
                 break;
             }
+
         } catch (_) {
-            // Try the next compatible column.
+
+            // Try next compatible column.
         }
     }
+
 
     return results;
 }
 
 
-// ------------------------------------------------------------
-// AVAILABLE TASK QUERY
-// ------------------------------------------------------------
+// ============================================================
+// QUERY AVAILABLE TASKS
+// ============================================================
 
 async function queryAvailableTasks() {
+
     if (!supabase) {
         return [];
     }
 
-    const attempts = [
-        {
-            column: "status",
-            values: [
-                "available",
-                "open",
-                "pending"
-            ]
-        }
+
+    const statuses = [
+        "available",
+        "unclaimed",
+        "pending",
+        "open",
+        "draft"
     ];
 
-    for (const attempt of attempts) {
-        for (const value of attempt.values) {
-            try {
-                const {
-                    data,
-                    error
-                } = await supabase
-                    .from("tasks")
-                    .select("*")
-                    .eq(attempt.column, value)
-                    .order("created_at", {
-                        ascending: false
-                    })
-                    .limit(100);
 
-                if (
-                    !error &&
-                    Array.isArray(data)
-                ) {
-                    return data;
-                }
-            } catch (_) {
-                // Continue trying compatible statuses.
+    for (
+        const status of statuses
+    ) {
+
+        try {
+
+            const {
+                data,
+                error
+            } = await supabase
+                .from("tasks")
+                .select("*")
+                .eq(
+                    "status",
+                    status
+                )
+                .order(
+                    "created_at",
+                    {
+                        ascending: false
+                    }
+                )
+                .limit(100);
+
+
+            if (
+                !error &&
+                Array.isArray(data)
+            ) {
+
+                return data;
             }
+
+        } catch (_) {
+
+            // Try the next status.
         }
     }
 
-    // Last attempt: return recent tasks if the project
-    // does not use a status column.
+
+    // Last fallback:
+    // retrieve recent tasks.
     try {
+
         const {
             data,
             error
         } = await supabase
             .from("tasks")
             .select("*")
-            .order("created_at", {
-                ascending: false
-            })
+            .order(
+                "created_at",
+                {
+                    ascending: false
+                }
+            )
             .limit(100);
+
 
         if (
             !error &&
             Array.isArray(data)
         ) {
+
             return data;
         }
+
     } catch (_) {
-        // Ignore and return empty list.
+
+        // Ignore.
     }
+
 
     return [];
 }
 
 
-// ------------------------------------------------------------
-// REMOVE DUPLICATES
-// ------------------------------------------------------------
+// ============================================================
+// REMOVE DUPLICATE TASKS
+// ============================================================
 
 function deduplicateTasks(tasks) {
-    const map = new Map();
+
+    const map =
+        new Map();
+
+
+    if (!Array.isArray(tasks)) {
+        return [];
+    }
+
 
     tasks.forEach(task => {
+
         const id =
             task?.id ||
             task?.task_id ||
             `${getTaskTitle(task)}_${task?.created_at || ""}`;
 
-        if (!map.has(String(id))) {
-            map.set(String(id), task);
+
+        if (
+            !map.has(
+                String(id)
+            )
+        ) {
+
+            map.set(
+                String(id),
+                task
+            );
         }
     });
 
-    return Array.from(map.values());
+
+    return Array.from(
+        map.values()
+    );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
+// ROLE MATCHING
+// ============================================================
+
+function taskMatchesUserRole(
+    task,
+    role
+) {
+
+    if (!task) {
+        return false;
+    }
+
+
+    // Admin and staff can see all work.
+    if (
+        role === "admin" ||
+        role === "staff"
+    ) {
+        return true;
+    }
+
+
+    const taskRole =
+        String(
+            task?.work_role ||
+            task?.role ||
+            ""
+        ).toLowerCase();
+
+
+    const workType =
+        String(
+            task?.work_type ||
+            task?.annotation_type ||
+            task?.type ||
+            ""
+        ).toLowerCase();
+
+
+    if (!taskRole && !workType) {
+        return true;
+    }
+
+
+    const aliases = {
+
+        coworker_2d_box: [
+            "coworker_2d_box",
+            "2d_box",
+            "box",
+            "bbox",
+            "bounding_box",
+            "2d"
+        ],
+
+        coworker_polygon: [
+            "coworker_polygon",
+            "polygon"
+        ],
+
+        coworker_segmentation: [
+            "coworker_segmentation",
+            "segmentation",
+            "semantic_segmentation",
+            "mask"
+        ]
+    };
+
+
+    const roleValues =
+        aliases[role] || [
+            role
+        ];
+
+
+    const normalizedValues =
+        roleValues.map(
+            value =>
+                String(value)
+                    .toLowerCase()
+        );
+
+
+    if (
+        taskRole &&
+        normalizedValues.includes(
+            taskRole
+        )
+    ) {
+        return true;
+    }
+
+
+    if (
+        workType &&
+        normalizedValues.includes(
+            workType
+        )
+    ) {
+        return true;
+    }
+
+
+    // Reviewer can receive review tasks.
+    if (
+        role === "reviewer" &&
+        (
+            taskRole === "reviewer" ||
+            workType === "review" ||
+            workType === "reviewer"
+        )
+    ) {
+        return true;
+    }
+
+
+    // Generic coworker compatibility.
+    if (
+        role === "coworker" ||
+        role === "worker"
+    ) {
+
+        return (
+            !taskRole ||
+            taskRole.includes(
+                "coworker"
+            ) ||
+            taskRole === "worker"
+        );
+    }
+
+
+    return false;
+}
+
+
+// ============================================================
 // LOAD DASHBOARD JOBS
-// ------------------------------------------------------------
+// ============================================================
 
 export async function loadDashboardJobs() {
-    if (homeState.loading) {
+
+    if (
+        homeState.loading
+    ) {
         return homeState.jobs;
     }
 
-    homeState.loading = true;
+
+    homeState.loading =
+        true;
+
 
     try {
+
         const user =
             homeState.user ||
             await getCurrentUser();
 
-        homeState.user = user;
+
+        homeState.user =
+            user;
+
 
         if (!user) {
-            homeState.jobs = [];
+
+            homeState.jobs =
+                [];
+
             renderAvailableJobs();
+
             return [];
         }
 
-        updateUserUI(user);
+
+        updateUserUI(
+            user
+        );
+
 
         const role =
-            normalizeRole(user);
+            normalizeRole(
+                user
+            );
 
-        let tasks = [];
 
-        // Staff/reviewer/admin users may see available work.
+        let tasks =
+            [];
+
+
+        // ----------------------------------------------------
+        // ADMIN / STAFF / REVIEWER / COWORKER
+        // ----------------------------------------------------
+
         if (
             role === "admin" ||
             role === "staff" ||
             role === "reviewer" ||
             role === "worker" ||
-            role === "coworker"
+            role === "coworker" ||
+            role === "coworker_2d_box" ||
+            role === "coworker_polygon" ||
+            role === "coworker_segmentation"
         ) {
-            tasks =
+
+            const available =
                 await queryAvailableTasks();
 
-            const assigned =
-                await queryTasksByUser(user);
 
-            tasks = deduplicateTasks([
-                ...assigned,
-                ...tasks
-            ]);
-        } else {
+            const assigned =
+                await queryTasksByUser(
+                    user
+                );
+
+
             tasks =
-                await queryTasksByUser(user);
+                deduplicateTasks([
+                    ...assigned,
+                    ...available
+                ]);
+
+        }
+
+        // ----------------------------------------------------
+        // CUSTOMER
+        // ----------------------------------------------------
+
+        else {
+
+            tasks =
+                await queryTasksByUser(
+                    user
+                );
+
 
             if (!tasks.length) {
+
                 tasks =
                     await queryAvailableTasks();
             }
         }
 
+
+        // ----------------------------------------------------
+        // ROLE FILTER
+        // ----------------------------------------------------
+
+        if (
+            role !== "admin" &&
+            role !== "staff" &&
+            role !== "customer"
+        ) {
+
+            const filtered =
+                tasks.filter(
+                    task =>
+                        taskMatchesUserRole(
+                            task,
+                            role
+                        )
+                );
+
+
+            // Keep assigned tasks even if
+            // the task's role metadata is incomplete.
+            const assignedTasks =
+                tasks.filter(
+                    task => {
+
+                        return (
+                            task?.assigned_to === user.id ||
+                            task?.assigned_user_id === user.id ||
+                            task?.worker_id === user.id ||
+                            task?.claimed_by === user.id
+                        );
+                    }
+                );
+
+
+            tasks =
+                deduplicateTasks([
+                    ...assignedTasks,
+                    ...filtered
+                ]);
+        }
+
+
         homeState.jobs =
-            deduplicateTasks(tasks);
+            deduplicateTasks(
+                tasks
+            );
+
 
         renderAvailableJobs();
 
+
         updateDashboardStats();
+
 
         return homeState.jobs;
 
+    } catch (error) {
+
+        console.error(
+            "Failed to load dashboard:",
+            error
+        );
+
+
+        homeState.jobs =
+            [];
+
+
+        renderAvailableJobs();
+
+
+        return [];
+
     } finally {
-        homeState.loading = false;
+
+        homeState.loading =
+            false;
     }
 }
 
 
-// ------------------------------------------------------------
-// COMPATIBILITY DASHBOARD LOADER
+// ============================================================
+// COMPATIBILITY ALIAS
 //
-// app.js versions may import either:
-//     loadDashboard
-// or:
-//     loadDashboardJobs
+// Some versions of app.js call:
+//     loadDashboard()
 //
-// Keep both names available so the modules remain compatible.
-// ------------------------------------------------------------
+// Keep this alias so both names work.
+// ============================================================
 
 export async function loadDashboard() {
+
     return await loadDashboardJobs();
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // RENDER LOADING
-// ------------------------------------------------------------
+// ============================================================
 
-function renderJobsLoading(container) {
+function renderJobsLoading(
+    container
+) {
+
     if (!container) {
         return;
     }
 
+
     container.innerHTML = `
         <div class="jobs-loading">
             <div class="jobs-loading-spinner"></div>
-            <div>Loading available work...</div>
+            <div>
+                Loading available work...
+            </div>
         </div>
     `;
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // RENDER NO JOBS
-// ------------------------------------------------------------
+// ============================================================
 
-function renderNoJobs(container) {
+function renderNoJobs(
+    container
+) {
+
     if (!container) {
         return;
     }
 
+
     container.innerHTML = `
         <div class="jobs-empty">
-            <div class="jobs-empty-icon">□</div>
+
+            <div class="jobs-empty-icon">
+                □
+            </div>
 
             <div class="jobs-empty-title">
                 Oops, looking for more work for you
@@ -637,47 +1037,83 @@ function renderNoJobs(container) {
                 We’re checking for the next role-matched job.
                 Please check again soon.
             </div>
+
         </div>
     `;
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // RENDER TASK CARD
-// ------------------------------------------------------------
+// ============================================================
 
-function renderTaskCard(task) {
+function renderTaskCard(
+    task
+) {
+
     const id =
         task?.id ||
         task?.task_id ||
         "";
+
 
     const title =
         escapeHTML(
             getTaskTitle(task)
         );
 
+
     const status =
         getTaskStatus(task);
+
 
     const shape =
         escapeHTML(
             getTaskShape(task)
         );
 
+
     const pay =
         getTaskPay(task);
+
 
     const duration =
         getTaskDuration(task);
 
+
     const media =
         getTaskMedia(task);
+
 
     const created =
         task?.created_at ||
         task?.createdAt ||
         null;
+
+
+    const role =
+        task?.work_role ||
+        task?.role ||
+        "";
+
+
+    const roleText =
+        escapeHTML(
+            role
+        );
+
+
+    const workType =
+        task?.work_type ||
+        task?.annotation_type ||
+        getTaskShape(task);
+
+
+    const workTypeText =
+        escapeHTML(
+            workType
+        );
+
 
     return `
         <article
@@ -685,11 +1121,16 @@ function renderTaskCard(task) {
             data-task-id="${escapeHTML(id)}"
         >
 
-            <div class="available-job-card-header">
+            <div
+                class="available-job-card-header"
+            >
 
-                <div class="available-job-title">
+                <div
+                    class="available-job-title"
+                >
                     ${title}
                 </div>
+
 
                 <span
                     class="task-status ${statusClass(status)}"
@@ -702,16 +1143,36 @@ function renderTaskCard(task) {
             </div>
 
 
-            <div class="available-job-meta">
+            <div
+                class="available-job-meta"
+            >
 
-                <span class="job-shape">
-                    ${shape}
+                <span
+                    class="job-shape"
+                >
+                    ${workTypeText}
                 </span>
+
+
+                ${
+                    roleText
+                        ? `
+                            <span
+                                class="job-role"
+                            >
+                                ${roleText}
+                            </span>
+                        `
+                        : ""
+                }
+
 
                 ${
                     duration !== ""
                         ? `
-                            <span class="job-duration">
+                            <span
+                                class="job-duration"
+                            >
                                 ${escapeHTML(duration)}
                                 ${
                                     Number(duration) === 1
@@ -723,10 +1184,13 @@ function renderTaskCard(task) {
                         : ""
                 }
 
+
                 ${
                     pay !== ""
                         ? `
-                            <span class="job-pay">
+                            <span
+                                class="job-pay"
+                            >
                                 ${escapeHTML(pay)}
                             </span>
                         `
@@ -739,11 +1203,15 @@ function renderTaskCard(task) {
             ${
                 created
                     ? `
-                        <div class="available-job-date">
+                        <div
+                            class="available-job-date"
+                        >
                             ${escapeHTML(
                                 formatDate(created)
                             )}
+
                             ·
+
                             ${escapeHTML(
                                 formatTime(created)
                             )}
@@ -756,7 +1224,9 @@ function renderTaskCard(task) {
             ${
                 media
                     ? `
-                        <div class="available-job-media">
+                        <div
+                            class="available-job-media"
+                        >
                             Media available
                         </div>
                     `
@@ -764,7 +1234,9 @@ function renderTaskCard(task) {
             }
 
 
-            <div class="available-job-actions">
+            <div
+                class="available-job-actions"
+            >
 
                 <button
                     type="button"
@@ -781,85 +1253,135 @@ function renderTaskCard(task) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // RENDER AVAILABLE JOBS
-// ------------------------------------------------------------
+// ============================================================
 
 export function renderAvailableJobs() {
+
     const container =
         $("availableJobs") ||
         $("jobsList") ||
         $("availableJobsList");
 
+
     if (!container) {
         return;
     }
 
-    if (!homeState.jobs.length) {
-        renderNoJobs(container);
+
+    if (
+        !homeState.jobs.length
+    ) {
+
+        renderNoJobs(
+            container
+        );
+
         return;
     }
+
 
     container.innerHTML =
         homeState.jobs
-            .map(renderTaskCard)
+            .map(
+                renderTaskCard
+            )
             .join("");
 
-    bindTaskCards(container);
+
+    bindTaskCards(
+        container
+    );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
+// REFRESH AVAILABLE JOBS
+//
+// This is the missing export causing your current error.
+// ============================================================
+
+export async function refreshAvailableJobs() {
+
+    return await refreshDashboard();
+}
+
+
+// ============================================================
 // TASK CARD EVENTS
-// ------------------------------------------------------------
+// ============================================================
 
-function bindTaskCards(container) {
+function bindTaskCards(
     container
-        .querySelectorAll(".open-task-btn")
-        .forEach(button => {
-
-            button.addEventListener(
-                "click",
-                event => {
-
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    const taskId =
-                        button.dataset.taskId;
-
-                    openTask(taskId);
-                }
-            );
-        });
-
+) {
 
     container
-        .querySelectorAll(".available-job-card")
-        .forEach(card => {
+        .querySelectorAll(
+            ".open-task-btn"
+        )
+        .forEach(
+            button => {
 
-            card.addEventListener(
-                "dblclick",
-                () => {
+                button.addEventListener(
+                    "click",
+                    event => {
 
-                    const taskId =
-                        card.dataset.taskId;
+                        event.preventDefault();
 
-                    openTask(taskId);
-                }
-            );
-        });
+                        event.stopPropagation();
+
+
+                        const taskId =
+                            button.dataset.taskId;
+
+
+                        openTask(
+                            taskId
+                        );
+                    }
+                );
+            }
+        );
+
+
+    container
+        .querySelectorAll(
+            ".available-job-card"
+        )
+        .forEach(
+            card => {
+
+                card.addEventListener(
+                    "dblclick",
+                    () => {
+
+                        const taskId =
+                            card.dataset.taskId;
+
+
+                        openTask(
+                            taskId
+                        );
+                    }
+                );
+            }
+        );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // OPEN TASK
-// ------------------------------------------------------------
+// ============================================================
 
-export function openTask(taskId) {
+export function openTask(
+    taskId
+) {
+
     if (!taskId) {
         return;
     }
+
 
     window.dispatchEvent(
         new CustomEvent(
@@ -873,14 +1395,17 @@ export function openTask(taskId) {
     );
 
 
-    // Compatibility with tasks.js.
     try {
 
         if (
             typeof window.loadTask ===
             "function"
         ) {
-            window.loadTask(taskId);
+
+            window.loadTask(
+                taskId
+            );
+
             return;
         }
 
@@ -890,12 +1415,15 @@ export function openTask(taskId) {
             "function"
         ) {
 
-            // Avoid recursively calling this function.
             if (
                 window.openTask !==
                 openTask
             ) {
-                window.openTask(taskId);
+
+                window.openTask(
+                    taskId
+                );
+
                 return;
             }
         }
@@ -905,7 +1433,11 @@ export function openTask(taskId) {
             typeof window.selectTask ===
             "function"
         ) {
-            window.selectTask(taskId);
+
+            window.selectTask(
+                taskId
+            );
+
             return;
         }
 
@@ -919,26 +1451,38 @@ export function openTask(taskId) {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // REFRESH DASHBOARD
-// ------------------------------------------------------------
+// ============================================================
 
 export async function refreshDashboard() {
+
     const button =
         $("refreshDashboardJobs");
 
+
     if (button) {
-        button.disabled = true;
-        button.classList.add("loading");
+
+        button.disabled =
+            true;
+
+        button.classList.add(
+            "loading"
+        );
     }
 
+
     try {
+
         return await loadDashboardJobs();
 
     } finally {
 
         if (button) {
-            button.disabled = false;
+
+            button.disabled =
+                false;
+
             button.classList.remove(
                 "loading"
             );
@@ -947,100 +1491,137 @@ export async function refreshDashboard() {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // DASHBOARD STATS
-// ------------------------------------------------------------
+// ============================================================
 
 export function updateDashboardStats() {
+
     const jobs =
         homeState.jobs || [];
 
 
     const availableCount =
-        jobs.filter(task => {
+        jobs.filter(
+            task => {
 
-            const status =
-                getTaskStatus(task);
+                const status =
+                    getTaskStatus(
+                        task
+                    );
 
-            return [
-                "available",
-                "open",
-                "pending"
-            ].includes(status);
 
-        }).length;
+                return [
+                    "available",
+                    "open",
+                    "pending",
+                    "unclaimed",
+                    "draft"
+                ].includes(
+                    status
+                );
+            }
+        ).length;
 
 
     const assignedCount =
-        jobs.filter(task => {
+        jobs.filter(
+            task => {
 
-            const status =
-                getTaskStatus(task);
+                const status =
+                    getTaskStatus(
+                        task
+                    );
 
-            return [
-                "assigned",
-                "in_progress",
-                "in-progress",
-                "working"
-            ].includes(status);
 
-        }).length;
+                return [
+                    "assigned",
+                    "claimed",
+                    "in_progress",
+                    "in-progress",
+                    "working",
+                    "in_review",
+                    "review"
+                ].includes(
+                    status
+                );
+            }
+        ).length;
 
 
     const completedCount =
-        jobs.filter(task => {
+        jobs.filter(
+            task => {
 
-            const status =
-                getTaskStatus(task);
+                const status =
+                    getTaskStatus(
+                        task
+                    );
 
-            return [
-                "completed",
-                "approved",
-                "submitted"
-            ].includes(status);
 
-        }).length;
+                return [
+                    "completed",
+                    "approved",
+                    "submitted",
+                    "paid"
+                ].includes(
+                    status
+                );
+            }
+        ).length;
 
 
     const mappings = {
+
         availableCount,
+
         assignedCount,
+
         completedCount,
-        totalJobs: jobs.length
+
+        totalJobs:
+            jobs.length
     };
 
 
-    Object.entries(mappings)
-        .forEach(
-            ([id, value]) => {
+    Object.entries(
+        mappings
+    ).forEach(
+        ([id, value]) => {
 
-                const element =
-                    $(id);
+            const element =
+                $(id);
 
-                if (element) {
-                    element.textContent =
-                        String(value);
-                }
+
+            if (element) {
+
+                element.textContent =
+                    String(value);
             }
-        );
+        }
+    );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // REFRESH BUTTON
-// ------------------------------------------------------------
+// ============================================================
 
 function bindRefreshButton() {
+
     const button =
         $("refreshDashboardJobs");
+
 
     if (
         !button ||
         button.dataset.homeBound ===
             "true"
     ) {
+
         return;
     }
+
 
     button.dataset.homeBound =
         "true";
@@ -1052,52 +1633,79 @@ function bindRefreshButton() {
 
             event.preventDefault();
 
-            refreshDashboard();
+            refreshAvailableJobs();
         }
     );
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // COWORKER DASHBOARD
-// ------------------------------------------------------------
+// ============================================================
 
-function setupCoworkerDashboard(user) {
+function setupCoworkerDashboard(
+    user
+) {
+
     const dashboard =
         $("coworkerDashboard");
+
 
     if (!dashboard) {
         return;
     }
 
+
     const role =
-        normalizeRole(user);
+        normalizeRole(
+            user
+        );
+
 
     const coworkerRoles = [
+
         "coworker",
+
+        "worker",
+
+        "coworker_2d_box",
+
+        "coworker_polygon",
+
+        "coworker_segmentation",
+
         "staff",
+
         "reviewer",
-        "admin",
-        "worker"
+
+        "admin"
     ];
 
 
     if (
-        coworkerRoles.includes(role)
+        coworkerRoles.includes(
+            role
+        )
     ) {
-        dashboard.hidden = false;
-        dashboard.style.display = "";
+
+        dashboard.hidden =
+            false;
+
+        dashboard.style.display =
+            "";
     }
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // COWORKER WORKBENCH
-// ------------------------------------------------------------
+// ============================================================
 
 function bindCoworkerWorkbench() {
+
     const workbench =
         $("coworkerWorkbench");
+
 
     if (!workbench) {
         return;
@@ -1108,6 +1716,7 @@ function bindCoworkerWorkbench() {
         workbench.dataset.homeBound ===
         "true"
     ) {
+
         return;
     }
 
@@ -1119,20 +1728,34 @@ function bindCoworkerWorkbench() {
     const upload =
         $("workbenchUpload");
 
+
     const ai =
         $("workbenchAI");
 
+
+    const edit =
+        $("workbenchEditTool");
+
+
+    // --------------------------------------------------------
+    // Upload
+    // --------------------------------------------------------
 
     if (upload) {
 
         upload.addEventListener(
             "click",
-            () => {
+            event => {
+
+                event.preventDefault();
+
 
                 const mediaInput =
                     $("mediaInput");
 
+
                 if (mediaInput) {
+
                     mediaInput.click();
                 }
             }
@@ -1140,11 +1763,18 @@ function bindCoworkerWorkbench() {
     }
 
 
+    // --------------------------------------------------------
+    // AI
+    // --------------------------------------------------------
+
     if (ai) {
 
         ai.addEventListener(
             "click",
-            () => {
+            event => {
+
+                event.preventDefault();
+
 
                 window.dispatchEvent(
                     new CustomEvent(
@@ -1170,12 +1800,66 @@ function bindCoworkerWorkbench() {
             }
         );
     }
+
+
+    // --------------------------------------------------------
+    // Edit tool
+    // --------------------------------------------------------
+
+    if (edit) {
+
+        edit.addEventListener(
+            "click",
+            event => {
+
+                event.preventDefault();
+
+
+                window.dispatchEvent(
+                    new CustomEvent(
+                        "home:editTool"
+                    )
+                );
+
+
+                const selectTool =
+                    $("selectTool") ||
+                    $("editTool") ||
+                    $("toolSelect");
+
+
+                if (selectTool) {
+
+                    if (
+                        selectTool.tagName ===
+                        "SELECT"
+                    ) {
+
+                        selectTool.value =
+                            "select";
+                    }
+
+
+                    selectTool.click?.();
+                }
+
+
+                if (
+                    typeof window.activateEditTool ===
+                    "function"
+                ) {
+
+                    window.activateEditTool();
+                }
+            }
+        );
+    }
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // AUTH EVENTS
-// ------------------------------------------------------------
+// ============================================================
 
 function bindAuthEvents() {
 
@@ -1187,13 +1871,17 @@ function bindAuthEvents() {
                 event.detail?.user ||
                 null;
 
+
             homeState.user =
                 user;
 
 
             if (user) {
 
-                updateUserUI(user);
+                updateUserUI(
+                    user
+                );
+
 
                 setupCoworkerDashboard(
                     user
@@ -1202,6 +1890,7 @@ function bindAuthEvents() {
 
 
             showHome();
+
 
             loadDashboardJobs();
         }
@@ -1216,7 +1905,9 @@ function bindAuthEvents() {
                 event.detail?.session;
 
 
-            if (session?.user) {
+            if (
+                session?.user
+            ) {
 
                 homeState.user =
                     session.user;
@@ -1234,6 +1925,7 @@ function bindAuthEvents() {
 
                 showHome();
 
+
                 loadDashboardJobs();
             }
         }
@@ -1247,16 +1939,22 @@ function bindAuthEvents() {
             homeState.user =
                 null;
 
+
             homeState.jobs =
                 [];
 
 
             const container =
-                $("availableJobs");
+                $("availableJobs") ||
+                $("jobsList") ||
+                $("availableJobsList");
 
 
             if (container) {
-                renderNoJobs(container);
+
+                renderNoJobs(
+                    container
+                );
             }
 
 
@@ -1266,19 +1964,26 @@ function bindAuthEvents() {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // TASK EVENTS
-// ------------------------------------------------------------
+// ============================================================
 
 function bindTaskEvents() {
 
     const events = [
+
         "task:created",
+
         "task:updated",
+
         "task:submitted",
+
         "task:completed",
+
         "task:approved",
+
         "task:rejected",
+
         "task:skipped"
     ];
 
@@ -1291,7 +1996,7 @@ function bindTaskEvents() {
                 () => {
 
                     setTimeout(
-                        refreshDashboard,
+                        refreshAvailableJobs,
                         250
                     );
                 }
@@ -1301,29 +2006,30 @@ function bindTaskEvents() {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // GLOBAL COMPATIBILITY
-// ------------------------------------------------------------
+// ============================================================
 
 function exposeGlobals() {
+
+    window.loadDashboard =
+        loadDashboard;
+
 
     window.loadDashboardJobs =
         loadDashboardJobs;
 
 
-    // Important:
-    // Some older/newer app.js versions use
-    // window.loadDashboard instead.
-    window.loadDashboard =
-        loadDashboard;
+    window.refreshDashboard =
+        refreshDashboard;
+
+
+    window.refreshAvailableJobs =
+        refreshAvailableJobs;
 
 
     window.renderAvailableJobs =
         renderAvailableJobs;
-
-
-    window.refreshDashboard =
-        refreshDashboard;
 
 
     window.openDashboardTask =
@@ -1343,13 +2049,16 @@ function exposeGlobals() {
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // INITIALIZATION
-// ------------------------------------------------------------
+// ============================================================
 
 export async function initializeHome() {
 
-    if (homeState.initialized) {
+    if (
+        homeState.initialized
+    ) {
+
         return;
     }
 
@@ -1370,37 +2079,49 @@ export async function initializeHome() {
     bindTaskEvents();
 
 
-    const session =
-        await getCurrentSession();
+    try {
+
+        const session =
+            await getCurrentSession();
 
 
-    if (session?.user) {
+        if (
+            session?.user
+        ) {
 
-        homeState.user =
-            session.user;
+            homeState.user =
+                session.user;
 
 
-        updateUserUI(
-            session.user
+            updateUserUI(
+                session.user
+            );
+
+
+            setupCoworkerDashboard(
+                session.user
+            );
+
+
+            showHome();
+
+
+            await loadDashboardJobs();
+        }
+
+    } catch (error) {
+
+        console.error(
+            "Home initialization error:",
+            error
         );
-
-
-        setupCoworkerDashboard(
-            session.user
-        );
-
-
-        showHome();
-
-
-        await loadDashboardJobs();
     }
 }
 
 
-// ------------------------------------------------------------
+// ============================================================
 // AUTO INITIALIZE
-// ------------------------------------------------------------
+// ============================================================
 
 if (
     document.readyState ===
@@ -1421,16 +2142,22 @@ if (
 }
 
 
-// ------------------------------------------------------------
-// EXPORT STATE
-// ------------------------------------------------------------
+// ============================================================
+// EXPORT STATE + HELPERS
+// ============================================================
 
 export {
     homeState,
+
     getTaskTitle,
+
     getTaskStatus,
+
     getTaskShape,
+
     getTaskPay,
+
     getTaskDuration,
+
     getTaskMedia
 };
