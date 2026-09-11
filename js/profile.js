@@ -24,7 +24,6 @@ import {
   getCurrentUser,
   getCurrentProfile,
   getRole,
-  getUserName,
   updateUserProfile,
   updateAvatar,
   signOut,
@@ -58,8 +57,7 @@ export const profileState = {
   modalOpen: false,
 };
 
-window.profileState =
-  profileState;
+window.profileState = profileState;
 
 /* ============================================================
    HELPERS
@@ -108,9 +106,20 @@ function showElement(
   if (show) {
     element.style.display = "";
   } else {
-    element.style.display =
-      "none";
+    element.style.display = "none";
   }
+}
+
+function setText(
+  element,
+  value = ""
+) {
+  if (!element) return;
+
+  element.textContent =
+    value == null
+      ? ""
+      : String(value);
 }
 
 function toast(
@@ -186,8 +195,7 @@ function refreshState() {
   profileState.role =
     normalizeRole(
       getRole?.() ||
-        profileState.profile
-          ?.role ||
+        profileState.profile?.role ||
         profileState.user
           ?.user_metadata
           ?.role ||
@@ -213,8 +221,7 @@ function refreshState() {
   profileState.originalEmail =
     text(
       profileState.user?.email ||
-        profileState.profile
-          ?.email,
+        profileState.profile?.email,
       ""
     );
 
@@ -236,6 +243,10 @@ export function initializeProfile() {
     profileState.initialized
   ) {
     refreshState();
+
+    updateNavigationProfile();
+    updateDashboardProfile();
+
     return profileState;
   }
 
@@ -382,8 +393,8 @@ function populateProfileForm() {
 
     /*
      * Email is intentionally read-only.
-     * Changing the authentication email
-     * requires a separate verified flow.
+     * Changing authentication email requires
+     * a separate verified flow.
      */
     emailInput.readOnly =
       true;
@@ -463,29 +474,30 @@ function bindAvatarUpload() {
   const input =
     $("avatarInput");
 
-  if (!input) return;
+  if (input) {
+    input.addEventListener(
+      "change",
+      async () => {
+        const file =
+          input.files?.[0];
 
-  input.addEventListener(
-    "change",
-    async () => {
-      const file =
-        input.files?.[0];
+        if (!file) {
+          return;
+        }
 
-      if (!file) {
-        return;
+        await uploadProfileAvatar(
+          file
+        );
+
+        /*
+         * Reset input so selecting
+         * the same file again triggers
+         * change.
+         */
+        input.value = "";
       }
-
-      await uploadProfileAvatar(
-        file
-      );
-
-      /*
-       * Reset input so selecting the
-       * same file again triggers change.
-       */
-      input.value = "";
-    }
-  );
+    );
+  }
 
   /*
    * Older HTML may use
@@ -519,7 +531,7 @@ function bindAvatarUpload() {
   }
 }
 
-async function uploadProfileAvatar(
+export async function uploadProfileAvatar(
   file
 ) {
   if (
@@ -539,13 +551,22 @@ async function uploadProfileAvatar(
     return false;
   }
 
+  if (!file) {
+    toast(
+      "Please choose an image file.",
+      "warning"
+    );
+
+    return false;
+  }
+
   /*
    * Image-only validation.
    */
   if (
-    !file.type.startsWith(
-      "image/"
-    )
+    !String(
+      file.type || ""
+    ).startsWith("image/")
   ) {
     toast(
       "Please choose an image file.",
@@ -624,6 +645,11 @@ async function uploadProfileAvatar(
 
       refreshState();
 
+      /*
+       * Keep the returned URL if the
+       * profile refresh has not yet
+       * picked it up.
+       */
       if (
         !profileState.avatarUrl &&
         newUrl
@@ -664,7 +690,7 @@ async function uploadProfileAvatar(
       "avatars";
 
     const extension =
-      file.name.includes(".")
+      file.name?.includes(".")
         ? file.name
             .split(".")
             .pop()
@@ -781,11 +807,19 @@ async function uploadProfileAvatar(
         }
       );
     } catch {
-      // Profile table remains the source of truth.
+      /*
+       * Profile table remains the
+       * source of truth.
+       */
     }
 
     profileState.avatarUrl =
       avatarUrl;
+
+    if (profileState.profile) {
+      profileState.profile.avatar_url =
+        avatarUrl;
+    }
 
     renderAvatarPreview();
     updateNavigationProfile();
@@ -804,7 +838,7 @@ async function uploadProfileAvatar(
     );
 
     toast(
-      error.message ||
+      error?.message ||
         "Unable to upload profile picture.",
       "error"
     );
@@ -943,9 +977,7 @@ export async function saveProfile() {
 
   try {
     /*
-     * Preserve the protected admin email.
-     * The profile page does not allow email
-     * changes anyway.
+     * Email remains protected/read-only.
      */
     const email =
       profileState.originalEmail;
@@ -954,6 +986,12 @@ export async function saveProfile() {
       normalizeRole(
         profileState.role
       );
+
+    /*
+     * Keep variables referenced so
+     * protected values are explicit.
+     */
+    void email;
 
     /*
      * Update profile using auth.js helper.
@@ -1013,7 +1051,7 @@ export async function saveProfile() {
      * Also synchronize Supabase Auth
      * metadata when possible.
      *
-     * This does NOT change email or role.
+     * This does NOT change email.
      */
     const client =
       getClient();
@@ -1040,10 +1078,7 @@ export async function saveProfile() {
         );
       } catch (error) {
         /*
-         * The profile update already
-         * succeeded. Metadata failure
-         * should not make the user think
-         * their profile was lost.
+         * Profile update already succeeded.
          */
         console.warn(
           "Auth metadata update:",
@@ -1110,7 +1145,7 @@ export async function saveProfile() {
     );
 
     toast(
-      error.message ||
+      error?.message ||
         "Unable to save profile.",
       "error"
     );
@@ -1362,6 +1397,12 @@ export async function refreshProfile() {
           profileState.originalName
         );
 
+      profileState.originalEmail =
+        text(
+          data.email,
+          profileState.originalEmail
+        );
+
       profileState.avatarUrl =
         data.avatar_url ||
         profileState.avatarUrl;
@@ -1406,7 +1447,9 @@ async function logProfileActivity(
 
     return;
   } catch {
-    // Use direct fallback below.
+    /*
+     * Use direct fallback below.
+     */
   }
 
   try {
@@ -1415,6 +1458,11 @@ async function logProfileActivity(
 
     if (!client) return;
 
+    /*
+     * IMPORTANT:
+     * activity_logs does NOT contain
+     * actor_id in the current schema.
+     */
     await client
       .from(
         APP_CONFIG?.tables
@@ -1425,11 +1473,17 @@ async function logProfileActivity(
         user_id:
           profileState.user?.id ||
           null,
-        actor_id:
-          profileState.user?.id ||
-          null,
+
         action,
+
+        event_type:
+          action,
+
         metadata,
+
+        details:
+          metadata,
+
         created_at:
           new Date().toISOString(),
       });
@@ -1473,7 +1527,9 @@ export async function logoutFromProfile() {
       {}
     );
   } catch {
-    // Do not block logout.
+    /*
+     * Do not block logout.
+     */
   }
 
   try {
@@ -1489,7 +1545,7 @@ export async function logoutFromProfile() {
     );
 
     toast(
-      error.message ||
+      error?.message ||
         "Unable to log out.",
       "error"
     );
@@ -1545,6 +1601,10 @@ function clearProfileUI() {
   if (navAvatar) {
     navAvatar.innerHTML =
       "";
+
+    navAvatar.classList.remove(
+      "has-avatar"
+    );
   }
 
   setText(
@@ -1556,6 +1616,30 @@ function clearProfileUI() {
     $("dashboardRoleText"),
     ""
   );
+
+  const dashboardAvatar =
+    $("dashboardAvatar");
+
+  if (dashboardAvatar) {
+    dashboardAvatar.removeAttribute(
+      "src"
+    );
+
+    showElement(
+      dashboardAvatar,
+      false
+    );
+  }
+
+  const dashboardFallback =
+    $("dashboardAvatarFallback");
+
+  if (dashboardFallback) {
+    showElement(
+      dashboardFallback,
+      false
+    );
+  }
 }
 
 /* ============================================================
@@ -1583,9 +1667,7 @@ export function isProtectedAdminProfile() {
 
 /*
  * The profile page never exposes controls
- * for changing role or email. This is
- * especially important for the protected
- * administrator account.
+ * for changing role or email.
  */
 export function canEditProfileField(
   field
@@ -1643,6 +1725,33 @@ export async function getAvatarUrl(
       ?.profilePictures ||
     "avatars";
 
+  /*
+   * Try public URL first.
+   */
+  try {
+    const {
+      data,
+    } =
+      client.storage
+        .from(bucket)
+        .getPublicUrl(
+          path
+        );
+
+    if (
+      data?.publicUrl
+    ) {
+      return data.publicUrl;
+    }
+  } catch {
+    /*
+     * Continue to signed URL.
+     */
+  }
+
+  /*
+   * Private bucket fallback.
+   */
   try {
     const {
       data,
@@ -1762,18 +1871,12 @@ if (
 }
 
 /* ============================================================
-   EXPORTS
+   MODULE LOADED
+   ------------------------------------------------------------
+   IMPORTANT:
+   There is intentionally NO second export block here.
+   Every exported function is exported exactly once above.
    ============================================================ */
-
-export {
-  uploadProfileAvatar,
-  updateNavigationProfile,
-  updateDashboardProfile,
-  refreshProfile,
-  getAvatarUrl,
-  getProfileSnapshot,
-  isProtectedAdminProfile,
-};
 
 console.log(
   "Profile module loaded."
