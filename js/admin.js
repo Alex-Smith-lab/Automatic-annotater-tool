@@ -1,6847 +1,5513 @@
 /* ============================================================
    ADMIN.JS
-   ANNOTATION AI
-
-   ADMIN CENTER
+   Full-screen Admin Center
    ------------------------------------------------------------
-   Users
-   Roles
-   Approval
-   Kicked / disabled users
-   Coworkers
-   Staff
-   Tasks
-   Assignment
-   Reassignment
-   Task progress
-   Payments
-   Pay rates
-   Activity
-   CSV export
-   HTML export
-
-   IMPORTANT
-   ------------------------------------------------------------
-   This file NEVER uses a Supabase service-role key.
-
-   Browser access uses the publishable/anon key through
-   supabase.js.
-
-   IMPORTANT:
-   Database/RLS policies must still protect production data.
-============================================================ */
+   Features:
+   - Admin-only access
+   - Dashboard statistics
+   - User management
+   - Approve / deactivate / kick users
+   - Change user roles
+   - Create coworker / staff accounts
+   - Task management
+   - Assign / reassign tasks
+   - Task progress
+   - Pay-rate management
+   - Payment management
+   - Activity logs
+   - CSV export
+   - HTML export
+   - Admin full-screen workspace
+   ============================================================ */
 
 import {
-    supabase,
-    getCurrentUser,
-    getCurrentSession,
-    getCurrentProfile,
-    logActivity,
-    logWorkflowEvent
-} from "./supabase.js";
-
-import {
-    APP_CONFIG,
-    ALL_ROLES,
-    normalizeRole,
-    roleLabel,
-    isAdminRole,
-    isStaffRole,
-    isReviewerRole,
-    isCoworkerRole,
-    WORK_ROLE,
-    roleForWorkType
+  APP_CONFIG,
+  ALL_ROLES,
+  WORK_ROLE,
+  normalizeRole,
+  isAdminRole,
+  isStaffRole,
+  isReviewerRole,
+  isCoworkerRole,
+  roleLabel,
+  annotationTypeForRole,
+  roleForWorkType,
 } from "./config.js";
 
 import {
-    isAdmin
+  getCurrentUser,
+  getCurrentProfile,
+  getRole,
+  isAdmin,
+  isStaff,
+  isReviewer,
+  signOut,
 } from "./auth.js";
 
-
-/* ============================================================
-   CONFIGURATION
-============================================================ */
-
-const ADMIN_CONFIG = {
-
-    adminEmail:
-        APP_CONFIG?.adminEmail ||
-        window.ADMIN_EMAIL ||
-        "antonymbali96@gmail.com",
-
-    tables: {
-
-        tasks:
-            APP_CONFIG?.tables?.tasks ||
-            window.APP_TASK_TABLE ||
-            "tasks",
-
-        profiles:
-            APP_CONFIG?.tables?.profiles ||
-            window.APP_PROFILE_TABLE ||
-            "profiles",
-
-        results:
-            APP_CONFIG?.tables?.taskResults ||
-            APP_CONFIG?.tables?.results ||
-            window.APP_RESULT_TABLE ||
-            "task_results",
-
-        annotations:
-            APP_CONFIG?.tables?.annotations ||
-            "task_annotations",
-
-        coworkers:
-            APP_CONFIG?.tables?.coworkers ||
-            window.APP_COWORKER_TABLE ||
-            "coworkers",
-
-        payments:
-            APP_CONFIG?.tables?.payments ||
-            window.APP_PAYMENT_TABLE ||
-            "payments",
-
-        payRates:
-            APP_CONFIG?.tables?.payRates ||
-            "pay_rates",
-
-        activity:
-            APP_CONFIG?.tables?.activityLogs ||
-            window.APP_ACTIVITY_TABLE ||
-            "activity_logs",
-
-        taskSkips:
-            APP_CONFIG?.tables?.taskSkips ||
-            "task_skips"
-    },
-
-    buckets: {
-
-        taskMedia:
-            APP_CONFIG?.buckets?.taskMedia ||
-            "task-media"
-    },
-
-    roles:
-        Array.isArray(ALL_ROLES)
-            ? ALL_ROLES
-            : [
-                "customer",
-                "reviewer",
-                "staff",
-                "admin",
-                "coworker_2d_box",
-                "coworker_polygon",
-                "coworker_segmentation"
-            ]
-};
-
-
-/* ============================================================
-   DOM HELPER
-============================================================ */
-
-const $ = id =>
-    document.getElementById(id);
-
-
-/* ============================================================
-   DOM REFERENCES
-============================================================ */
-
-let adminModal;
-let closeAdminModalButton;
-let adminCenterButton;
-
-let createTaskButton;
-let taskTitleInput;
-let taskShapeInput;
-let taskDurationInput;
-let taskPayInput;
-let taskMediaInput;
-
-let adminTasksList;
-let adminUsersList;
-let adminCoworkersList;
-let paymentsList;
-let activityList;
-let payRatesList;
-
-let copyAdminCSV;
-let downloadAdminHTML;
-
-let adminContent;
-
-
-/* ============================================================
-   REFRESH DOM REFERENCES
-============================================================ */
-
-function cacheDOM() {
-
-    adminModal =
-        $("adminModal");
-
-    closeAdminModalButton =
-        $("closeAdminModal");
-
-    adminCenterButton =
-        $("adminCenterButton");
-
-
-    createTaskButton =
-        $("createTaskButton");
-
-    taskTitleInput =
-        $("taskTitle");
-
-    taskShapeInput =
-        $("taskShape");
-
-    taskDurationInput =
-        $("taskDuration");
-
-    taskPayInput =
-        $("taskPay");
-
-    taskMediaInput =
-        $("taskMediaInput");
-
-
-    adminTasksList =
-        $("adminTasksList") ||
-        $("adminTasksTable");
-
-
-    adminUsersList =
-        $("usersList") ||
-        $("adminUsersList") ||
-        $("adminUsersTable");
-
-
-    adminCoworkersList =
-        $("coworkersList") ||
-        $("adminCoworkersList") ||
-        $("adminCoworkersTable");
-
-
-    paymentsList =
-        $("paymentsList");
-
-
-    activityList =
-        $("activityList");
-
-
-    payRatesList =
-        $("payRatesList");
-
-
-    copyAdminCSV =
-        $("copyAdminCSV");
-
-
-    downloadAdminHTML =
-        $("downloadAdminHTML");
-
-
-    adminContent =
-        $("adminContent");
-}
-
+import {
+  getSupabase,
+  getCurrentUser as getSupabaseUser,
+  logActivity,
+  logWorkflowEvent,
+} from "./supabase.js";
 
 /* ============================================================
    STATE
-============================================================ */
+   ============================================================ */
 
-const adminState = {
+export const adminState = {
+  initialized: false,
 
-    initialized:
-        false,
+  user: null,
+  profile: null,
+  role: null,
 
-    open:
-        false,
+  currentPage: "overview",
 
-    loading:
-        false,
+  users: [],
+  tasks: [],
+  payments: [],
+  payRates: [],
+  activities: [],
 
-    currentUser:
-        null,
+  loading: false,
 
-    currentProfile:
-        null,
+  selectedUser: null,
+  selectedTask: null,
 
-    currentRole:
-        null,
+  exportRows: [],
 
-    activeTab:
-        "overview",
-
-    users:
-        [],
-
-    coworkers:
-        [],
-
-    tasks:
-        [],
-
-    payments:
-        [],
-
-    payRates:
-        [],
-
-    activity:
-        [],
-
-    selectedTask:
-        null,
-
-    lastRefresh:
-        null,
-
-    optionalTables:
-        {
-            coworkers:
-                true,
-
-            payments:
-                true,
-
-            payRates:
-                true,
-
-            activity:
-                true,
-
-            annotations:
-                true,
-
-            results:
-                true
-        }
+  stats: {
+    users: 0,
+    customers: 0,
+    coworkers: 0,
+    reviewers: 0,
+    staff: 0,
+    admins: 0,
+    pending: 0,
+    active: 0,
+    tasks: 0,
+    available: 0,
+    claimed: 0,
+    submitted: 0,
+    approved: 0,
+    skipped: 0,
+    unpaid: 0,
+    paid: 0,
+  },
 };
 
+window.adminState = adminState;
 
 /* ============================================================
-   SAFE HTML
-============================================================ */
+   HELPERS
+   ============================================================ */
+
+const $ = (id) =>
+  document.getElementById(id);
+
+const qs = (
+  selector,
+  root = document
+) => {
+  try {
+    return root.querySelector(
+      selector
+    );
+  } catch {
+    return null;
+  }
+};
+
+const qsa = (
+  selector,
+  root = document
+) => {
+  try {
+    return [
+      ...root.querySelectorAll(
+        selector
+      ),
+    ];
+  } catch {
+    return [];
+  }
+};
+
+function text(
+  value,
+  fallback = ""
+) {
+  return value == null ||
+    value === ""
+    ? fallback
+    : String(value);
+}
+
+function number(
+  value,
+  fallback = 0
+) {
+  const n = Number(value);
+  return Number.isFinite(n)
+    ? n
+    : fallback;
+}
 
 function escapeHTML(value) {
-
-    return String(
-        value ?? ""
-    )
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
+  return String(
+    value ?? ""
+  )
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
-
-
-/* ============================================================
-   DATE
-============================================================ */
-
-function formatDate(value) {
-
-    if (!value) {
-        return "—";
-    }
-
-    const date =
-        new Date(value);
-
-    if (
-        Number.isNaN(
-            date.getTime()
-        )
-    ) {
-        return escapeHTML(
-            value
-        );
-    }
-
-    return date.toLocaleString();
-}
-
-
-/* ============================================================
-   MONEY
-============================================================ */
 
 function formatMoney(value) {
+  const amount = number(
+    value,
+    0
+  );
 
-    const amount =
-        Number(value);
-
-    if (
-        !Number.isFinite(
-            amount
-        )
-    ) {
-        return "0.00";
+  return amount.toLocaleString(
+    undefined,
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }
-
-    return amount.toFixed(2);
+  );
 }
 
+function formatDate(value) {
+  if (!value) return "—";
 
-/* ============================================================
-   SUPABASE
-============================================================ */
+  const date =
+    new Date(value);
 
-function getSupabaseClient() {
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return text(value);
+  }
 
-    if (supabase) {
-        return supabase;
-    }
-
-    if (
-        window.supabaseClient
-    ) {
-        return window.supabaseClient;
-    }
-
-    return null;
+  return date.toLocaleString();
 }
 
+function formatDateShort(value) {
+  if (!value) return "—";
 
-/* ============================================================
-   CURRENT USER
-============================================================ */
+  const date =
+    new Date(value);
 
-async function getAdminUser() {
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return text(value);
+  }
 
-    try {
-
-        if (
-            typeof getCurrentUser ===
-            "function"
-        ) {
-
-            const user =
-                await getCurrentUser();
-
-            if (user) {
-                return user;
-            }
-        }
-
-    } catch (error) {
-
-        console.warn(
-            "Admin user lookup failed:",
-            error
-        );
-    }
-
-
-    try {
-
-        if (
-            typeof getCurrentSession ===
-            "function"
-        ) {
-
-            const session =
-                await getCurrentSession();
-
-            return (
-                session?.user ||
-                null
-            );
-        }
-
-    } catch (error) {
-
-        console.warn(
-            "Admin session lookup failed:",
-            error
-        );
-    }
-
-
-    return null;
+  return date.toLocaleDateString();
 }
 
-
-/* ============================================================
-   PROFILE ROLE
-============================================================ */
-
-function getProfileRole(
-    profile
+function showElement(
+  element,
+  show = true
 ) {
+  if (!element) return;
 
-    if (!profile) {
-        return null;
-    }
+  element.hidden = !show;
 
-    return normalizeRole(
-        profile.role ||
-        profile.user_role ||
-        null
-    );
+  if (show) {
+    element.style.display = "";
+  } else {
+    element.style.display =
+      "none";
+  }
 }
 
-
-/* ============================================================
-   ADMIN CHECK
-============================================================ */
-
-function isAdminUser(
-    user = adminState.currentUser
+function setText(
+  element,
+  value
 ) {
+  if (!element) return;
 
-    if (!user) {
-        return false;
-    }
-
-
-    /*
-     * First use the central auth module.
-     */
-
-    try {
-
-        if (
-            typeof isAdmin ===
-            "function" &&
-            isAdmin()
-        ) {
-            return true;
-        }
-
-    } catch {
-        /* continue with fallback */
-    }
-
-
-    const metadata =
-        user.user_metadata ||
-        {};
-
-    const appMetadata =
-        user.app_metadata ||
-        {};
-
-
-    const metadataRole =
-        normalizeRole(
-            metadata.role ||
-            appMetadata.role
-        );
-
-
-    if (
-        isAdminRole(
-            metadataRole
-        )
-    ) {
-        return true;
-    }
-
-
-    const profileRole =
-        getProfileRole(
-            adminState.currentProfile
-        );
-
-
-    if (
-        isAdminRole(
-            profileRole
-        )
-    ) {
-        return true;
-    }
-
-
-    const email =
-        String(
-            user.email ||
-            ""
-        )
-            .trim()
-            .toLowerCase();
-
-
-    return (
-        email ===
-        String(
-            ADMIN_CONFIG.adminEmail
-        )
-            .trim()
-            .toLowerCase()
-    );
+  element.textContent =
+    value ?? "";
 }
 
-
-/* ============================================================
-   REQUIRE ADMIN
-============================================================ */
-
-async function requireAdmin() {
-
-    const user =
-        await getAdminUser();
-
-
-    adminState.currentUser =
-        user;
-
-
-    if (!user) {
-
-        adminState.currentProfile =
-            null;
-
-        adminState.currentRole =
-            null;
-
-        return false;
-    }
-
-
-    try {
-
-        if (
-            typeof getCurrentProfile ===
-            "function"
-        ) {
-
-            adminState.currentProfile =
-                await getCurrentProfile();
-        }
-
-    } catch {
-
-        adminState.currentProfile =
-            null;
-    }
-
-
-    adminState.currentRole =
-        getProfileRole(
-            adminState.currentProfile
-        );
-
-
-    if (
-        !adminState.currentRole
-    ) {
-
-        adminState.currentRole =
-            normalizeRole(
-                user.user_metadata?.role ||
-                user.app_metadata?.role
-            );
-    }
-
-
-    return isAdminUser(
-        user
-    );
-}
-
-
-/* ============================================================
-   STATUS
-============================================================ */
-
-function setAdminStatus(
-    message,
-    type = "info"
+function toast(
+  message,
+  type = "info"
 ) {
+  if (
+    typeof window.showToast ===
+    "function"
+  ) {
+    window.showToast(
+      message,
+      type
+    );
+    return;
+  }
 
-    const element =
-        $("adminTaskStatus");
+  const container =
+    $("toastContainer");
 
+  if (!container) {
+    console.log(
+      `[${type}] ${message}`
+    );
+    return;
+  }
 
-    if (!element) {
-        return;
-    }
+  const item =
+    document.createElement(
+      "div"
+    );
 
+  item.className =
+    `toast toast-${type}`;
 
-    element.textContent =
-        message || "";
+  item.textContent =
+    message;
 
+  container.appendChild(item);
 
-    element.dataset.type =
-        type;
+  setTimeout(() => {
+    item.remove();
+  }, 4000);
 }
 
-
-/* ============================================================
-   TOAST
-============================================================ */
-
-function showAdminToast(
-    message,
-    type = "info"
-) {
-
-    if (
-        typeof window.showToast ===
-        "function"
-    ) {
-
-        window.showToast(
-            message,
-            type
-        );
-
-        return;
-    }
-
-
-    const container =
-        $("toastContainer");
-
-
-    if (!container) {
-        return;
-    }
-
-
-    const toast =
-        document.createElement(
-            "div"
-        );
-
-
-    toast.className =
-        "toast";
-
-
-    toast.dataset.type =
-        type;
-
-
-    toast.textContent =
-        message;
-
-
-    container.appendChild(
-        toast
-    );
-
-
-    window.setTimeout(
-        () => {
-            toast.remove();
-        },
-        3500
-    );
+function getClient() {
+  return (
+    getSupabase?.() ||
+    window.supabaseClient ||
+    null
+  );
 }
 
-
-/* ============================================================
-   GENERIC TABLE CHECK
-============================================================ */
-
-function isMissingTableError(
-    error
-) {
-
-    const message =
-        String(
-            error?.message ||
-            ""
-        )
-            .toLowerCase();
-
-
-    return (
-        message.includes(
-            "does not exist"
-        ) ||
-        message.includes(
-            "relation"
-        ) ||
-        message.includes(
-            "could not find"
-        ) ||
-        message.includes(
-            "schema cache"
-        )
-    );
+function currentAdminEmail() {
+  return String(
+    APP_CONFIG?.adminEmail ||
+      "antonymbali96@gmail.com"
+  ).toLowerCase();
 }
 
-
 /* ============================================================
-   GENERIC UPDATE LOCAL USER
-============================================================ */
+   ADMIN ACCESS
+   ============================================================ */
 
-function updateLocalUser(
-    userId,
-    changes
-) {
+function isCurrentUserAdmin() {
+  const email =
+    String(
+      adminState.user?.email ||
+        ""
+    ).toLowerCase();
 
-    const index =
-        adminState.users.findIndex(
-            user =>
-                String(
-                    user.id
-                ) ===
-                String(
-                    userId
-                )
-        );
+  const currentRole =
+    normalizeRole(
+      adminState.role
+    );
 
-
-    if (index < 0) {
-        return;
-    }
-
-
-    adminState.users[index] =
-        {
-            ...adminState.users[index],
-            ...changes
-        };
+  return (
+    email ===
+      currentAdminEmail() ||
+    isAdminRole(currentRole)
+  );
 }
 
-
-/* ============================================================
-   OPEN ADMIN CENTER
-============================================================ */
-
-async function openAdminCenter() {
-
-    const allowed =
-        await requireAdmin();
-
-
-    if (!allowed) {
-
-        showAdminToast(
-            "Administrator access is required.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    cacheDOM();
-
-
-    adminState.open =
-        true;
-
-
-    if (adminModal) {
-
-        adminModal.style.display =
-            "flex";
-
-        adminModal.classList.add(
-            "open"
-        );
-
-        adminModal.setAttribute(
-            "aria-hidden",
-            "false"
-        );
-
-        adminModal.classList.add(
-            "admin-fullscreen-modal"
-        );
-    }
-
-
-    document.body.classList.add(
-        "admin-center-open"
+function requireAdmin() {
+  if (
+    !isCurrentUserAdmin()
+  ) {
+    toast(
+      "Administrator access is required.",
+      "error"
     );
 
+    return false;
+  }
 
-    activateAdminTab(
-        adminState.activeTab
+  return true;
+}
+
+function requireAdminOrStaff() {
+  const role =
+    normalizeRole(
+      adminState.role
     );
 
-
-    await refreshAdminCenter();
-
-
+  if (
+    isAdminRole(role) ||
+    isStaffRole(role)
+  ) {
     return true;
+  }
+
+  toast(
+    "Admin or staff access is required.",
+    "error"
+  );
+
+  return false;
 }
 
+/* ============================================================
+   TABLE NAMES
+   ============================================================ */
+
+function table(name, fallback) {
+  return (
+    APP_CONFIG?.tables?.[name] ||
+    fallback
+  );
+}
+
+const TABLES = {
+  profiles: table(
+    "profiles",
+    "profiles"
+  ),
+
+  tasks: table(
+    "tasks",
+    "tasks"
+  ),
+
+  annotations: table(
+    "annotations",
+    "annotations"
+  ),
+
+  payments: table(
+    "payments",
+    "payments"
+  ),
+
+  payRates: table(
+    "payRates",
+    "pay_rates"
+  ),
+
+  activities: table(
+    "activities",
+    "activity_logs"
+  ),
+
+  workflow: table(
+    "workflowEvents",
+    "workflow_events"
+  ),
+
+  skips: table(
+    "taskSkips",
+    "task_skips"
+  ),
+};
 
 /* ============================================================
-   CLOSE ADMIN CENTER
-============================================================ */
+   ROLE OPTIONS
+   ============================================================ */
 
-function closeAdminCenter() {
+function roleOptions(
+  selected = ""
+) {
+  const roles =
+    Array.isArray(
+      ALL_ROLES
+    ) && ALL_ROLES.length
+      ? ALL_ROLES
+      : [
+          "customer",
+          "coworker_2d_box",
+          "coworker_polygon",
+          "coworker_segmentation",
+          "reviewer",
+          "staff",
+          "admin",
+        ];
 
-    adminState.open =
-        false;
+  return roles
+    .map((role) => {
+      const normalized =
+        normalizeRole(role);
 
+      return `
+        <option
+          value="${escapeHTML(
+            normalized
+          )}"
+          ${
+            normalizeRole(
+              selected
+            ) === normalized
+              ? "selected"
+              : ""
+          }
+        >
+          ${escapeHTML(
+            roleLabel(normalized)
+          )}
+        </option>
+      `;
+    })
+    .join("");
+}
 
-    if (adminModal) {
+/* ============================================================
+   ADMIN CENTER OPEN / CLOSE
+   ============================================================ */
 
-        adminModal.classList.remove(
-            "open"
-        );
+export function openAdminCenter() {
+  if (!requireAdmin()) {
+    return false;
+  }
 
-        adminModal.style.display =
-            "none";
+  const modal =
+    $("adminModal");
 
-        adminModal.setAttribute(
-            "aria-hidden",
-            "true"
-        );
-    }
+  if (!modal) {
+    toast(
+      "Admin Center element was not found.",
+      "error"
+    );
 
+    return false;
+  }
 
-    document.body.classList.remove(
-        "admin-center-open"
+  showElement(
+    modal,
+    true
+  );
+
+  modal.classList.add(
+    "admin-fullscreen-modal"
+  );
+
+  document.body.classList.add(
+    "admin-center-open"
+  );
+
+  loadAdminCenter();
+
+  return true;
+}
+
+export function closeAdminCenter() {
+  const modal =
+    $("adminModal");
+
+  if (modal) {
+    showElement(
+      modal,
+      false
+    );
+  }
+
+  document.body.classList.remove(
+    "admin-center-open"
+  );
+
+  adminState.currentPage =
+    "overview";
+}
+
+function bindModal() {
+  $("closeAdminModal")
+    ?.addEventListener(
+      "click",
+      closeAdminCenter
+    );
+
+  $("adminCenterButton")
+    ?.addEventListener(
+      "click",
+      openAdminCenter
     );
 }
 
+/* ============================================================
+   ADMIN PAGES
+   ============================================================ */
+
+function getPages() {
+  return qsa(
+    "[data-admin-page]"
+  );
+}
+
+function getTabs() {
+  return qsa(
+    "[data-admin-tab]"
+  );
+}
+
+export function showAdminPage(
+  page
+) {
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const normalized =
+    String(
+      page || "overview"
+    ).trim();
+
+  adminState.currentPage =
+    normalized;
+
+  getPages().forEach(
+    (element) => {
+      const pageName =
+        element.dataset
+          .adminPage;
+
+      const visible =
+        pageName ===
+        normalized;
+
+      showElement(
+        element,
+        visible
+      );
+
+      element.classList.toggle(
+        "active",
+        visible
+      );
+    }
+  );
+
+  getTabs().forEach(
+    (tab) => {
+      const tabName =
+        tab.dataset.adminTab;
+
+      tab.classList.toggle(
+        "active",
+        tabName ===
+          normalized
+      );
+
+      tab.setAttribute(
+        "aria-selected",
+        tabName ===
+          normalized
+          ? "true"
+          : "false"
+      );
+    }
+  );
+
+  const loaders = {
+    overview:
+      loadOverview,
+    users:
+      loadUsers,
+    coworkers:
+      loadCoworkers,
+    tasks:
+      loadTasks,
+    payments:
+      loadPayments,
+    rates:
+      loadPayRates,
+    activity:
+      loadActivity,
+    export:
+      renderExportPage,
+  };
+
+  const loader =
+    loaders[normalized];
+
+  if (loader) {
+    loader();
+  }
+}
+
+function bindTabs() {
+  getTabs().forEach(
+    (tab) => {
+      tab.addEventListener(
+        "click",
+        () => {
+          showAdminPage(
+            tab.dataset.adminTab
+          );
+        }
+      );
+    }
+  );
+}
 
 /* ============================================================
-   REFRESH ADMIN CENTER
-============================================================ */
+   INITIALIZATION
+   ============================================================ */
 
-async function refreshAdminCenter() {
+export async function initializeAdmin() {
+  if (
+    adminState.initialized
+  ) {
+    return adminState;
+  }
 
-    if (
-        adminState.loading
-    ) {
-        return;
-    }
+  adminState.initialized =
+    true;
 
+  adminState.user =
+    getCurrentUser?.() ||
+    getSupabaseUser?.() ||
+    null;
 
-    const allowed =
-        await requireAdmin();
+  adminState.profile =
+    getCurrentProfile?.() ||
+    null;
 
-
-    if (!allowed) {
-        return;
-    }
-
-
-    adminState.loading =
-        true;
-
-
-    setAdminStatus(
-        "Refreshing admin center...",
-        "info"
+  adminState.role =
+    normalizeRole(
+      getRole?.() ||
+        adminState.profile?.role ||
+        ""
     );
 
+  bindModal();
+  bindTabs();
+  bindAdminButtons();
+  bindUserActions();
+  bindTaskActions();
+  bindPaymentActions();
+  bindRateActions();
+  bindCreateWorker();
+  bindCreateTask();
+  bindExportActions();
 
-    try {
+  hideAdminFromNonAdmin();
 
-        await Promise.allSettled([
+  if (
+    isCurrentUserAdmin()
+  ) {
+    showAdminPage(
+      "overview"
+    );
+  }
 
-            loadAdminTasks(),
-
-            loadAdminUsers(),
-
-            loadAdminCoworkers(),
-
-            loadAdminPayments(),
-
-            loadAdminPayRates(),
-
-            loadAdminActivity()
-        ]);
-
-
-        renderAdminTasks();
-
-        renderAdminUsers();
-
-        renderAdminCoworkers();
-
-        renderAdminPayments();
-
-        renderAdminPayRates();
-
-        renderAdminActivity();
-
-        renderAdminOverview();
-
-
-        adminState.lastRefresh =
-            new Date()
-                .toISOString();
-
-
-        setAdminStatus(
-            "Admin center updated.",
-            "success"
-        );
-
-    } catch (error) {
-
-        console.error(
-            "Admin refresh failed:",
-            error
-        );
-
-        setAdminStatus(
-            "Unable to refresh admin data.",
-            "error"
-        );
-
-    } finally {
-
-        adminState.loading =
-            false;
-    }
+  return adminState;
 }
 
+function hideAdminFromNonAdmin() {
+  const button =
+    $("adminCenterButton");
+
+  if (!button) return;
+
+  showElement(
+    button,
+    isCurrentUserAdmin()
+  );
+}
 
 /* ============================================================
-   LOAD TASKS
-============================================================ */
+   LOAD ADMIN CENTER
+   ============================================================ */
 
-async function loadAdminTasks() {
+async function loadAdminCenter() {
+  if (!requireAdmin()) {
+    return;
+  }
 
-    const client =
-        getSupabaseClient();
+  adminState.user =
+    getCurrentUser?.() ||
+    getSupabaseUser?.() ||
+    adminState.user;
 
+  adminState.profile =
+    getCurrentProfile?.() ||
+    adminState.profile;
 
-    if (!client) {
-        return [];
+  adminState.role =
+    normalizeRole(
+      getRole?.() ||
+        adminState.profile?.role ||
+        ""
+    );
+
+  await loadUsers();
+  await loadTasks();
+  await loadPayments();
+  await loadPayRates();
+  await loadActivity();
+
+  calculateStats();
+
+  showAdminPage(
+    adminState.currentPage ||
+      "overview"
+  );
+}
+
+/* ============================================================
+   OVERVIEW
+   ============================================================ */
+
+async function loadOverview() {
+  calculateStats();
+
+  setText(
+    $("adminTotalUsers"),
+    adminState.stats.users
+  );
+
+  setText(
+    $("adminActiveUsers"),
+    adminState.stats.active
+  );
+
+  setText(
+    $("adminPendingUsers"),
+    adminState.stats.pending
+  );
+
+  setText(
+    $("adminTotalTasks"),
+    adminState.stats.tasks
+  );
+
+  setText(
+    $("adminAvailableTasks"),
+    adminState.stats.available
+  );
+
+  setText(
+    $("adminSubmittedTasks"),
+    adminState.stats.submitted
+  );
+
+  setText(
+    $("adminApprovedTasks"),
+    adminState.stats.approved
+  );
+
+  setText(
+    $("adminUnpaidPayments"),
+    adminState.stats.unpaid
+  );
+
+  renderRecentActivity();
+  renderTaskProgress();
+}
+
+function calculateStats() {
+  const users =
+    adminState.users || [];
+
+  const tasks =
+    adminState.tasks || [];
+
+  const payments =
+    adminState.payments || [];
+
+  const stats = {
+    users: users.length,
+
+    customers: 0,
+    coworkers: 0,
+    reviewers: 0,
+    staff: 0,
+    admins: 0,
+
+    pending: 0,
+    active: 0,
+
+    tasks: tasks.length,
+    available: 0,
+    claimed: 0,
+    submitted: 0,
+    approved: 0,
+    skipped: 0,
+
+    unpaid: 0,
+    paid: 0,
+  };
+
+  users.forEach(
+    (user) => {
+      const role =
+        normalizeRole(
+          user.role
+        );
+
+      if (
+        role ===
+        "customer"
+      ) {
+        stats.customers++;
+      }
+
+      if (
+        isCoworkerRole(role)
+      ) {
+        stats.coworkers++;
+      }
+
+      if (
+        isReviewerRole(role)
+      ) {
+        stats.reviewers++;
+      }
+
+      if (
+        isStaffRole(role) &&
+        !isAdminRole(role)
+      ) {
+        stats.staff++;
+      }
+
+      if (
+        isAdminRole(role)
+      ) {
+        stats.admins++;
+      }
+
+      if (
+        user.active ===
+          false ||
+        user.status ===
+          "pending"
+      ) {
+        stats.pending++;
+      }
+
+      if (
+        user.active !==
+          false
+      ) {
+        stats.active++;
+      }
     }
+  );
 
+  tasks.forEach(
+    (task) => {
+      const status =
+        normalizeTaskStatus(
+          task.status
+        );
 
-    try {
+      if (
+        status ===
+          "available" ||
+        status === "open"
+      ) {
+        stats.available++;
+      }
 
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.tasks
-                )
-                .select("*")
-                .order(
-                    "created_at",
-                    {
-                        ascending:
-                            false
-                    }
-                );
+      if (
+        task.claimed_by ||
+        status === "claimed" ||
+        status === "in_progress"
+      ) {
+        stats.claimed++;
+      }
 
+      if (
+        status ===
+          "submitted" ||
+        status === "review"
+      ) {
+        stats.submitted++;
+      }
 
-        if (error) {
-            throw error;
+      if (
+        status ===
+        "approved"
+      ) {
+        stats.approved++;
+      }
+
+      if (
+        status ===
+        "skipped"
+      ) {
+        stats.skipped++;
+      }
+    }
+  );
+
+  payments.forEach(
+    (payment) => {
+      if (
+        payment.paid ===
+          true ||
+        payment.status ===
+          "paid"
+      ) {
+        stats.paid++;
+      } else {
+        stats.unpaid++;
+      }
+    }
+  );
+
+  adminState.stats =
+    stats;
+
+  return stats;
+}
+
+/* ============================================================
+   USERS
+   ============================================================ */
+
+export async function loadUsers() {
+  if (!requireAdmin()) {
+    return [];
+  }
+
+  const client =
+    getClient();
+
+  if (!client) {
+    return [];
+  }
+
+  try {
+    const {
+      data,
+      error,
+    } = await client
+      .from(TABLES.profiles)
+      .select("*")
+      .order(
+        "created_at",
+        {
+          ascending: false,
         }
+      );
 
+    if (error) {
+      console.error(
+        "loadUsers:",
+        error
+      );
 
-        adminState.tasks =
-            Array.isArray(data)
-                ? data
-                : [];
+      toast(
+        error.message ||
+          "Unable to load users.",
+        "error"
+      );
 
-
-        return adminState.tasks;
-
-    } catch (error) {
-
-        console.warn(
-            "Could not load admin tasks:",
-            error
-        );
-
-        adminState.tasks =
-            [];
-
-        return [];
+      return [];
     }
+
+    adminState.users =
+      Array.isArray(data)
+        ? data
+        : [];
+
+    calculateStats();
+
+    renderUsers();
+    renderCoworkers();
+
+    return adminState.users;
+  } catch (error) {
+    console.error(
+      "loadUsers exception:",
+      error
+    );
+
+    return [];
+  }
 }
 
+function renderUsers() {
+  const container =
+    $("usersList");
 
-/* ============================================================
-   LOAD USERS
-============================================================ */
+  if (!container) return;
 
-async function loadAdminUsers() {
+  const users =
+    adminState.users || [];
 
-    const client =
-        getSupabaseClient();
+  if (!users.length) {
+    container.innerHTML =
+      `
+        <div class="empty-state">
+          No users found.
+        </div>
+      `;
 
+    return;
+  }
 
-    if (!client) {
-        return [];
-    }
+  container.innerHTML =
+    users
+      .map(
+        (user) =>
+          renderUserRow(
+            user
+          )
+      )
+      .join("");
+}
 
+function renderUserRow(
+  user
+) {
+  const role =
+    normalizeRole(
+      user.role
+    );
 
-    try {
+  const active =
+    user.active !== false;
 
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.profiles
+  const isSelf =
+    user.id ===
+    adminState.user?.id;
+
+  const isDefaultAdmin =
+    String(
+      user.email || ""
+    ).toLowerCase() ===
+    currentAdminEmail();
+
+  const status =
+    active
+      ? "Active"
+      : user.status ===
+        "kicked"
+      ? "Kicked"
+      : "Pending";
+
+  return `
+    <div
+      class="admin-user-row"
+      data-user-id="${escapeHTML(
+        user.id
+      )}"
+    >
+      <div class="admin-user-main">
+        <div class="admin-user-avatar">
+          ${
+            user.avatar_url
+              ? `<img src="${escapeHTML(
+                  user.avatar_url
+                )}" alt="">`
+              : escapeHTML(
+                  text(
+                    user.full_name,
+                    "U"
+                  )
+                    .charAt(0)
+                    .toUpperCase()
                 )
-                .select("*")
-                .order(
-                    "created_at",
-                    {
-                        ascending:
-                            false
-                    }
-                );
+          }
+        </div>
 
+        <div class="admin-user-info">
+          <strong>
+            ${escapeHTML(
+              user.full_name ||
+                user.name ||
+                "Unnamed user"
+            )}
+          </strong>
 
-        if (error) {
-            throw error;
-        }
+          <span>
+            ${escapeHTML(
+              user.email ||
+                "No email"
+            )}
+          </span>
 
+          <small>
+            Joined:
+            ${escapeHTML(
+              formatDate(
+                user.created_at
+              )
+            )}
+          </small>
 
-        adminState.users =
-            Array.isArray(data)
-                ? data
-                : [];
-
-
-        return adminState.users;
-
-    } catch (error) {
-
-        console.warn(
-            "Could not load admin users:",
-            error
-        );
-
-        adminState.users =
-            [];
-
-        return [];
-    }
-}
-
-
-/* ============================================================
-   LOAD COWORKERS
-============================================================ */
-
-async function loadAdminCoworkers() {
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return [];
-    }
-
-
-    /*
-     * Try dedicated coworkers table.
-     */
-
-    if (
-        adminState.optionalTables.coworkers
-    ) {
-
-        try {
-
-            const {
-                data,
-                error
-            } =
-                await client
-                    .from(
-                        ADMIN_CONFIG.tables.coworkers
+          ${
+            user.last_login_at
+              ? `
+                <small>
+                  Last login:
+                  ${escapeHTML(
+                    formatDate(
+                      user.last_login_at
                     )
-                    .select("*")
-                    .order(
-                        "created_at",
-                        {
-                            ascending:
-                                false
-                        }
-                    );
+                  )}
+                </small>
+              `
+              : ""
+          }
+        </div>
+      </div>
 
+      <div class="admin-user-role">
+        <select
+          class="admin-role-select"
+          data-user-role="${escapeHTML(
+            user.id
+          )}"
+          ${
+            isSelf ||
+            isDefaultAdmin
+              ? "disabled"
+              : ""
+          }
+        >
+          ${roleOptions(
+            role
+          )}
+        </select>
+      </div>
 
-            if (!error) {
+      <div class="admin-user-status">
+        <span
+          class="status-badge ${
+            active
+              ? "status-active"
+              : "status-pending"
+          }"
+        >
+          ${escapeHTML(
+            status
+          )}
+        </span>
+      </div>
 
-                adminState.coworkers =
-                    Array.isArray(data)
-                        ? data
-                        : [];
-
-                return adminState.coworkers;
-            }
-
-
-            if (
-                isMissingTableError(
-                    error
-                )
-            ) {
-
-                adminState.optionalTables.coworkers =
-                    false;
-            }
-
-        } catch {
-            adminState.optionalTables.coworkers =
-                false;
+      <div class="admin-user-actions">
+        ${
+          !active &&
+          !isDefaultAdmin
+            ? `
+              <button
+                type="button"
+                class="admin-action-btn approve-user"
+                data-user-id="${escapeHTML(
+                  user.id
+                )}"
+              >
+                Approve
+              </button>
+            `
+            : ""
         }
-    }
 
+        ${
+          active &&
+          !isSelf &&
+          !isDefaultAdmin
+            ? `
+              <button
+                type="button"
+                class="admin-action-btn deactivate-user"
+                data-user-id="${escapeHTML(
+                  user.id
+                )}"
+              >
+                Deactivate
+              </button>
+            `
+            : ""
+        }
 
-    /*
-     * Fallback: derive coworkers from profiles.
-     */
-
-    adminState.coworkers =
-        adminState.users.filter(
-            user =>
-                isCoworkerRole(
-                    normalizeRole(
-                        user.role
-                    )
-                )
-        );
-
-
-    return adminState.coworkers;
+        ${
+          !isSelf &&
+          !isDefaultAdmin
+            ? `
+              <button
+                type="button"
+                class="admin-action-btn danger kick-user"
+                data-user-id="${escapeHTML(
+                  user.id
+                )}"
+              >
+                Kick
+              </button>
+            `
+            : ""
+        }
+      </div>
+    </div>
+  `;
 }
 
-
-/* ============================================================
-   LOAD PAYMENTS
-============================================================ */
-
-async function loadAdminPayments() {
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        !client ||
-        !adminState.optionalTables.payments
-    ) {
-        return [];
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.payments
-                )
-                .select("*")
-                .order(
-                    "created_at",
-                    {
-                        ascending:
-                            false
-                    }
-                );
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        adminState.payments =
-            Array.isArray(data)
-                ? data
-                : [];
-
-
-        return adminState.payments;
-
-    } catch (error) {
-
-        if (
-            isMissingTableError(
-                error
-            )
-        ) {
-
-            adminState.optionalTables.payments =
-                false;
-
-        } else {
-
-            console.warn(
-                "Could not load payments:",
-                error
-            );
-        }
-
-
-        adminState.payments =
-            [];
-
-
-        return [];
-    }
-}
-
-
-/* ============================================================
-   LOAD PAY RATES
-============================================================ */
-
-async function loadAdminPayRates() {
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        !client ||
-        !adminState.optionalTables.payRates
-    ) {
-        return [];
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.payRates
-                )
-                .select("*")
-                .order(
-                    "created_at",
-                    {
-                        ascending:
-                            false
-                    }
-                );
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        adminState.payRates =
-            Array.isArray(data)
-                ? data
-                : [];
-
-
-        return adminState.payRates;
-
-    } catch (error) {
-
-        if (
-            isMissingTableError(
-                error
-            )
-        ) {
-
-            adminState.optionalTables.payRates =
-                false;
-
-        } else {
-
-            console.warn(
-                "Could not load pay rates:",
-                error
-            );
-        }
-
-
-        adminState.payRates =
-            [];
-
-
-        return [];
-    }
-}
-
-
-/* ============================================================
-   LOAD ACTIVITY
-============================================================ */
-
-async function loadAdminActivity() {
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        !client ||
-        !adminState.optionalTables.activity
-    ) {
-        return [];
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.activity
-                )
-                .select("*")
-                .order(
-                    "created_at",
-                    {
-                        ascending:
-                            false
-                    }
-                )
-                .limit(
-                    500
-                );
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        adminState.activity =
-            Array.isArray(data)
-                ? data
-                : [];
-
-
-        return adminState.activity;
-
-    } catch (error) {
-
-        if (
-            isMissingTableError(
-                error
-            )
-        ) {
-
-            adminState.optionalTables.activity =
-                false;
-
-        } else {
-
-            console.warn(
-                "Could not load activity:",
-                error
-            );
-        }
-
-
-        adminState.activity =
-            [];
-
-
-        return [];
-    }
-}
-
-
-/* ============================================================
-   CREATE TASK
-============================================================ */
-
-async function createAdminTask() {
-
-    if (
-        !await requireAdmin()
-    ) {
-
-        showAdminToast(
-            "Administrator access is required.",
-            "error"
+function bindUserActions() {
+  $("refreshUsersButton")
+    ?.addEventListener(
+      "click",
+      () => loadUsers()
+    );
+
+  document.addEventListener(
+    "change",
+    async (event) => {
+      const select =
+        event.target.closest(
+          ".admin-role-select"
         );
 
-        return null;
+      if (!select) return;
+
+      const userId =
+        select.dataset.userRole;
+
+      const role =
+        select.value;
+
+      await updateUserRole(
+        userId,
+        role
+      );
     }
+  );
 
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-
-        showAdminToast(
-            "Supabase is not configured.",
-            "error"
+  document.addEventListener(
+    "click",
+    async (event) => {
+      const approve =
+        event.target.closest(
+          ".approve-user"
         );
 
-        return null;
-    }
-
-
-    const title =
-        taskTitleInput?.value
-            ?.trim() ||
-        "Untitled task";
-
-
-    const shape =
-        String(
-            taskShapeInput?.value ||
-            "box"
-        )
-            .trim()
-            .toLowerCase();
-
-
-    const duration =
-        Number(
-            taskDurationInput?.value
-        ) || 0;
-
-
-    const pay =
-        Number(
-            taskPayInput?.value
-        ) || 0;
-
-
-    /*
-     * Convert shape to the application's
-     * standard work role.
-     */
-
-    const workRole =
-        roleForWorkType(
-            shape
-        ) ||
-        (
-            shape === "polygon"
-                ? WORK_ROLE.POLYGON
-                : shape === "segmentation"
-                    ? WORK_ROLE.SEGMENTATION
-                    : WORK_ROLE.BOX
+      if (approve) {
+        await setUserActive(
+          approve.dataset.userId,
+          true
         );
 
+        return;
+      }
 
-    const task = {
+      const deactivate =
+        event.target.closest(
+          ".deactivate-user"
+        );
 
-        title,
+      if (deactivate) {
+        await setUserActive(
+          deactivate.dataset.userId,
+          false
+        );
 
-        shape,
+        return;
+      }
 
-        task_type:
-            shape,
+      const kick =
+        event.target.closest(
+          ".kick-user"
+        );
 
-        work_type:
-            shape,
+      if (kick) {
+        await kickUser(
+          kick.dataset.userId
+        );
+      }
+    }
+  );
+}
 
-        work_role:
-            workRole,
+/* ============================================================
+   USER ROLE MANAGEMENT
+   ============================================================ */
 
-        annotation_type:
-            shape,
+export async function updateUserRole(
+  userId,
+  role
+) {
+  if (!requireAdmin()) {
+    return false;
+  }
 
-        duration,
+  const client =
+    getClient();
 
-        estimated_minutes:
-            duration,
+  if (!client) {
+    return false;
+  }
 
-        pay,
+  const normalized =
+    normalizeRole(role);
 
-        reward:
-            pay,
+  if (!normalized) {
+    toast(
+      "Invalid role.",
+      "error"
+    );
 
-        status:
-            "available",
+    return false;
+  }
 
-        created_by:
-            adminState.currentUser?.id ||
-            null,
+  const user =
+    adminState.users.find(
+      (item) =>
+        item.id ===
+        userId
+    );
 
-        created_at:
-            new Date()
-                .toISOString()
+  if (!user) {
+    toast(
+      "User not found.",
+      "error"
+    );
+
+    return false;
+  }
+
+  const isDefaultAdmin =
+    String(
+      user.email || ""
+    ).toLowerCase() ===
+    currentAdminEmail();
+
+  if (isDefaultAdmin) {
+    toast(
+      "The default administrator cannot be downgraded.",
+      "warning"
+    );
+
+    renderUsers();
+
+    return false;
+  }
+
+  try {
+    const payload = {
+      role: normalized,
+      active: true,
     };
 
+    let {
+      error,
+    } = await client
+      .from(TABLES.profiles)
+      .update(payload)
+      .eq(
+        "id",
+        userId
+      );
 
-    const file =
-        taskMediaInput?.files?.[0];
+    if (error) {
+      /*
+       Some older profiles tables may not
+       have active. Retry role-only update.
+      */
+      const retry =
+        await client
+          .from(TABLES.profiles)
+          .update({
+            role: normalized,
+          })
+          .eq(
+            "id",
+            userId
+          );
 
-
-    if (file) {
-
-        task.media_name =
-            file.name;
-
-        task.media_type =
-            file.type;
-
-        task.media_size =
-            file.size;
+      error =
+        retry.error;
     }
 
+    if (error) {
+      throw error;
+    }
 
-    setAdminStatus(
-        "Creating task...",
-        "info"
+    await logAdminActivity(
+      "role_changed",
+      userId,
+      {
+        role: normalized,
+      }
     );
 
+    toast(
+      `User role changed to ${roleLabel(
+        normalized
+      )}.`,
+      "success"
+    );
 
-    try {
+    await loadUsers();
 
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.tasks
-                )
-                .insert(
-                    task
-                )
-                .select()
-                .single();
+    return true;
+  } catch (error) {
+    console.error(
+      "updateUserRole:",
+      error
+    );
 
+    toast(
+      error.message ||
+        "Unable to update user role.",
+      "error"
+    );
 
-        if (error) {
-            throw error;
-        }
+    renderUsers();
 
-
-        if (data) {
-
-            adminState.tasks.unshift(
-                data
-            );
-        }
-
-
-        clearCreateTaskForm();
-
-        renderAdminTasks();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "create_task",
-            {
-                task_id:
-                    data?.id ||
-                    null,
-
-                title,
-
-                work_type:
-                    shape,
-
-                work_role:
-                    workRole,
-
-                pay,
-
-                duration
-            }
-        );
-
-
-        showAdminToast(
-            "Task created successfully.",
-            "success"
-        );
-
-
-        setAdminStatus(
-            "Task created successfully.",
-            "success"
-        );
-
-
-        return data;
-
-    } catch (error) {
-
-        console.error(
-            "Create task failed:",
-            error
-        );
-
-
-        setAdminStatus(
-            error?.message ||
-            "Could not create task.",
-            "error"
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not create task.",
-            "error"
-        );
-
-
-        return null;
-    }
+    return false;
+  }
 }
 
-
 /* ============================================================
-   CLEAR CREATE TASK FORM
-============================================================ */
+   USER ACTIVE / APPROVAL
+   ============================================================ */
 
-function clearCreateTaskForm() {
-
-    if (taskTitleInput) {
-        taskTitleInput.value =
-            "";
-    }
-
-    if (taskDurationInput) {
-        taskDurationInput.value =
-            "";
-    }
-
-    if (taskPayInput) {
-        taskPayInput.value =
-            "";
-    }
-
-    if (taskMediaInput) {
-        taskMediaInput.value =
-            "";
-    }
-}
-
-
-/* ============================================================
-   UPDATE TASK
-============================================================ */
-
-async function updateAdminTask(
-    taskId,
-    changes
+async function setUserActive(
+  userId,
+  active
 ) {
+  if (!requireAdmin()) {
+    return false;
+  }
 
-    if (
-        !await requireAdmin()
-    ) {
-        return null;
+  const client =
+    getClient();
+
+  if (!client) return false;
+
+  const user =
+    adminState.users.find(
+      (item) =>
+        item.id ===
+        userId
+    );
+
+  if (!user) {
+    return false;
+  }
+
+  if (
+    String(
+      user.email || ""
+    ).toLowerCase() ===
+    currentAdminEmail()
+  ) {
+    toast(
+      "The default administrator cannot be deactivated.",
+      "warning"
+    );
+
+    return false;
+  }
+
+  try {
+    const payload = {
+      active,
+    };
+
+    if (active) {
+      payload.status =
+        "active";
+    } else {
+      payload.status =
+        "pending";
     }
 
-
-    if (!taskId) {
-        return null;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return null;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.tasks
-                )
-                .update(
-                    {
-                        ...changes,
-                        updated_at:
-                            new Date()
-                                .toISOString()
-                    }
-                )
-                .eq(
-                    "id",
-                    taskId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        const index =
-            adminState.tasks.findIndex(
-                task =>
-                    String(
-                        task.id
-                    ) ===
-                    String(
-                        taskId
-                    )
-            );
-
-
-        if (index >= 0) {
-
-            adminState.tasks[index] =
-                {
-                    ...adminState.tasks[index],
-                    ...data
-                };
-        }
-
-
-        renderAdminTasks();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "update_task",
-            {
-                task_id:
-                    taskId,
-
-                changes
-            }
-        );
-
-
-        return data;
-
-    } catch (error) {
-
-        console.error(
-            "Update task failed:",
-            error
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not update task.",
-            "error"
-        );
-
-
-        return null;
-    }
-}
-
-
-/* ============================================================
-   DELETE TASK
-============================================================ */
-
-async function deleteAdminTask(
-    taskId
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!taskId) {
-        return false;
-    }
-
-
-    const confirmed =
-        window.confirm(
-            "Delete this task? This cannot be undone."
-        );
-
-
-    if (!confirmed) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return false;
-    }
-
-
-    try {
-
-        const {
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.tasks
-                )
-                .delete()
-                .eq(
-                    "id",
-                    taskId
-                );
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        adminState.tasks =
-            adminState.tasks.filter(
-                task =>
-                    String(
-                        task.id
-                    ) !==
-                    String(
-                        taskId
-                    )
-            );
-
-
-        renderAdminTasks();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "delete_task",
-            {
-                task_id:
-                    taskId
-            }
-        );
-
-
-        showAdminToast(
-            "Task deleted.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Delete task failed:",
-            error
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not delete task.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   APPROVE USER
-============================================================ */
-
-async function approveUser(
-    userId
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!userId) {
-        return false;
-    }
-
-
-    if (
-        String(
-            adminState.currentUser?.id
-        ) ===
-        String(
+    let {
+      error,
+    } = await client
+      .from(TABLES.profiles)
+      .update(payload)
+      .eq(
+        "id",
+        userId
+      );
+
+    if (error) {
+      const retry =
+        await client
+          .from(TABLES.profiles)
+          .update({
+            active,
+          })
+          .eq(
+            "id",
             userId
-        )
-    ) {
-        return true;
+          );
+
+      error =
+        retry.error;
     }
 
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return false;
+    if (error) {
+      throw error;
     }
 
+    await logAdminActivity(
+      active
+        ? "user_approved"
+        : "user_deactivated",
+      userId,
+      {
+        active,
+      }
+    );
 
-    try {
+    toast(
+      active
+        ? "User approved."
+        : "User deactivated.",
+      "success"
+    );
 
-        const changes = {
+    await loadUsers();
 
-            active:
-                true,
+    return true;
+  } catch (error) {
+    console.error(
+      "setUserActive:",
+      error
+    );
 
-            status:
-                "active",
+    toast(
+      error.message ||
+        "Unable to update user access.",
+      "error"
+    );
 
-            approval_status:
-                "approved",
-
-            approved_by:
-                adminState.currentUser?.id ||
-                null,
-
-            approved_at:
-                new Date()
-                    .toISOString(),
-
-            updated_at:
-                new Date()
-                    .toISOString()
-        };
-
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.profiles
-                )
-                .update(
-                    changes
-                )
-                .eq(
-                    "id",
-                    userId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        updateLocalUser(
-            userId,
-            data || changes
-        );
-
-
-        renderAdminUsers();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "approve_user",
-            {
-                user_id:
-                    userId
-            }
-        );
-
-
-        showAdminToast(
-            "User approved.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        /*
-         * Some older profiles tables may not contain
-         * all approval columns. Retry with a smaller
-         * payload.
-         */
-
-        try {
-
-            const {
-                data,
-                error: retryError
-            } =
-                await client
-                    .from(
-                        ADMIN_CONFIG.tables.profiles
-                    )
-                    .update({
-                        active:
-                            true,
-
-                        status:
-                            "active",
-
-                        updated_at:
-                            new Date()
-                                .toISOString()
-                    })
-                    .eq(
-                        "id",
-                        userId
-                    )
-                    .select()
-                    .single();
-
-
-            if (retryError) {
-                throw retryError;
-            }
-
-
-            updateLocalUser(
-                userId,
-                data
-            );
-
-
-            renderAdminUsers();
-
-            renderAdminOverview();
-
-
-            await writeAdminActivity(
-                "approve_user",
-                {
-                    user_id:
-                        userId
-                }
-            );
-
-
-            showAdminToast(
-                "User approved.",
-                "success"
-            );
-
-
-            return true;
-
-        } catch (retryError) {
-
-            console.error(
-                "Approve user failed:",
-                error,
-                retryError
-            );
-
-
-            showAdminToast(
-                retryError?.message ||
-                "Could not approve user.",
-                "error"
-            );
-
-
-            return false;
-        }
-    }
+    return false;
+  }
 }
-
 
 /* ============================================================
    KICK USER
-============================================================ */
+   ============================================================ */
 
 async function kickUser(
-    userId
+  userId
 ) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!userId) {
-        return false;
-    }
-
-
-    if (
-        String(
-            adminState.currentUser?.id
-        ) ===
-        String(
-            userId
-        )
-    ) {
-
-        showAdminToast(
-            "You cannot kick your own account.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    const confirmed =
-        window.confirm(
-            "Kick this user and prevent them from working?"
-        );
-
-
-    if (!confirmed) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return false;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.profiles
-                )
-                .update({
-                    active:
-                        false,
-
-                    status:
-                        "kicked",
-
-                    approval_status:
-                        "kicked",
-
-                    updated_at:
-                        new Date()
-                            .toISOString()
-                })
-                .eq(
-                    "id",
-                    userId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        updateLocalUser(
-            userId,
-            data
-        );
-
-
-        /*
-         * Return any currently assigned tasks
-         * owned by this user to available state.
-         */
-
-        await releaseTasksForUser(
-            userId
-        );
-
-
-        renderAdminUsers();
-
-        renderAdminTasks();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "kick_user",
-            {
-                user_id:
-                    userId
-            }
-        );
-
-
-        showAdminToast(
-            "User kicked.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        /*
-         * Compatibility fallback for profiles
-         * that only have active.
-         */
-
-        try {
-
-            const {
-                data,
-                error: retryError
-            } =
-                await client
-                    .from(
-                        ADMIN_CONFIG.tables.profiles
-                    )
-                    .update({
-                        active:
-                            false,
-
-                        updated_at:
-                            new Date()
-                                .toISOString()
-                    })
-                    .eq(
-                        "id",
-                        userId
-                    )
-                    .select()
-                    .single();
-
-
-            if (retryError) {
-                throw retryError;
-            }
-
-
-            updateLocalUser(
-                userId,
-                data
-            );
-
-
-            renderAdminUsers();
-
-
-            showAdminToast(
-                "User access disabled.",
-                "success"
-            );
-
-
-            return true;
-
-        } catch (retryError) {
-
-            console.error(
-                "Kick user failed:",
-                error,
-                retryError
-            );
-
-
-            showAdminToast(
-                retryError?.message ||
-                "Could not kick user.",
-                "error"
-            );
-
-
-            return false;
-        }
-    }
-}
-
-
-/* ============================================================
-   ENABLE / RESTORE USER
-============================================================ */
-
-async function enableUser(
-    userId
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!userId) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return false;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.profiles
-                )
-                .update({
-                    active:
-                        true,
-
-                    status:
-                        "active",
-
-                    approval_status:
-                        "approved",
-
-                    updated_at:
-                        new Date()
-                            .toISOString()
-                })
-                .eq(
-                    "id",
-                    userId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        updateLocalUser(
-            userId,
-            data
-        );
-
-
-        renderAdminUsers();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "enable_user",
-            {
-                user_id:
-                    userId
-            }
-        );
-
-
-        showAdminToast(
-            "User enabled.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Enable user failed:",
-            error
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not enable user.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   DISABLE USER
-============================================================ */
-
-async function disableUser(
-    userId
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!userId) {
-        return false;
-    }
-
-
-    if (
-        String(
-            adminState.currentUser?.id
-        ) ===
-        String(
-            userId
-        )
-    ) {
-
-        showAdminToast(
-            "You cannot disable your own account.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    const confirmed =
-        window.confirm(
-            "Disable this user?"
-        );
-
-
-    if (!confirmed) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return false;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.profiles
-                )
-                .update({
-                    active:
-                        false,
-
-                    status:
-                        "disabled",
-
-                    updated_at:
-                        new Date()
-                            .toISOString()
-                })
-                .eq(
-                    "id",
-                    userId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        updateLocalUser(
-            userId,
-            data
-        );
-
-
-        await releaseTasksForUser(
-            userId
-        );
-
-
-        renderAdminUsers();
-
-        renderAdminTasks();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "disable_user",
-            {
-                user_id:
-                    userId
-            }
-        );
-
-
-        showAdminToast(
-            "User disabled.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Disable user failed:",
-            error
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not disable user.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   RELEASE USER TASKS
-============================================================ */
-
-async function releaseTasksForUser(
-    userId
-) {
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        !client ||
-        !userId
-    ) {
-        return;
-    }
-
-
-    try {
-
-        await client
-            .from(
-                ADMIN_CONFIG.tables.tasks
-            )
-            .update({
-                status:
-                    "available",
-
-                claimed_by:
-                    null,
-
-                claimed_at:
-                    null,
-
-                assigned_to:
-                    null,
-
-                assigned_at:
-                    null,
-
-                updated_at:
-                    new Date()
-                        .toISOString()
-            })
-            .or(
-                `claimed_by.eq.${userId},assigned_to.eq.${userId}`
-            );
-
-    } catch (error) {
-
-        console.warn(
-            "Could not release user's tasks:",
-            error
-        );
-    }
-}
-
-
-/* ============================================================
-   UPDATE USER ROLE
-============================================================ */
-
-async function updateUserRole(
-    userId,
-    newRole
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!userId) {
-        return false;
-    }
-
-
-    newRole =
-        normalizeRole(
-            newRole
-        );
-
-
-    if (
-        !ADMIN_CONFIG.roles.includes(
-            newRole
-        )
-    ) {
-
-        showAdminToast(
-            "Invalid role.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    if (
-        String(
-            adminState.currentUser?.id
-        ) ===
-        String(
-            userId
-        ) &&
-        !isAdminRole(
-            newRole
-        )
-    ) {
-
-        showAdminToast(
-            "You cannot remove your own admin role.",
-            "error"
-        );
-
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return false;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.profiles
-                )
-                .update({
-                    role:
-                        newRole,
-
-                    updated_at:
-                        new Date()
-                            .toISOString()
-                })
-                .eq(
-                    "id",
-                    userId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        updateLocalUser(
-            userId,
-            data
-        );
-
-
-        renderAdminUsers();
-
-        renderAdminCoworkers();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "change_role",
-            {
-                user_id:
-                    userId,
-
-                role:
-                    newRole
-            }
-        );
-
-
-        showAdminToast(
-            `Role changed to ${roleLabel(newRole)}.`,
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Role update failed:",
-            error
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not update user role.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   CREATE / ASSIGN COWORKER
-============================================================ */
-
-async function createCoworker(
-    userId,
-    coworkerRole =
-        "coworker_2d_box"
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!userId) {
-        return false;
-    }
-
-
-    coworkerRole =
-        normalizeRole(
-            coworkerRole
-        );
-
-
-    if (
-        !isCoworkerRole(
-            coworkerRole
-        )
-    ) {
-
-        coworkerRole =
-            "coworker_2d_box";
-    }
-
-
-    const roleUpdated =
-        await updateUserRole(
-            userId,
-            coworkerRole
-        );
-
-
-    if (!roleUpdated) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        client &&
-        adminState.optionalTables.coworkers
-    ) {
-
-        try {
-
-            const {
-                data,
-                error
-            } =
-                await client
-                    .from(
-                        ADMIN_CONFIG.tables.coworkers
-                    )
-                    .insert({
-                        user_id:
-                            userId,
-
-                        role:
-                            coworkerRole,
-
-                        work_role:
-                            coworkerRole,
-
-                        status:
-                            "active",
-
-                        created_by:
-                            adminState.currentUser?.id ||
-                            null,
-
-                        created_at:
-                            new Date()
-                                .toISOString()
-                    })
-                    .select()
-                    .single();
-
-
-            if (!error && data) {
-
-                adminState.coworkers.unshift(
-                    data
-                );
-            }
-
-        } catch (error) {
-
-            console.info(
-                "Dedicated coworkers table unavailable:",
-                error
-            );
-        }
-    }
-
-
-    renderAdminCoworkers();
-
-
-    await writeAdminActivity(
-        "create_coworker",
-        {
-            user_id:
-                userId,
-
-            role:
-                coworkerRole
-        }
-    );
-
-
-    return true;
-}
-
-
-/* ============================================================
-   REMOVE COWORKER
-============================================================ */
-
-async function removeCoworker(
-    userId
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (!userId) {
-        return false;
-    }
-
-
-    const confirmed =
-        window.confirm(
-            "Remove this coworker role?"
-        );
-
-
-    if (!confirmed) {
-        return false;
-    }
-
-
-    const result =
-        await updateUserRole(
-            userId,
-            "customer"
-        );
-
-
-    if (!result) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        client &&
-        adminState.optionalTables.coworkers
-    ) {
-
-        try {
-
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.coworkers
-                )
-                .delete()
-                .eq(
-                    "user_id",
-                    userId
-                );
-
-        } catch {
-            /* optional table */
-        }
-    }
-
-
-    adminState.coworkers =
-        adminState.coworkers.filter(
-            coworker =>
-                String(
-                    coworker.user_id ||
-                    coworker.id
-                ) !==
-                String(
-                    userId
-                )
-        );
-
-
-    renderAdminCoworkers();
-
-
-    await writeAdminActivity(
-        "remove_coworker",
-        {
-            user_id:
-                userId
-        }
-    );
-
-
-    return true;
-}
-
-
-/* ============================================================
-   ASSIGN TASK
-============================================================ */
-
-async function assignTask(
-    taskId,
-    userId
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    if (
-        !taskId ||
-        !userId
-    ) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (!client) {
-        return false;
-    }
-
-
-    const user =
-        adminState.users.find(
-            item =>
-                String(
-                    item.id
-                ) ===
-                String(
-                    userId
-                )
-        );
-
-
-    const role =
-        normalizeRole(
-            user?.role
-        );
-
-
-    const task =
-        adminState.tasks.find(
-            item =>
-                String(
-                    item.id
-                ) ===
-                String(
-                    taskId
-                )
-        );
-
-
-    const workRole =
-        task?.work_role ||
-        roleForWorkType(
-            task?.work_type ||
-            task?.shape ||
-            task?.task_type
-        );
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.tasks
-                )
-                .update({
-
-                    assigned_to:
-                        userId,
-
-                    assigned_role:
-                        role ||
-                        null,
-
-                    work_role:
-                        workRole ||
-                        null,
-
-                    claimed_by:
-                        userId,
-
-                    claimed_at:
-                        new Date()
-                            .toISOString(),
-
-                    status:
-                        "in_progress",
-
-                    updated_at:
-                        new Date()
-                            .toISOString()
-                })
-                .eq(
-                    "id",
-                    taskId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        replaceLocalTask(
-            data
-        );
-
-
-        renderAdminTasks();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "assign_task",
-            {
-                task_id:
-                    taskId,
-
-                user_id:
-                    userId,
-
-                role
-            }
-        );
-
-
-        showAdminToast(
-            "Task assigned.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Assign task failed:",
-            error
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not assign task.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   REASSIGN TASK
-============================================================ */
-
-async function reassignTask(
-    taskId,
-    userId
-) {
-
-    return assignTask(
-        taskId,
+  if (!requireAdmin()) {
+    return false;
+  }
+
+  const user =
+    adminState.users.find(
+      (item) =>
+        item.id ===
         userId
     );
-}
 
-
-/* ============================================================
-   UNASSIGN TASK
-============================================================ */
-
-async function unassignTask(
-    taskId
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        !client ||
-        !taskId
-    ) {
-        return false;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.tasks
-                )
-                .update({
-                    assigned_to:
-                        null,
-
-                    assigned_role:
-                        null,
-
-                    claimed_by:
-                        null,
-
-                    claimed_at:
-                        null,
-
-                    status:
-                        "available",
-
-                    updated_at:
-                        new Date()
-                            .toISOString()
-                })
-                .eq(
-                    "id",
-                    taskId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        replaceLocalTask(
-            data
-        );
-
-
-        renderAdminTasks();
-
-        renderAdminOverview();
-
-
-        await writeAdminActivity(
-            "unassign_task",
-            {
-                task_id:
-                    taskId
-            }
-        );
-
-
-        showAdminToast(
-            "Task returned to available work.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Unassign task failed:",
-            error
-        );
-
-
-        showAdminToast(
-            "Could not unassign task.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   REPLACE LOCAL TASK
-============================================================ */
-
-function replaceLocalTask(
-    task
-) {
-
-    if (!task) {
-        return;
-    }
-
-
-    const index =
-        adminState.tasks.findIndex(
-            item =>
-                String(
-                    item.id
-                ) ===
-                String(
-                    task.id
-                )
-        );
-
-
-    if (index < 0) {
-
-        adminState.tasks.unshift(
-            task
-        );
-
-        return;
-    }
-
-
-    adminState.tasks[index] =
-        {
-            ...adminState.tasks[index],
-            ...task
-        };
-}
-
-
-/* ============================================================
-   TASK ACTION
-============================================================ */
-
-async function handleTaskAction(
-    action,
-    taskId
-) {
-
-    switch (action) {
-
-        case "delete":
-            await deleteAdminTask(
-                taskId
-            );
-            break;
-
-
-        case "close":
-            await updateAdminTask(
-                taskId,
-                {
-                    status:
-                        "closed"
-                }
-            );
-            break;
-
-
-        case "open":
-            await updateAdminTask(
-                taskId,
-                {
-                    status:
-                        "available",
-
-                    claimed_by:
-                        null,
-
-                    claimed_at:
-                        null,
-
-                    assigned_to:
-                        null
-                }
-            );
-            break;
-
-
-        case "approve":
-            await updateAdminTask(
-                taskId,
-                {
-                    status:
-                        "approved",
-
-                    approved_by:
-                        adminState.currentUser?.id ||
-                        null,
-
-                    approved_at:
-                        new Date()
-                            .toISOString()
-                }
-            );
-            break;
-
-
-        case "unassign":
-            await unassignTask(
-                taskId
-            );
-            break;
-    }
-}
-
-
-/* ============================================================
-   USER ACTION
-============================================================ */
-
-async function handleUserAction(
-    action,
-    userId
-) {
-
-    switch (action) {
-
-        case "approve":
-            await approveUser(
-                userId
-            );
-            break;
-
-
-        case "kick":
-            await kickUser(
-                userId
-            );
-            break;
-
-
-        case "disable":
-            await disableUser(
-                userId
-            );
-            break;
-
-
-        case "enable":
-            await enableUser(
-                userId
-            );
-            break;
-    }
-}
-
-
-/* ============================================================
-   ROLE CHANGE
-============================================================ */
-
-async function handleRoleChange(
-    select
-) {
-
-    if (!select) {
-        return;
-    }
-
-
-    await updateUserRole(
-        select.dataset.userId,
-        select.value
+  if (!user) {
+    return false;
+  }
+
+  const email =
+    String(
+      user.email || ""
+    ).toLowerCase();
+
+  if (
+    email ===
+      currentAdminEmail() ||
+    user.id ===
+      adminState.user?.id
+  ) {
+    toast(
+      "You cannot kick the administrator account.",
+      "warning"
     );
-}
 
+    return false;
+  }
 
-/* ============================================================
-   ADMIN ACTIVITY
-============================================================ */
+  const confirmed =
+    window.confirm(
+      `Kick ${
+        user.full_name ||
+        user.email ||
+        "this user"
+      }?`
+    );
 
-async function writeAdminActivity(
-    action,
-    payload = {}
-) {
+  if (!confirmed) {
+    return false;
+  }
 
-    const client =
-        getSupabaseClient();
+  const client =
+    getClient();
 
+  if (!client) return false;
 
-    const user =
-        adminState.currentUser;
-
-
+  try {
     /*
-     * Prefer central activity logger.
+     * We deliberately do not call
+     * auth.admin.createUser/deleteUser
+     * from the browser. A publishable key
+     * cannot safely perform privileged
+     * Auth Admin API operations.
+     *
+     * Setting profile access to false
+     * immediately prevents workspace access.
      */
 
-    try {
+    let {
+      error,
+    } = await client
+      .from(TABLES.profiles)
+      .update({
+        active: false,
+        status: "kicked",
+      })
+      .eq(
+        "id",
+        userId
+      );
 
-        if (
-            typeof logActivity ===
-            "function"
-        ) {
+    if (error) {
+      const retry =
+        await client
+          .from(TABLES.profiles)
+          .update({
+            active: false,
+          })
+          .eq(
+            "id",
+            userId
+          );
 
-            await logActivity(
-                action,
-                payload
-            );
-
-            return;
-        }
-
-    } catch (error) {
-
-        console.info(
-            "Central activity logger failed:",
-            error
-        );
+      error =
+        retry.error;
     }
 
-
-    if (
-        !client ||
-        !adminState.optionalTables.activity
-    ) {
-        return;
+    if (error) {
+      throw error;
     }
 
-
-    try {
-
-        const record = {
-
-            action,
-
-            user_id:
-                user?.id ||
-                null,
-
-            email:
-                user?.email ||
-                null,
-
-            details:
-                payload,
-
-            created_at:
-                new Date()
-                    .toISOString()
-        };
-
-
-        const {
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.activity
-                )
-                .insert(
-                    record
-                );
-
-
-        if (error) {
-
-            if (
-                isMissingTableError(
-                    error
-                )
-            ) {
-
-                adminState.optionalTables.activity =
-                    false;
-            }
-
-            return;
-        }
-
-
-        adminState.activity.unshift(
-            record
-        );
-
-
-        adminState.activity =
-            adminState.activity.slice(
-                0,
-                500
-            );
-
-
-        renderAdminActivity();
-
-    } catch (error) {
-
-        console.info(
-            "Activity logging skipped:",
-            error
-        );
-    }
-}
-
-
-/* ============================================================
-   RENDER OVERVIEW
-============================================================ */
-
-function renderAdminOverview() {
-
-    const totalUsers =
-        adminState.users.length;
-
-
-    const activeUsers =
-        adminState.users.filter(
-            user =>
-                user.active === true ||
-                String(
-                    user.status
-                ).toLowerCase() ===
-                    "active"
-        ).length;
-
-
-    const pendingUsers =
-        adminState.users.filter(
-            user =>
-                user.active === false &&
-                (
-                    !user.status ||
-                    [
-                        "pending",
-                        "inactive",
-                        "waiting"
-                    ].includes(
-                        String(
-                            user.status
-                        ).toLowerCase()
-                    )
-                )
-        ).length;
-
-
-    const totalTasks =
-        adminState.tasks.length;
-
-
-    const availableTasks =
-        adminState.tasks.filter(
-            task =>
-                String(
-                    task.status ||
-                    ""
-                ).toLowerCase() ===
-                "available"
-        ).length;
-
-
-    const progressTasks =
-        adminState.tasks.filter(
-            task =>
-                [
-                    "in_progress",
-                    "claimed",
-                    "working",
-                    "submitted",
-                    "review"
-                ].includes(
-                    String(
-                        task.status ||
-                        ""
-                    ).toLowerCase()
-                )
-        ).length;
-
-
-    const completedTasks =
-        adminState.tasks.filter(
-            task =>
-                [
-                    "completed",
-                    "approved",
-                    "paid"
-                ].includes(
-                    String(
-                        task.status ||
-                        ""
-                    ).toLowerCase()
-                )
-        ).length;
-
-
-    setText(
-        "adminTotalUsers",
-        totalUsers
+    await logAdminActivity(
+      "user_kicked",
+      userId,
+      {
+        email:
+          user.email,
+      }
     );
 
-    setText(
-        "adminActiveUsers",
-        activeUsers
+    toast(
+      "User has been kicked and access disabled.",
+      "success"
     );
 
-    setText(
-        "adminPendingUsers",
-        pendingUsers
-    );
-
-    setText(
-        "adminTotalTasks",
-        totalTasks
-    );
-
-    setText(
-        "adminAvailableTasks",
-        availableTasks
-    );
-
-    setText(
-        "adminProgressTasks",
-        progressTasks
-    );
-
-    setText(
-        "adminCompletedTasks",
-        completedTasks
-    );
-}
-
-
-/* ============================================================
-   SET TEXT
-============================================================ */
-
-function setText(
-    id,
-    value
-) {
-
-    const element =
-        $(id);
-
-
-    if (element) {
-        element.textContent =
-            String(
-                value ??
-                0
-            );
-    }
-}
-
-
-/* ============================================================
-   RENDER TASKS
-============================================================ */
-
-function renderAdminTasks() {
-
-    if (!adminTasksList) {
-        return;
-    }
-
-
-    if (
-        !adminState.tasks.length
-    ) {
-
-        adminTasksList.innerHTML = `
-            <div class="details-empty">
-                <strong>No tasks found</strong>
-                <span>Create a task to see it here.</span>
-            </div>
-        `;
-
-        return;
-    }
-
-
-    adminTasksList.innerHTML =
-        adminState.tasks
-            .map(
-                task => {
-
-                    const id =
-                        escapeHTML(
-                            task.id
-                        );
-
-
-                    const title =
-                        escapeHTML(
-                            task.title ||
-                            task.name ||
-                            "Untitled task"
-                        );
-
-
-                    const type =
-                        escapeHTML(
-                            task.work_type ||
-                            task.shape ||
-                            task.task_type ||
-                            task.type ||
-                            "—"
-                        );
-
-
-                    const role =
-                        normalizeRole(
-                            task.work_role ||
-                            task.assigned_role
-                        );
-
-
-                    const status =
-                        String(
-                            task.status ||
-                            "available"
-                        );
-
-
-                    const duration =
-                        task.duration ??
-                        task.estimated_minutes ??
-                        "—";
-
-
-                    const pay =
-                        formatMoney(
-                            task.pay ??
-                            task.reward ??
-                            0
-                        );
-
-
-                    const assignedTo =
-                        adminState.users.find(
-                            user =>
-                                String(
-                                    user.id
-                                ) ===
-                                String(
-                                    task.assigned_to ||
-                                    task.claimed_by
-                                )
-                        );
-
-
-                    const assignedName =
-                        assignedTo
-                            ? escapeHTML(
-                                assignedTo.full_name ||
-                                assignedTo.name ||
-                                assignedTo.email ||
-                                "Assigned user"
-                            )
-                            : "Unassigned";
-
-
-                    const statusLower =
-                        status.toLowerCase();
-
-
-                    return `
-                        <div
-                            class="admin-list-row admin-task-row"
-                            data-task-id="${id}"
-                        >
-
-                            <div class="admin-list-main">
-
-                                <strong>
-                                    ${title}
-                                </strong>
-
-                                <small>
-                                    ${type}
-                                    ·
-                                    ${role
-                                        ? escapeHTML(
-                                            roleLabel(
-                                                role
-                                            )
-                                        )
-                                        : "Unassigned role"
-                                    }
-                                    ·
-                                    ${escapeHTML(
-                                        String(
-                                            duration
-                                        )
-                                    )} min
-                                </small>
-
-                            </div>
-
-
-                            <div class="admin-list-meta">
-
-                                <strong>
-                                    ${pay}
-                                </strong>
-
-                                <span>
-                                    ${escapeHTML(
-                                        status
-                                    )}
-                                </span>
-
-                                <small>
-                                    ${assignedName}
-                                </small>
-
-                            </div>
-
-
-                            <div class="admin-list-actions">
-
-                                ${
-                                    statusLower ===
-                                    "available"
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-admin-task-action="close"
-                                                data-task-id="${id}"
-                                            >
-                                                Close
-                                            </button>
-                                        `
-                                        : `
-                                            <button
-                                                type="button"
-                                                data-admin-task-action="open"
-                                                data-task-id="${id}"
-                                            >
-                                                Open
-                                            </button>
-                                        `
-                                }
-
-
-                                ${
-                                    task.assigned_to ||
-                                    task.claimed_by
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-admin-task-action="unassign"
-                                                data-task-id="${id}"
-                                            >
-                                                Unassign
-                                            </button>
-                                        `
-                                        : ""
-                                }
-
-
-                                ${
-                                    [
-                                        "submitted",
-                                        "review",
-                                        "pending_review"
-                                    ].includes(
-                                        statusLower
-                                    )
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-admin-task-action="approve"
-                                                data-task-id="${id}"
-                                            >
-                                                Approve
-                                            </button>
-                                        `
-                                        : ""
-                                }
-
-
-                                <button
-                                    type="button"
-                                    data-admin-task-action="delete"
-                                    data-task-id="${id}"
-                                >
-                                    Delete
-                                </button>
-
-                            </div>
-
-                        </div>
-                    `;
-                }
-            )
-            .join("");
-}
-
-
-/* ============================================================
-   USER STATUS
-============================================================ */
-
-function getUserAccessStatus(
-    user
-) {
-
-    const status =
-        String(
-            user?.status ||
-            ""
-        )
-            .toLowerCase();
-
-
-    if (
-        status ===
-        "kicked"
-    ) {
-        return "Kicked";
-    }
-
-
-    if (
-        status ===
-        "disabled"
-    ) {
-        return "Disabled";
-    }
-
-
-    if (
-        user?.active === false ||
-        [
-            "pending",
-            "inactive",
-            "waiting"
-        ].includes(
-            status
-        )
-    ) {
-        return "Pending approval";
-    }
-
-
-    return "Active";
-}
-
-
-/* ============================================================
-   RENDER USERS
-============================================================ */
-
-function renderAdminUsers() {
-
-    if (!adminUsersList) {
-        return;
-    }
-
-
-    if (
-        !adminState.users.length
-    ) {
-
-        adminUsersList.innerHTML = `
-            <div class="details-empty">
-                <strong>No users found</strong>
-                <span>User profiles will appear here.</span>
-            </div>
-        `;
-
-        return;
-    }
-
-
-    adminUsersList.innerHTML =
-        adminState.users
-            .map(
-                user => {
-
-                    const id =
-                        escapeHTML(
-                            user.id
-                        );
-
-
-                    const name =
-                        escapeHTML(
-                            user.full_name ||
-                            user.name ||
-                            user.display_name ||
-                            user.screen_name ||
-                            "User"
-                        );
-
-
-                    const email =
-                        escapeHTML(
-                            user.email ||
-                            user.email_address ||
-                            "No email"
-                        );
-
-
-                    const role =
-                        normalizeRole(
-                            user.role
-                        ) ||
-                        "customer";
-
-
-                    const accessStatus =
-                        getUserAccessStatus(
-                            user
-                        );
-
-
-                    const isSelf =
-                        String(
-                            adminState.currentUser?.id
-                        ) ===
-                        String(
-                            user.id
-                        );
-
-
-                    const pending =
-                        accessStatus ===
-                        "Pending approval";
-
-
-                    const kicked =
-                        accessStatus ===
-                        "Kicked";
-
-
-                    const disabled =
-                        accessStatus ===
-                        "Disabled";
-
-
-                    return `
-                        <div
-                            class="admin-list-row admin-user-row"
-                            data-user-id="${id}"
-                        >
-
-                            <div class="admin-list-main">
-
-                                <strong>
-                                    ${name}
-                                </strong>
-
-                                <small>
-                                    ${email}
-                                </small>
-
-                            </div>
-
-
-                            <div class="admin-user-role">
-
-                                <select
-                                    data-user-role
-                                    data-user-id="${id}"
-                                    ${
-                                        isSelf
-                                            ? "disabled"
-                                            : ""
-                                    }
-                                >
-
-                                    ${
-                                        ADMIN_CONFIG.roles
-                                            .map(
-                                                option => `
-                                                    <option
-                                                        value="${escapeHTML(option)}"
-                                                        ${
-                                                            option ===
-                                                            role
-                                                                ? "selected"
-                                                                : ""
-                                                        }
-                                                    >
-                                                        ${escapeHTML(
-                                                            roleLabel(
-                                                                option
-                                                            )
-                                                        )}
-                                                    </option>
-                                                `
-                                            )
-                                            .join("")
-                                    }
-
-                                </select>
-
-                            </div>
-
-
-                            <div class="admin-list-meta">
-
-                                <span>
-                                    ${escapeHTML(
-                                        accessStatus
-                                    )}
-                                </span>
-
-                                <small>
-                                    Joined:
-                                    ${formatDate(
-                                        user.created_at
-                                    )}
-                                </small>
-
-                                <small>
-                                    Last login:
-                                    ${formatDate(
-                                        user.last_login_at ||
-                                        user.last_sign_in_at ||
-                                        user.last_login
-                                    )}
-                                </small>
-
-                                <small>
-                                    Last logout:
-                                    ${formatDate(
-                                        user.last_logout_at ||
-                                        user.logout_at
-                                    )}
-                                </small>
-
-                            </div>
-
-
-                            <div class="admin-list-actions">
-
-                                ${
-                                    pending ||
-                                    kicked ||
-                                    disabled
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-user-action="approve"
-                                                data-user-id="${id}"
-                                            >
-                                                Approve
-                                            </button>
-                                        `
-                                        : ""
-                                }
-
-
-                                ${
-                                    !isSelf &&
-                                    !disabled &&
-                                    !kicked
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-user-action="kick"
-                                                data-user-id="${id}"
-                                            >
-                                                Kick
-                                            </button>
-                                        `
-                                        : ""
-                                }
-
-
-                                ${
-                                    !isSelf &&
-                                    !disabled &&
-                                    !kicked
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-user-action="disable"
-                                                data-user-id="${id}"
-                                            >
-                                                Disable
-                                            </button>
-                                        `
-                                        : ""
-                                }
-
-
-                                ${
-                                    !isSelf &&
-                                    (
-                                        disabled ||
-                                        kicked
-                                    )
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-user-action="enable"
-                                                data-user-id="${id}"
-                                            >
-                                                Restore
-                                            </button>
-                                        `
-                                        : ""
-                                }
-
-                            </div>
-
-                        </div>
-                    `;
-                }
-            )
-            .join("");
-}
-
-
-/* ============================================================
-   RENDER COWORKERS
-============================================================ */
-
-function renderAdminCoworkers() {
-
-    if (!adminCoworkersList) {
-        return;
-    }
-
-
-    const coworkers =
-        adminState.users.filter(
-            user =>
-                isCoworkerRole(
-                    normalizeRole(
-                        user.role
-                    )
-                )
-        );
-
-
-    if (
-        !coworkers.length
-    ) {
-
-        adminCoworkersList.innerHTML = `
-            <div class="details-empty">
-                <strong>No coworkers found</strong>
-                <span>Assign a coworker role to a user.</span>
-            </div>
-        `;
-
-        return;
-    }
-
-
-    adminCoworkersList.innerHTML =
-        coworkers
-            .map(
-                user => {
-
-                    const id =
-                        escapeHTML(
-                            user.id
-                        );
-
-
-                    const name =
-                        escapeHTML(
-                            user.full_name ||
-                            user.name ||
-                            user.display_name ||
-                            "Coworker"
-                        );
-
-
-                    const email =
-                        escapeHTML(
-                            user.email ||
-                            "No email"
-                        );
-
-
-                    const role =
-                        normalizeRole(
-                            user.role
-                        );
-
-
-                    return `
-                        <div
-                            class="admin-list-row"
-                            data-coworker-id="${id}"
-                        >
-
-                            <div class="admin-list-main">
-
-                                <strong>
-                                    ${name}
-                                </strong>
-
-                                <small>
-                                    ${email}
-                                </small>
-
-                            </div>
-
-
-                            <div class="admin-list-meta">
-
-                                <strong>
-                                    ${escapeHTML(
-                                        roleLabel(
-                                            role
-                                        )
-                                    )}
-                                </strong>
-
-                                <span>
-                                    ${escapeHTML(
-                                        getUserAccessStatus(
-                                            user
-                                        )
-                                    )}
-                                </span>
-
-                            </div>
-
-
-                            <div class="admin-list-actions">
-
-                                <button
-                                    type="button"
-                                    data-coworker-action="remove"
-                                    data-user-id="${id}"
-                                >
-                                    Remove
-                                </button>
-
-                            </div>
-
-                        </div>
-                    `;
-                }
-            )
-            .join("");
-}
-
-
-/* ============================================================
-   RENDER PAYMENTS
-============================================================ */
-
-function renderAdminPayments() {
-
-    if (!paymentsList) {
-        return;
-    }
-
-
-    if (
-        !adminState.payments.length
-    ) {
-
-        paymentsList.innerHTML = `
-            <div class="details-empty">
-                <strong>No payment records</strong>
-                <span>Payment records will appear here.</span>
-            </div>
-        `;
-
-        return;
-    }
-
-
-    paymentsList.innerHTML =
-        adminState.payments
-            .map(
-                payment => {
-
-                    const id =
-                        escapeHTML(
-                            payment.id
-                        );
-
-
-                    const user =
-                        adminState.users.find(
-                            item =>
-                                String(
-                                    item.id
-                                ) ===
-                                String(
-                                    payment.user_id
-                                )
-                        );
-
-
-                    const name =
-                        escapeHTML(
-                            payment.email ||
-                            payment.user_email ||
-                            user?.full_name ||
-                            user?.email ||
-                            payment.user_id ||
-                            "User"
-                        );
-
-
-                    const amount =
-                        formatMoney(
-                            payment.amount ??
-                            payment.total ??
-                            payment.pay ??
-                            0
-                        );
-
-
-                    const status =
-                        String(
-                            payment.status ||
-                            "pending"
-                        );
-
-
-                    const paid =
-                        [
-                            "paid",
-                            "completed",
-                            "released"
-                        ].includes(
-                            status.toLowerCase()
-                        );
-
-
-                    return `
-                        <div
-                            class="admin-list-row"
-                            data-payment-id="${id}"
-                        >
-
-                            <div class="admin-list-main">
-
-                                <strong>
-                                    ${name}
-                                </strong>
-
-                                <small>
-                                    ${formatDate(
-                                        payment.created_at
-                                    )}
-                                </small>
-
-                            </div>
-
-
-                            <div class="admin-list-meta">
-
-                                <strong>
-                                    ${amount}
-                                </strong>
-
-                                <span>
-                                    ${escapeHTML(
-                                        status
-                                    )}
-                                </span>
-
-                            </div>
-
-
-                            <div class="admin-list-actions">
-
-                                ${
-                                    paid
-                                        ? `
-                                            <button
-                                                type="button"
-                                                data-payment-action="unpaid"
-                                                data-payment-id="${id}"
-                                            >
-                                                Mark unpaid
-                                            </button>
-                                        `
-                                        : `
-                                            <button
-                                                type="button"
-                                                data-payment-action="paid"
-                                                data-payment-id="${id}"
-                                            >
-                                                Mark paid
-                                            </button>
-                                        `
-                                }
-
-                            </div>
-
-                        </div>
-                    `;
-                }
-            )
-            .join("");
-}
-
-
-/* ============================================================
-   UPDATE PAYMENT STATUS
-============================================================ */
-
-async function updatePaymentStatus(
-    paymentId,
-    status
-) {
-
-    if (
-        !await requireAdmin()
-    ) {
-        return false;
-    }
-
-
-    const client =
-        getSupabaseClient();
-
-
-    if (
-        !client ||
-        !paymentId
-    ) {
-        return false;
-    }
-
-
-    try {
-
-        const {
-            data,
-            error
-        } =
-            await client
-                .from(
-                    ADMIN_CONFIG.tables.payments
-                )
-                .update({
-                    status,
-
-                    paid:
-                        status === "paid",
-
-                    paid_by:
-                        adminState.currentUser?.id ||
-                        null,
-
-                    paid_at:
-                        status === "paid"
-                            ? new Date()
-                                .toISOString()
-                            : null,
-
-                    updated_at:
-                        new Date()
-                            .toISOString()
-                })
-                .eq(
-                    "id",
-                    paymentId
-                )
-                .select()
-                .single();
-
-
-        if (error) {
-            throw error;
-        }
-
-
-        const index =
-            adminState.payments.findIndex(
-                payment =>
-                    String(
-                        payment.id
-                    ) ===
-                    String(
-                        paymentId
-                    )
-            );
-
-
-        if (index >= 0) {
-
-            adminState.payments[index] =
-                {
-                    ...adminState.payments[index],
-                    ...data
-                };
-        }
-
-
-        renderAdminPayments();
-
-
-        await writeAdminActivity(
-            "payment_status",
-            {
-                payment_id:
-                    paymentId,
-
-                status
-            }
-        );
-
-
-        showAdminToast(
-            status === "paid"
-                ? "Payment marked as paid."
-                : "Payment marked as unpaid.",
-            "success"
-        );
-
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Payment update failed:",
-            error
-        );
-
-
-        showAdminToast(
-            error?.message ||
-            "Could not update payment.",
-            "error"
-        );
-
-
-        return false;
-    }
-}
-
-
-/* ============================================================
-   RENDER PAY RATES
-============================================================ */
-
-function renderAdminPayRates() {
-
-    if (!payRatesList) {
-        return;
-    }
-
-
-    if (
-        !adminState.payRates.length
-    ) {
-
-        payRatesList.innerHTML = `
-            <div class="details-empty">
-                <strong>No pay rates configured</strong>
-                <span>Add pay-rate records in the pay_rates table.</span>
-            </div>
-        `;
-
-        return;
-    }
-
-
-    payRatesList.innerHTML =
-        adminState.payRates
-            .map(
-                rate => {
-
-                    const role =
-                        normalizeRole(
-                            rate.role ||
-                            rate.work_role
-                        );
-
-
-                    const workType =
-                        rate.work_type ||
-                        rate.task_type ||
-                        rate.shape ||
-                        "all";
-
-
-                    const amount =
-                        formatMoney(
-                            rate.rate ??
-                            rate.amount ??
-                            rate.pay ??
-                            rate.price ??
-                            0
-                        );
-
-
-                    return `
-                        <div class="admin-list-row">
-
-                            <div class="admin-list-main">
-
-                                <strong>
-                                    ${escapeHTML(
-                                        roleLabel(
-                                            role
-                                        )
-                                    )}
-                                </strong>
-
-                                <small>
-                                    ${escapeHTML(
-                                        workType
-                                    )}
-                                </small>
-
-                            </div>
-
-
-                            <div class="admin-list-meta">
-
-                                <strong>
-                                    ${amount}
-                                </strong>
-
-                                <span>
-                                    ${escapeHTML(
-                                        rate.unit ||
-                                        "per task"
-                                    )}
-                                </span>
-
-                            </div>
-
-                        </div>
-                    `;
-                }
-            )
-            .join("");
-}
-
-
-/* ============================================================
-   RENDER ACTIVITY
-============================================================ */
-
-function renderAdminActivity() {
-
-    if (!activityList) {
-        return;
-    }
-
-
-    if (
-        !adminState.activity.length
-    ) {
-
-        activityList.innerHTML = `
-            <div class="details-empty">
-                <strong>No activity records</strong>
-                <span>Activity will appear here.</span>
-            </div>
-        `;
-
-        return;
-    }
-
-
-    activityList.innerHTML =
-        adminState.activity
-            .map(
-                activity => {
-
-                    const action =
-                        escapeHTML(
-                            activity.action ||
-                            activity.event ||
-                            activity.type ||
-                            "Activity"
-                        );
-
-
-                    const email =
-                        escapeHTML(
-                            activity.email ||
-                            activity.user_email ||
-                            activity.user_id ||
-                            "System"
-                        );
-
-
-                    const details =
-                        escapeHTML(
-                            activity.description ||
-                            activity.message ||
-                            (
-                                activity.details
-                                    ? JSON.stringify(
-                                        activity.details
-                                    )
-                                    : ""
-                            )
-                        );
-
-
-                    return `
-                        <div class="admin-list-row">
-
-                            <div class="admin-list-main">
-
-                                <strong>
-                                    ${action}
-                                </strong>
-
-                                <small>
-                                    ${email}
-                                </small>
-
-                            </div>
-
-
-                            ${
-                                details
-                                    ? `
-                                        <div class="admin-list-meta">
-                                            ${details}
-                                        </div>
-                                    `
-                                    : ""
-                            }
-
-
-                            <div class="admin-list-meta">
-
-                                ${formatDate(
-                                    activity.created_at ||
-                                    activity.timestamp
-                                )}
-
-                            </div>
-
-                        </div>
-                    `;
-                }
-            )
-            .join("");
-}
-
-
-/* ============================================================
-   ADMIN TAB
-============================================================ */
-
-function activateAdminTab(
-    tab
-) {
-
-    if (!tab) {
-        tab =
-            "overview";
-    }
-
-
-    adminState.activeTab =
-        tab;
-
-
-    document
-        .querySelectorAll(
-            "[data-admin-tab]"
-        )
-        .forEach(
-            button => {
-
-                button.classList.toggle(
-                    "active",
-                    button.dataset.adminTab ===
-                        tab
-                );
-
-                button.setAttribute(
-                    "aria-selected",
-                    button.dataset.adminTab ===
-                        tab
-                        ? "true"
-                        : "false"
-                );
-            }
-        );
-
-
-    document
-        .querySelectorAll(
-            "[data-admin-page]"
-        )
-        .forEach(
-            page => {
-
-                const visible =
-                    page.dataset.adminPage ===
-                    tab;
-
-
-                page.style.display =
-                    visible
-                        ? ""
-                        : "none";
-
-
-                page.classList.toggle(
-                    "active",
-                    visible
-                );
-            }
-        );
-
-
-    document
-        .querySelectorAll(
-            "[data-admin-panel]"
-        )
-        .forEach(
-            panel => {
-
-                const visible =
-                    panel.dataset.adminPanel ===
-                    tab;
-
-
-                panel.style.display =
-                    visible
-                        ? ""
-                        : "none";
-            }
-        );
-
-
-    if (adminContent) {
-
-        adminContent.dataset.activePage =
-            tab;
-    }
-}
-
-
-/* ============================================================
-   BIND ADMIN EVENTS
-============================================================ */
-
-function bindAdminEvents() {
-
-    if (
-        adminState.initialized
-    ) {
-        return;
-    }
-
-
-    adminState.initialized =
-        true;
-
-
-    cacheDOM();
-
-
-    /*
-     * Open.
-     */
-
-    adminCenterButton?.addEventListener(
-        "click",
-        async event => {
-
-            event.preventDefault();
-
-            await openAdminCenter();
-        }
-    );
-
-
-    /*
-     * Close.
-     */
-
-    closeAdminModalButton?.addEventListener(
-        "click",
-        event => {
-
-            event.preventDefault();
-
-            closeAdminCenter();
-        }
-    );
-
-
-    /*
-     * Click outside.
-     */
-
-    adminModal?.addEventListener(
-        "click",
-        event => {
-
-            if (
-                event.target ===
-                adminModal
-            ) {
-
-                closeAdminCenter();
-            }
-        }
-    );
-
-
-    /*
-     * Escape.
-     */
-
-    document.addEventListener(
-        "keydown",
-        event => {
-
-            if (
-                event.key ===
-                "Escape" &&
-                adminState.open
-            ) {
-
-                closeAdminCenter();
-            }
-        }
-    );
-
-
-    /*
-     * Create task.
-     */
-
-    createTaskButton?.addEventListener(
-        "click",
-        async event => {
-
-            event.preventDefault();
-
-            await createAdminTask();
-        }
-    );
-
-
-    /*
-     * Task actions.
-     */
-
-    adminTasksList?.addEventListener(
-        "click",
-        async event => {
-
-            const button =
-                event.target.closest(
-                    "[data-admin-task-action]"
-                );
-
-
-            if (!button) {
-                return;
-            }
-
-
-            event.preventDefault();
-
-
-            await handleTaskAction(
-                button.dataset.adminTaskAction,
-                button.dataset.taskId
-            );
-        }
-    );
-
-
-    /*
-     * User role changes.
-     */
-
-    adminUsersList?.addEventListener(
-        "change",
-        async event => {
-
-            const select =
-                event.target.closest(
-                    "[data-user-role]"
-                );
-
-
-            if (!select) {
-                return;
-            }
-
-
-            await handleRoleChange(
-                select
-            );
-        }
-    );
-
-
-    /*
-     * User buttons.
-     */
-
-    adminUsersList?.addEventListener(
-        "click",
-        async event => {
-
-            const button =
-                event.target.closest(
-                    "[data-user-action]"
-                );
-
-
-            if (!button) {
-                return;
-            }
-
-
-            event.preventDefault();
-
-
-            await handleUserAction(
-                button.dataset.userAction,
-                button.dataset.userId
-            );
-        }
-    );
-
-
-    /*
-     * Coworker actions.
-     */
-
-    adminCoworkersList?.addEventListener(
-        "click",
-        async event => {
-
-            const button =
-                event.target.closest(
-                    "[data-coworker-action]"
-                );
-
-
-            if (!button) {
-                return;
-            }
-
-
-            event.preventDefault();
-
-
-            if (
-                button.dataset.coworkerAction ===
-                "remove"
-            ) {
-
-                await removeCoworker(
-                    button.dataset.userId
-                );
-            }
-        }
-    );
-
-
-    /*
-     * Payment actions.
-     */
-
-    paymentsList?.addEventListener(
-        "click",
-        async event => {
-
-            const button =
-                event.target.closest(
-                    "[data-payment-action]"
-                );
-
-
-            if (!button) {
-                return;
-            }
-
-
-            const status =
-                button.dataset.paymentAction ===
-                "paid"
-                    ? "paid"
-                    : "pending";
-
-
-            await updatePaymentStatus(
-                button.dataset.paymentId,
-                status
-            );
-        }
-    );
-
-
-    /*
-     * Admin tabs.
-     */
-
-    document.addEventListener(
-        "click",
-        event => {
-
-            const button =
-                event.target.closest(
-                    "[data-admin-tab]"
-                );
-
-
-            if (!button) {
-                return;
-            }
-
-
-            /*
-             * Only process tabs while Admin Center
-             * is open.
-             */
-
-            if (
-                !adminState.open
-            ) {
-                return;
-            }
-
-
-            event.preventDefault();
-
-
-            activateAdminTab(
-                button.dataset.adminTab
-            );
-        }
-    );
-
-
-    /*
-     * CSV.
-     */
-
-    copyAdminCSV?.addEventListener(
-        "click",
-        async event => {
-
-            event.preventDefault();
-
-            await exportAdminCSV();
-        }
-    );
-
-
-    /*
-     * HTML.
-     */
-
-    downloadAdminHTML?.addEventListener(
-        "click",
-        async event => {
-
-            event.preventDefault();
-
-            await exportAdminHTML();
-        }
-    );
-
-
-    /*
-     * Refresh users.
-     */
-
-    $("refreshUsersButton")
-        ?.addEventListener(
-            "click",
-            async event => {
-
-                event.preventDefault();
-
-                await loadAdminUsers();
-
-                await loadAdminCoworkers();
-
-                renderAdminUsers();
-
-                renderAdminCoworkers();
-
-                renderAdminOverview();
-            }
-        );
-
-
-    /*
-     * Refresh Admin Center if an external module
-     * requests it.
-     */
-
-    window.addEventListener(
-        "admin:refresh",
-        async () => {
-
-            if (
-                adminState.open
-            ) {
-
-                await refreshAdminCenter();
-            }
-        }
-    );
-}
-
-
-/* ============================================================
-   ADMIN VISIBILITY
-============================================================ */
-
-async function updateAdminVisibility() {
-
-    cacheDOM();
-
-
-    const user =
-        await getAdminUser();
-
-
-    adminState.currentUser =
-        user;
-
-
-    const allowed =
-        isAdminUser(
-            user
-        );
-
-
-    if (adminCenterButton) {
-
-        adminCenterButton.style.display =
-            allowed
-                ? ""
-                : "none";
-
-        adminCenterButton.hidden =
-            !allowed;
-
-        adminCenterButton.setAttribute(
-            "aria-hidden",
-            allowed
-                ? "false"
-                : "true"
-        );
-    }
-
-
-    /*
-     * Never render admin email here.
-     */
-}
-
-
-/* ============================================================
-   INITIALIZE
-============================================================ */
-
-async function initializeAdmin() {
-
-    cacheDOM();
-
-
-    bindAdminEvents();
-
-
-    await updateAdminVisibility();
-
-
-    /*
-     * Auth changes.
-     */
-
-    window.addEventListener(
-        "auth:changed",
-        async () => {
-
-            await updateAdminVisibility();
-
-            if (
-                !isAdminUser()
-            ) {
-                closeAdminCenter();
-            }
-        }
-    );
-
-
-    window.addEventListener(
-        "authChanged",
-        async () => {
-
-            await updateAdminVisibility();
-
-            if (
-                !isAdminUser()
-            ) {
-                closeAdminCenter();
-            }
-        }
-    );
-
+    await loadUsers();
 
     return true;
-}
-
-
-/* ============================================================
-   CSV ESCAPE
-============================================================ */
-
-function csvEscape(
-    value
-) {
-
-    const string =
-        String(
-            value ?? ""
-        );
-
-
-    return `"${string.replaceAll(
-        '"',
-        '""'
-    )}"`;
-}
-
-
-/* ============================================================
-   ARRAY TO CSV
-============================================================ */
-
-function arrayToCSV(
-    rows
-) {
-
-    if (
-        !Array.isArray(
-            rows
-        ) ||
-        !rows.length
-    ) {
-        return "";
-    }
-
-
-    const keys =
-        [
-            ...new Set(
-                rows.flatMap(
-                    row =>
-                        Object.keys(
-                            row ||
-                            {}
-                        )
-                )
-            )
-        ];
-
-
-    const header =
-        keys
-            .map(
-                csvEscape
-            )
-            .join(",");
-
-
-    const body =
-        rows
-            .map(
-                row =>
-                    keys
-                        .map(
-                            key => {
-
-                                const value =
-                                    row?.[
-                                        key
-                                    ];
-
-
-                                if (
-                                    value &&
-                                    typeof value ===
-                                    "object"
-                                ) {
-
-                                    return csvEscape(
-                                        JSON.stringify(
-                                            value
-                                        )
-                                    );
-                                }
-
-
-                                return csvEscape(
-                                    value
-                                );
-                            }
-                        )
-                        .join(",")
-            )
-            .join("\n");
-
-
-    return (
-        header +
-        "\n" +
-        body
+  } catch (error) {
+    console.error(
+      "kickUser:",
+      error
     );
+
+    toast(
+      error.message ||
+        "Unable to kick user.",
+      "error"
+    );
+
+    return false;
+  }
 }
 
-
 /* ============================================================
-   BUILD EXPORT ROWS
-============================================================ */
+   COWORKERS
+   ============================================================ */
 
-function buildAdminExportRows() {
+async function loadCoworkers() {
+  if (!adminState.users.length) {
+    await loadUsers();
+  }
 
-    const rows = [];
+  renderCoworkers();
+}
 
+function renderCoworkers() {
+  const container =
+    $("coworkersList");
 
-    adminState.users.forEach(
-        user => {
+  if (!container) return;
 
-            rows.push({
+  const coworkers =
+    adminState.users.filter(
+      (user) =>
+        isCoworkerRole(
+          normalizeRole(
+            user.role
+          )
+        )
+    );
 
-                section:
-                    "users",
+  if (!coworkers.length) {
+    container.innerHTML =
+      `
+        <div class="empty-state">
+          No coworkers have been created yet.
+        </div>
+      `;
 
-                id:
-                    user.id,
+    return;
+  }
 
-                name:
+  container.innerHTML =
+    coworkers
+      .map(
+        (user) => {
+          const role =
+            normalizeRole(
+              user.role
+            );
+
+          const assigned =
+            adminState.tasks.filter(
+              (task) =>
+                task.assigned_to ===
+                  user.id ||
+                task.claimed_by ===
+                  user.id
+            ).length;
+
+          return `
+            <div
+              class="admin-coworker-card"
+              data-user-id="${escapeHTML(
+                user.id
+              )}"
+            >
+              <div>
+                <strong>
+                  ${escapeHTML(
                     user.full_name ||
-                    user.name ||
-                    user.display_name ||
-                    "",
+                      user.name ||
+                      "Unnamed"
+                  )}
+                </strong>
 
-                email:
+                <span>
+                  ${escapeHTML(
                     user.email ||
-                    "",
+                      ""
+                  )}
+                </span>
+              </div>
 
-                role:
-                    user.role ||
-                    "",
+              <div>
+                <strong>
+                  ${escapeHTML(
+                    roleLabel(
+                      role
+                    )
+                  )}
+                </strong>
 
-                status:
-                    getUserAccessStatus(
-                        user
-                    ),
+                <small>
+                  ${assigned}
+                  assigned task${
+                    assigned ===
+                    1
+                      ? ""
+                      : "s"
+                  }
+                </small>
+              </div>
 
-                joined:
-                    user.created_at ||
-                    "",
-
-                last_login:
-                    user.last_login_at ||
-                    user.last_sign_in_at ||
-                    "",
-
-                last_logout:
-                    user.last_logout_at ||
-                    "",
-
-                active:
-                    user.active
-            });
+              <div>
+                <span
+                  class="status-badge ${
+                    user.active !==
+                    false
+                      ? "status-active"
+                      : "status-pending"
+                  }"
+                >
+                  ${
+                    user.active !==
+                    false
+                      ? "Active"
+                      : "Inactive"
+                  }
+                </span>
+              </div>
+            </div>
+          `;
         }
-    );
-
-
-    adminState.tasks.forEach(
-        task => {
-
-            rows.push({
-
-                section:
-                    "tasks",
-
-                id:
-                    task.id,
-
-                title:
-                    task.title ||
-                    task.name ||
-                    "",
-
-                type:
-                    task.work_type ||
-                    task.shape ||
-                    task.task_type ||
-                    "",
-
-                work_role:
-                    task.work_role ||
-                    "",
-
-                duration:
-                    task.duration ??
-                    task.estimated_minutes ??
-                    "",
-
-                pay:
-                    task.pay ??
-                    task.reward ??
-                    "",
-
-                status:
-                    task.status ||
-                    "",
-
-                assigned_to:
-                    task.assigned_to ||
-                    task.claimed_by ||
-                    "",
-
-                created_at:
-                    task.created_at ||
-                    ""
-            });
-        }
-    );
-
-
-    adminState.coworkers.forEach(
-        coworker => {
-
-            rows.push({
-
-                section:
-                    "coworkers",
-
-                id:
-                    coworker.id,
-
-                user_id:
-                    coworker.user_id ||
-                    coworker.id ||
-                    "",
-
-                role:
-                    coworker.role ||
-                    "",
-
-                status:
-                    coworker.status ||
-                    "",
-
-                created_at:
-                    coworker.created_at ||
-                    ""
-            });
-        }
-    );
-
-
-    adminState.payments.forEach(
-        payment => {
-
-            rows.push({
-
-                section:
-                    "payments",
-
-                id:
-                    payment.id,
-
-                user_id:
-                    payment.user_id ||
-                    "",
-
-                amount:
-                    payment.amount ??
-                    payment.total ??
-                    payment.pay ??
-                    "",
-
-                status:
-                    payment.status ||
-                    "",
-
-                paid_at:
-                    payment.paid_at ||
-                    "",
-
-                created_at:
-                    payment.created_at ||
-                    ""
-            });
-        }
-    );
-
-
-    adminState.activity.forEach(
-        activity => {
-
-            rows.push({
-
-                section:
-                    "activity",
-
-                action:
-                    activity.action ||
-                    activity.event ||
-                    "",
-
-                user_id:
-                    activity.user_id ||
-                    "",
-
-                email:
-                    activity.email ||
-                    activity.user_email ||
-                    "",
-
-                details:
-                    activity.details ||
-                    activity.description ||
-                    "",
-
-                created_at:
-                    activity.created_at ||
-                    activity.timestamp ||
-                    ""
-            });
-        }
-    );
-
-
-    return rows;
+      )
+      .join("");
 }
 
+/* ============================================================
+   CREATE COWORKER / STAFF
+   ============================================================ */
+
+function bindCreateWorker() {
+  $("createCoworkerButton")
+    ?.addEventListener(
+      "click",
+      openCreateCoworkerModal
+    );
+
+  $("closeCreateCoworkerModal")
+    ?.addEventListener(
+      "click",
+      closeCreateCoworkerModal
+    );
+
+  $("cancelCreateCoworker")
+    ?.addEventListener(
+      "click",
+      closeCreateCoworkerModal
+    );
+
+  $("createCoworkerForm")
+    ?.addEventListener(
+      "submit",
+      createCoworker
+    );
+}
+
+function openCreateCoworkerModal() {
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const modal =
+    $("createCoworkerModal");
+
+  if (!modal) return;
+
+  showElement(
+    modal,
+    true
+  );
+
+  const role =
+    $("newWorkerRole");
+
+  if (role) {
+    role.innerHTML = `
+      <option value="coworker_2d_box">
+        2D Box Coworker
+      </option>
+
+      <option value="coworker_polygon">
+        Polygon Coworker
+      </option>
+
+      <option value="coworker_segmentation">
+        Segmentation Coworker
+      </option>
+
+      <option value="reviewer">
+        Reviewer
+      </option>
+
+      <option value="staff">
+        Staff
+      </option>
+
+      <option value="admin">
+        Administrator
+      </option>
+    `;
+  }
+}
+
+function closeCreateCoworkerModal() {
+  showElement(
+    $("createCoworkerModal"),
+    false
+  );
+}
+
+async function createCoworker(
+  event
+) {
+  event.preventDefault();
+
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const name =
+    $("newWorkerName")
+      ?.value
+      ?.trim();
+
+  const email =
+    $("newWorkerEmail")
+      ?.value
+      ?.trim()
+      ?.toLowerCase();
+
+  const password =
+    $("newWorkerPassword")
+      ?.value;
+
+  const role =
+    normalizeRole(
+      $("newWorkerRole")
+        ?.value
+    );
+
+  if (
+    !name ||
+    !email ||
+    !password ||
+    !role
+  ) {
+    toast(
+      "Complete all account fields.",
+      "warning"
+    );
+
+    return;
+  }
+
+  if (
+    password.length <
+    6
+  ) {
+    toast(
+      "Password must contain at least 6 characters.",
+      "warning"
+    );
+
+    return;
+  }
+
+  if (
+    email ===
+    currentAdminEmail()
+  ) {
+    toast(
+      "That email is reserved for the administrator.",
+      "error"
+    );
+
+    return;
+  }
+
+  const client =
+    getClient();
+
+  if (!client) {
+    return;
+  }
+
+  try {
+    const originalSession =
+      (
+        await client.auth.getSession()
+      )?.data?.session;
+
+    /*
+     * Browser-safe account creation.
+     *
+     * We use Supabase signUp instead of
+     * auth.admin.createUser because the
+     * publishable key cannot safely execute
+     * the Auth Admin API.
+     */
+    const {
+      data,
+      error,
+    } =
+      await client.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name:
+              name,
+            role,
+            created_by_admin:
+              true,
+          },
+        },
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    const newUser =
+      data?.user;
+
+    /*
+     * If email confirmation is disabled,
+     * signUp may return a session.
+     *
+     * If it did, restore the administrator
+     * session immediately after writing the
+     * profile.
+     */
+    if (newUser) {
+      const {
+        error:
+          profileError,
+      } = await client
+        .from(
+          TABLES.profiles
+        )
+        .upsert(
+          {
+            id:
+              newUser.id,
+            email,
+            full_name:
+              name,
+            role,
+            active: true,
+            status:
+              "active",
+          },
+          {
+            onConflict:
+              "id",
+          }
+        );
+
+      if (profileError) {
+        console.warn(
+          "Profile creation warning:",
+          profileError
+        );
+      }
+
+      await logAdminActivity(
+        "account_created",
+        newUser.id,
+        {
+          email,
+          name,
+          role,
+        }
+      );
+    }
+
+    /*
+     * Restore original admin session.
+     */
+    if (
+      originalSession &&
+      data?.session
+    ) {
+      await client.auth.setSession(
+        originalSession
+      );
+    }
+
+    closeCreateCoworkerModal();
+
+    const form =
+      $("createCoworkerForm");
+
+    form?.reset();
+
+    toast(
+      data?.session
+        ? "Account created successfully."
+        : "Account created. If email confirmation is enabled, the user must confirm their email before signing in.",
+      "success"
+    );
+
+    await loadUsers();
+  } catch (error) {
+    console.error(
+      "createCoworker:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to create account.",
+      "error"
+    );
+  }
+}
 
 /* ============================================================
-   EXPORT CSV
-============================================================ */
+   TASKS
+   ============================================================ */
 
-async function exportAdminCSV() {
+export async function loadTasks() {
+  if (!requireAdmin()) {
+    return [];
+  }
 
-    if (
-        !await requireAdmin()
-    ) {
+  const client =
+    getClient();
 
-        showAdminToast(
-            "Administrator access is required.",
-            "error"
-        );
+  if (!client) {
+    return [];
+  }
 
-        return;
+  try {
+    const {
+      data,
+      error,
+    } = await client
+      .from(TABLES.tasks)
+      .select("*")
+      .order(
+        "created_at",
+        {
+          ascending: false,
+        }
+      );
+
+    if (error) {
+      throw error;
     }
 
+    adminState.tasks =
+      Array.isArray(data)
+        ? data
+        : [];
 
-    const rows =
-        buildAdminExportRows();
+    calculateStats();
 
+    renderTasks();
+    renderTaskProgress();
 
-    const csv =
-        arrayToCSV(
-            rows
-        );
+    return adminState.tasks;
+  } catch (error) {
+    console.error(
+      "loadTasks:",
+      error
+    );
 
+    toast(
+      error.message ||
+        "Unable to load tasks.",
+      "error"
+    );
 
-    if (!csv) {
+    return [];
+  }
+}
 
-        showAdminToast(
-            "There is no admin data to export.",
-            "info"
-        );
+function normalizeTaskStatus(
+  status
+) {
+  const value =
+    String(
+      status ||
+        "available"
+    )
+      .trim()
+      .toLowerCase();
 
-        return;
-    }
+  if (
+    value ===
+    "in-progress"
+  ) {
+    return "in_progress";
+  }
 
+  return value;
+}
 
-    try {
+function taskWorkType(
+  task
+) {
+  return (
+    task.work_type ||
+    task.workType ||
+    task.annotation_type ||
+    task.annotationType ||
+    ""
+  );
+}
+
+function taskWorkRole(
+  task
+) {
+  return (
+    normalizeRole(
+      task.work_role ||
+        task.workRole ||
+        roleForWorkType(
+          taskWorkType(task)
+        ) ||
+        ""
+    )
+  );
+}
+
+function taskTitle(
+  task
+) {
+  return (
+    task.title ||
+    task.name ||
+    task.task_name ||
+    "Untitled task"
+  );
+}
+
+function taskDuration(
+  task
+) {
+  return number(
+    task.expected_duration ??
+      task.duration ??
+      task.estimated_duration,
+    0
+  );
+}
+
+function taskPay(
+  task
+) {
+  return number(
+    task.pay ??
+      task.payment ??
+      task.pay_amount ??
+      task.amount,
+    0
+  );
+}
+
+function renderTasks() {
+  const container =
+    $("adminTasksList");
+
+  if (!container) return;
+
+  if (
+    !adminState.tasks.length
+  ) {
+    container.innerHTML =
+      `
+        <div class="empty-state">
+          No tasks found.
+        </div>
+      `;
+
+    return;
+  }
+
+  container.innerHTML =
+    adminState.tasks
+      .map(
+        (task) =>
+          renderTaskRow(
+            task
+          )
+      )
+      .join("");
+}
+
+function renderTaskRow(
+  task
+) {
+  const status =
+    normalizeTaskStatus(
+      task.status
+    );
+
+  const workType =
+    taskWorkType(task);
+
+  const role =
+    taskWorkRole(task);
+
+  const assignedUser =
+    adminState.users.find(
+      (user) =>
+        user.id ===
+          task.assigned_to ||
+        user.id ===
+          task.claimed_by
+    );
+
+  return `
+    <div
+      class="admin-task-row"
+      data-task-id="${escapeHTML(
+        task.id
+      )}"
+    >
+      <div class="admin-task-main">
+        <strong>
+          ${escapeHTML(
+            taskTitle(task)
+          )}
+        </strong>
+
+        <span>
+          ID:
+          ${escapeHTML(
+            task.id
+          )}
+        </span>
+
+        <small>
+          Created:
+          ${escapeHTML(
+            formatDate(
+              task.created_at
+            )
+          )}
+        </small>
+      </div>
+
+      <div class="admin-task-work">
+        <strong>
+          ${escapeHTML(
+            workType ||
+              "Unspecified"
+          )}
+        </strong>
+
+        <span>
+          ${escapeHTML(
+            roleLabel(
+              role
+            )
+          )}
+        </span>
+
+        <small>
+          ${escapeHTML(
+            annotationTypeForRole(
+              role
+            ) || ""
+          )}
+        </small>
+      </div>
+
+      <div class="admin-task-status">
+        <span
+          class="status-badge status-${escapeHTML(
+            status
+          )}"
+        >
+          ${escapeHTML(
+            status
+          )}
+        </span>
+
+        ${
+          task.claimed_by
+            ? `
+              <small>
+                Claimed
+              </small>
+            `
+            : ""
+        }
+      </div>
+
+      <div class="admin-task-assignment">
+        <select
+          class="admin-task-assignee"
+          data-task-id="${escapeHTML(
+            task.id
+          )}"
+        >
+          <option value="">
+            Unassigned
+          </option>
+
+          ${workerOptions(
+            task.assigned_to ||
+              task.claimed_by ||
+              "",
+            role
+          )}
+        </select>
+      </div>
+
+      <div class="admin-task-actions">
+        <button
+          type="button"
+          class="admin-action-btn view-task-progress"
+          data-task-id="${escapeHTML(
+            task.id
+          )}"
+        >
+          Progress
+        </button>
+
+        ${
+          status !==
+          "approved"
+            ? `
+              <button
+                type="button"
+                class="admin-action-btn admin-approve-task"
+                data-task-id="${escapeHTML(
+                  task.id
+                )}"
+              >
+                Approve
+              </button>
+            `
+            : ""
+        }
+      </div>
+    </div>
+  `;
+}
+
+function workerOptions(
+  selectedId = "",
+  taskRole = ""
+) {
+  const workers =
+    adminState.users.filter(
+      (user) => {
+        const role =
+          normalizeRole(
+            user.role
+          );
 
         if (
-            navigator.clipboard?.writeText
+          user.active ===
+          false
         ) {
-
-            await navigator.clipboard.writeText(
-                csv
-            );
-
-
-            showAdminToast(
-                "Admin CSV copied to clipboard.",
-                "success"
-            );
-
-
-            return;
+          return false;
         }
 
-    } catch {
-        /* fallback */
+        if (
+          isAdminRole(role) ||
+          isStaffRole(role) ||
+          isReviewerRole(role)
+        ) {
+          return true;
+        }
+
+        return (
+          !taskRole ||
+          role ===
+            normalizeRole(
+              taskRole
+            )
+        );
+      }
+    );
+
+  return workers
+    .map(
+      (user) => `
+        <option
+          value="${escapeHTML(
+            user.id
+          )}"
+          ${
+            user.id ===
+            selectedId
+              ? "selected"
+              : ""
+          }
+        >
+          ${escapeHTML(
+            user.full_name ||
+              user.email ||
+              user.id
+          )}
+          —
+          ${escapeHTML(
+            roleLabel(
+              normalizeRole(
+                user.role
+              )
+            )
+          )}
+        </option>
+      `
+    )
+    .join("");
+}
+
+/* ============================================================
+   TASK ACTIONS
+   ============================================================ */
+
+function bindTaskActions() {
+  $("createTaskButton")
+    ?.addEventListener(
+      "click",
+      openCreateTaskModal
+    );
+
+  $("closeCreateTaskModal")
+    ?.addEventListener(
+      "click",
+      closeCreateTaskModal
+    );
+
+  $("cancelCreateTask")
+    ?.addEventListener(
+      "click",
+      closeCreateTaskModal
+    );
+
+  $("createTaskForm")
+    ?.addEventListener(
+      "submit",
+      createTask
+    );
+
+  document.addEventListener(
+    "change",
+    async (event) => {
+      const select =
+        event.target.closest(
+          ".admin-task-assignee"
+        );
+
+      if (!select) return;
+
+      await assignTask(
+        select.dataset.taskId,
+        select.value || null
+      );
     }
+  );
 
-
-    downloadTextFile(
-        "annotation-ai-admin.csv",
-        csv,
-        "text/csv;charset=utf-8"
-    );
-
-
-    showAdminToast(
-        "CSV download started.",
-        "success"
-    );
-}
-
-
-/* ============================================================
-   DOWNLOAD TEXT
-============================================================ */
-
-function downloadTextFile(
-    filename,
-    content,
-    mime =
-        "text/plain;charset=utf-8"
-) {
-
-    const blob =
-        new Blob(
-            [
-                content
-            ],
-            {
-                type:
-                    mime
-            }
+  document.addEventListener(
+    "click",
+    async (event) => {
+      const progress =
+        event.target.closest(
+          ".view-task-progress"
         );
 
-
-    const url =
-        URL.createObjectURL(
-            blob
-        );
-
-
-    const link =
-        document.createElement(
-            "a"
-        );
-
-
-    link.href =
-        url;
-
-
-    link.download =
-        filename;
-
-
-    document.body.appendChild(
-        link
-    );
-
-
-    link.click();
-
-
-    link.remove();
-
-
-    window.setTimeout(
-        () => {
-            URL.revokeObjectURL(
-                url
-            );
-        },
-        1000
-    );
-}
-
-
-/* ============================================================
-   ADMIN HTML EXPORT
-============================================================ */
-
-async function exportAdminHTML() {
-
-    if (
-        !await requireAdmin()
-    ) {
-
-        showAdminToast(
-            "Administrator access is required.",
-            "error"
+      if (progress) {
+        await showTaskProgress(
+          progress.dataset.taskId
         );
 
         return;
+      }
+
+      const approve =
+        event.target.closest(
+          ".admin-approve-task"
+        );
+
+      if (approve) {
+        await approveTask(
+          approve.dataset.taskId
+        );
+      }
+    }
+  );
+}
+
+/* ============================================================
+   ASSIGN / REASSIGN TASK
+   ============================================================ */
+
+export async function assignTask(
+  taskId,
+  userId
+) {
+  if (!requireAdmin()) {
+    return false;
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return false;
+
+  const task =
+    adminState.tasks.find(
+      (item) =>
+        item.id ===
+        taskId
+    );
+
+  if (!task) {
+    return false;
+  }
+
+  try {
+    let {
+      error,
+    } = await client
+      .from(TABLES.tasks)
+      .update({
+        assigned_to:
+          userId,
+      })
+      .eq(
+        "id",
+        taskId
+      );
+
+    /*
+     * Older schema fallback:
+     * use claimed_by if assigned_to
+     * does not exist.
+     */
+    if (error) {
+      const retry =
+        await client
+          .from(TABLES.tasks)
+          .update({
+            claimed_by:
+              userId,
+          })
+          .eq(
+            "id",
+            taskId
+          );
+
+      error =
+        retry.error;
     }
 
+    if (error) {
+      throw error;
+    }
 
-    const now =
-        new Date()
-            .toLocaleString();
+    await logAdminActivity(
+      "task_reassigned",
+      userId,
+      {
+        task_id:
+          taskId,
+        previous_assignee:
+          task.assigned_to ||
+          task.claimed_by ||
+          null,
+        new_assignee:
+          userId,
+      }
+    );
 
+    toast(
+      userId
+        ? "Task assigned successfully."
+        : "Task unassigned.",
+      "success"
+    );
 
-    const usersHTML =
-        adminState.users
-            .map(
-                user => `
-                    <tr>
+    await loadTasks();
 
-                        <td>
+    return true;
+  } catch (error) {
+    console.error(
+      "assignTask:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to assign task.",
+      "error"
+    );
+
+    await loadTasks();
+
+    return false;
+  }
+}
+
+/* ============================================================
+   APPROVE TASK
+   ============================================================ */
+
+async function approveTask(
+  taskId
+) {
+  if (!requireAdmin()) {
+    return false;
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return false;
+
+  try {
+    let rpcWorked =
+      false;
+
+    /*
+     * Try project RPC first.
+     */
+    try {
+      const {
+        error,
+      } = await client.rpc(
+        "approve_task",
+        {
+          p_task_id:
+            taskId,
+          p_user_id:
+            adminState.user?.id,
+        }
+      );
+
+      if (!error) {
+        rpcWorked = true;
+      }
+    } catch {
+      rpcWorked = false;
+    }
+
+    if (!rpcWorked) {
+      const {
+        error,
+      } = await client
+        .from(TABLES.tasks)
+        .update({
+          status:
+            "approved",
+          approved_by:
+            adminState.user?.id ||
+            null,
+          approved_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          taskId
+        );
+
+      if (error) {
+        throw error;
+      }
+    }
+
+    await logAdminActivity(
+      "task_approved",
+      null,
+      {
+        task_id:
+          taskId,
+      }
+    );
+
+    toast(
+      "Task approved.",
+      "success"
+    );
+
+    await loadTasks();
+
+    return true;
+  } catch (error) {
+    console.error(
+      "approveTask:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to approve task.",
+      "error"
+    );
+
+    return false;
+  }
+}
+
+/* ============================================================
+   TASK PROGRESS
+   ============================================================ */
+
+async function showTaskProgress(
+  taskId
+) {
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const task =
+    adminState.tasks.find(
+      (item) =>
+        item.id ===
+        taskId
+    );
+
+  if (!task) {
+    return;
+  }
+
+  const client =
+    getClient();
+
+  let annotationCount =
+    0;
+
+  let annotationRows =
+    [];
+
+  if (client) {
+    try {
+      const {
+        data,
+        error,
+      } = await client
+        .from(
+          TABLES.annotations
+        )
+        .select("*")
+        .eq(
+          "task_id",
+          taskId
+        );
+
+      if (!error) {
+        annotationRows =
+          data || [];
+
+        annotationCount =
+          annotationRows.length;
+      }
+    } catch {
+      // Annotation table may not exist.
+    }
+  }
+
+  const assigned =
+    adminState.users.find(
+      (user) =>
+        user.id ===
+          task.assigned_to ||
+        user.id ===
+          task.claimed_by
+    );
+
+  const html = `
+    <div class="admin-progress-overlay">
+      <div class="admin-progress-dialog">
+        <div class="admin-progress-header">
+          <div>
+            <h2>
+              ${escapeHTML(
+                taskTitle(task)
+              )}
+            </h2>
+
+            <small>
+              Task ID:
+              ${escapeHTML(
+                task.id
+              )}
+            </small>
+          </div>
+
+          <button
+            type="button"
+            class="admin-progress-close"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="admin-progress-grid">
+          <div>
+            <span>Status</span>
+            <strong>
+              ${escapeHTML(
+                normalizeTaskStatus(
+                  task.status
+                )
+              )}
+            </strong>
+          </div>
+
+          <div>
+            <span>Work type</span>
+            <strong>
+              ${escapeHTML(
+                taskWorkType(task) ||
+                  "—"
+              )}
+            </strong>
+          </div>
+
+          <div>
+            <span>Role</span>
+            <strong>
+              ${escapeHTML(
+                roleLabel(
+                  taskWorkRole(
+                    task
+                  )
+                )
+              )}
+            </strong>
+          </div>
+
+          <div>
+            <span>Worker</span>
+            <strong>
+              ${escapeHTML(
+                assigned?.full_name ||
+                  assigned?.email ||
+                  "Unassigned"
+              )}
+            </strong>
+          </div>
+
+          <div>
+            <span>Annotations</span>
+            <strong>
+              ${annotationCount}
+            </strong>
+          </div>
+
+          <div>
+            <span>Created</span>
+            <strong>
+              ${escapeHTML(
+                formatDate(
+                  task.created_at
+                )
+              )}
+            </strong>
+          </div>
+
+          <div>
+            <span>Updated</span>
+            <strong>
+              ${escapeHTML(
+                formatDate(
+                  task.updated_at
+                )
+              )}
+            </strong>
+          </div>
+
+          <div>
+            <span>Pay</span>
+            <strong>
+              ${formatMoney(
+                taskPay(task)
+              )}
+            </strong>
+          </div>
+        </div>
+
+        <div class="admin-progress-annotations">
+          <h3>
+            Annotation progress
+          </h3>
+
+          ${
+            annotationRows.length
+              ? `
+                <div class="admin-progress-list">
+                  ${annotationRows
+                    .map(
+                      (
+                        annotation,
+                        index
+                      ) => `
+                        <div>
+                          <strong>
+                            #${
+                              index + 1
+                            }
+                            ${
+                              escapeHTML(
+                                annotation.label ||
+                                  annotation.classification ||
+                                  "object"
+                              )
+                            }
+                          </strong>
+
+                          <span>
                             ${escapeHTML(
-                                user.full_name ||
-                                user.name ||
-                                "User"
+                              annotation.type ||
+                                "box"
                             )}
-                        </td>
+                          </span>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              `
+              : `
+                <p>
+                  No annotation rows found for this task.
+                </p>
+              `
+          }
+        </div>
+      </div>
+    </div>
+  `;
 
-                        <td>
-                            ${escapeHTML(
-                                user.email ||
-                                ""
-                            )}
-                        </td>
+  const wrapper =
+    document.createElement(
+      "div"
+    );
 
-                        <td>
-                            ${escapeHTML(
-                                roleLabel(
-                                    normalizeRole(
-                                        user.role
-                                    )
-                                )
-                            )}
-                        </td>
+  wrapper.innerHTML =
+    html;
 
-                        <td>
-                            ${escapeHTML(
-                                getUserAccessStatus(
-                                    user
-                                )
-                            )}
-                        </td>
+  const overlay =
+    wrapper.firstElementChild;
 
-                        <td>
-                            ${escapeHTML(
-                                formatDate(
-                                    user.created_at
-                                )
-                            )}
-                        </td>
+  document.body.appendChild(
+    overlay
+  );
 
-                        <td>
-                            ${escapeHTML(
-                                formatDate(
-                                    user.last_login_at ||
-                                    user.last_sign_in_at
-                                )
-                            )}
-                        </td>
+  overlay
+    .querySelector(
+      ".admin-progress-close"
+    )
+    ?.addEventListener(
+      "click",
+      () => {
+        overlay.remove();
+      }
+    );
 
-                    </tr>
-                `
+  overlay.addEventListener(
+    "click",
+    (event) => {
+      if (
+        event.target ===
+        overlay
+      ) {
+        overlay.remove();
+      }
+    }
+  );
+}
+
+/* ============================================================
+   CREATE TASK
+   ============================================================ */
+
+function openCreateTaskModal() {
+  if (!requireAdmin()) {
+    return;
+  }
+
+  showElement(
+    $("createTaskModal"),
+    true
+  );
+}
+
+function closeCreateTaskModal() {
+  showElement(
+    $("createTaskModal"),
+    false
+  );
+}
+
+async function createTask(
+  event
+) {
+  event.preventDefault();
+
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return;
+
+  const title =
+    $("taskTitle")
+      ?.value
+      ?.trim();
+
+  const workType =
+    $("taskShape")
+      ?.value
+      ?.trim();
+
+  const duration =
+    number(
+      $("taskDuration")
+        ?.value,
+      0
+    );
+
+  const pay =
+    number(
+      $("taskPay")
+        ?.value,
+      0
+    );
+
+  const file =
+    $("taskMediaInput")
+      ?.files?.[0];
+
+  if (
+    !title ||
+    !workType
+  ) {
+    toast(
+      "Enter a task title and work type.",
+      "warning"
+    );
+
+    return;
+  }
+
+  try {
+    let mediaPath =
+      null;
+
+    /*
+     * Optional direct upload.
+     */
+    if (file) {
+      const bucket =
+        APP_CONFIG?.buckets
+          ?.taskMedia ||
+        "task-media";
+
+      const extension =
+        file.name.includes(".")
+          ? file.name
+              .split(".")
+              .pop()
+              .toLowerCase()
+          : "bin";
+
+      const path =
+        `admin-created/${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2)}.${extension}`;
+
+      const {
+        error:
+          uploadError,
+      } = await client.storage
+        .from(bucket)
+        .upload(
+          path,
+          file,
+          {
+            upsert:
+              false,
+            contentType:
+              file.type ||
+              undefined,
+          }
+        );
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      mediaPath =
+        path;
+    }
+
+    const workRole =
+      roleForWorkType(
+        workType
+      ) ||
+      "";
+
+    const payload = {
+      title,
+      work_type:
+        workType,
+      work_role:
+        normalizeRole(
+          workRole
+        ),
+      status:
+        "available",
+      created_by:
+        adminState.user?.id ||
+        null,
+      expected_duration:
+        duration,
+      duration,
+      pay,
+      media_path:
+        mediaPath,
+      metadata: {
+        created_by_admin:
+          true,
+      },
+    };
+
+    let {
+      data,
+      error,
+    } = await client
+      .from(TABLES.tasks)
+      .insert(payload)
+      .select()
+      .single();
+
+    /*
+     * Fallback for older schemas.
+     */
+    if (error) {
+      const fallback = {
+        title,
+        work_type:
+          workType,
+        status:
+          "available",
+        created_by:
+          adminState.user?.id ||
+          null,
+        duration,
+        pay,
+        media_path:
+          mediaPath,
+      };
+
+      const retry =
+        await client
+          .from(TABLES.tasks)
+          .insert(
+            fallback
+          )
+          .select()
+          .single();
+
+      data =
+        retry.data;
+
+      error =
+        retry.error;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    await logAdminActivity(
+      "task_created",
+      null,
+      {
+        task_id:
+          data?.id ||
+          null,
+        title,
+        work_type:
+          workType,
+      }
+    );
+
+    closeCreateTaskModal();
+
+    $("createTaskForm")
+      ?.reset();
+
+    toast(
+      "Task created successfully.",
+      "success"
+    );
+
+    await loadTasks();
+  } catch (error) {
+    console.error(
+      "createTask:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to create task.",
+      "error"
+    );
+  }
+}
+
+/* ============================================================
+   PAY RATES
+   ============================================================ */
+
+async function loadPayRates() {
+  if (!requireAdmin()) {
+    return [];
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return [];
+
+  try {
+    const {
+      data,
+      error,
+    } = await client
+      .from(
+        TABLES.payRates
+      )
+      .select("*")
+      .order(
+        "created_at",
+        {
+          ascending:
+            false,
+        }
+      );
+
+    if (error) {
+      /*
+       * Missing table is not fatal.
+       */
+      console.warn(
+        "Pay rates table:",
+        error.message
+      );
+
+      adminState.payRates =
+        [];
+
+      renderPayRates();
+
+      return [];
+    }
+
+    adminState.payRates =
+      data || [];
+
+    renderPayRates();
+
+    return adminState.payRates;
+  } catch (error) {
+    console.warn(
+      "loadPayRates:",
+      error
+    );
+
+    adminState.payRates =
+      [];
+
+    renderPayRates();
+
+    return [];
+  }
+}
+
+function renderPayRates() {
+  const container =
+    $("payRatesList");
+
+  if (!container) return;
+
+  const rates =
+    adminState.payRates || [];
+
+  const workers =
+    adminState.users.filter(
+      (user) =>
+        isCoworkerRole(
+          normalizeRole(
+            user.role
+          )
+        ) ||
+        isReviewer(
+          normalizeRole(
+            user.role
+          )
+        )
+    );
+
+  let html = "";
+
+  if (rates.length) {
+    html += rates
+      .map(
+        (rate) => `
+          <div
+            class="admin-rate-row"
+            data-rate-id="${escapeHTML(
+              rate.id
+            )}"
+          >
+            <div>
+              <strong>
+                ${escapeHTML(
+                  rate.work_type ||
+                    rate.annotation_type ||
+                    "All work"
+                )}
+              </strong>
+
+              <span>
+                ${escapeHTML(
+                  roleLabel(
+                    normalizeRole(
+                      rate.role ||
+                        rate.work_role ||
+                        ""
+                    )
+                  )
+                )}
+              </span>
+            </div>
+
+            <div>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value="${escapeHTML(
+                  rate.rate ??
+                    rate.amount ??
+                    0
+                )}"
+                data-rate-value="${escapeHTML(
+                  rate.id
+                )}"
+              />
+            </div>
+
+            <button
+              type="button"
+              class="admin-action-btn save-rate"
+              data-rate-id="${escapeHTML(
+                rate.id
+              )}"
+            >
+              Save
+            </button>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  html += `
+    <div class="admin-rate-create">
+      <h3>
+        Add pay rate
+      </h3>
+
+      <div class="admin-rate-form">
+        <select
+          id="newRateRole"
+        >
+          ${roleOptions(
+            "coworker_2d_box"
+          )}
+        </select>
+
+        <input
+          id="newRateWorkType"
+          type="text"
+          placeholder="Work type"
+        />
+
+        <input
+          id="newRateAmount"
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Rate"
+        />
+
+        <button
+          type="button"
+          class="admin-action-btn"
+          id="createRateButton"
+        >
+          Add rate
+        </button>
+      </div>
+    </div>
+  `;
+
+  if (
+    !rates.length
+  ) {
+    html =
+      `
+        <div class="empty-state">
+          No pay rates have been configured.
+        </div>
+      ` +
+      html;
+  }
+
+  container.innerHTML =
+    html;
+
+  container
+    .querySelectorAll(
+      ".save-rate"
+    )
+    .forEach(
+      (button) => {
+        button.addEventListener(
+          "click",
+          () =>
+            savePayRate(
+              button.dataset.rateId
             )
-            .join("");
+        );
+      }
+    );
 
+  $("createRateButton")
+    ?.addEventListener(
+      "click",
+      createPayRate
+    );
+}
 
-    const tasksHTML =
-        adminState.tasks
-            .map(
-                task => `
-                    <tr>
+async function createPayRate() {
+  if (!requireAdmin()) {
+    return;
+  }
 
-                        <td>
-                            ${escapeHTML(
-                                task.title ||
-                                task.name ||
-                                "Task"
-                            )}
-                        </td>
+  const client =
+    getClient();
 
-                        <td>
-                            ${escapeHTML(
-                                task.work_type ||
-                                task.shape ||
-                                task.task_type ||
-                                ""
-                            )}
-                        </td>
+  if (!client) return;
 
-                        <td>
-                            ${escapeHTML(
-                                roleLabel(
-                                    normalizeRole(
-                                        task.work_role
-                                    )
-                                )
-                            )}
-                        </td>
+  const role =
+    normalizeRole(
+      $("newRateRole")
+        ?.value
+    );
 
-                        <td>
-                            ${escapeHTML(
-                                task.duration ??
-                                task.estimated_minutes ??
-                                ""
-                            )}
-                        </td>
+  const workType =
+    $("newRateWorkType")
+      ?.value
+      ?.trim();
 
-                        <td>
-                            ${escapeHTML(
-                                formatMoney(
-                                    task.pay ??
-                                    task.reward ??
-                                    0
-                                )
-                            )}
-                        </td>
+  const amount =
+    number(
+      $("newRateAmount")
+        ?.value,
+      0
+    );
 
-                        <td>
-                            ${escapeHTML(
-                                task.status ||
-                                ""
-                            )}
-                        </td>
+  if (
+    !role ||
+    amount <= 0
+  ) {
+    toast(
+      "Enter a valid role and rate.",
+      "warning"
+    );
 
-                        <td>
-                            ${escapeHTML(
-                                task.assigned_to ||
-                                task.claimed_by ||
-                                "Unassigned"
-                            )}
-                        </td>
+    return;
+  }
 
-                    </tr>
-                `
+  try {
+    const payload = {
+      role,
+      work_role:
+        role,
+      work_type:
+        workType ||
+        null,
+      rate:
+        amount,
+      amount,
+      created_by:
+        adminState.user?.id ||
+        null,
+    };
+
+    let {
+      error,
+    } = await client
+      .from(
+        TABLES.payRates
+      )
+      .insert(payload);
+
+    if (error) {
+      const retry =
+        await client
+          .from(
+            TABLES.payRates
+          )
+          .insert({
+            role,
+            work_type:
+              workType ||
+              null,
+            rate:
+              amount,
+          });
+
+      error =
+        retry.error;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    toast(
+      "Pay rate added.",
+      "success"
+    );
+
+    await loadPayRates();
+  } catch (error) {
+    console.error(
+      "createPayRate:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to create pay rate.",
+      "error"
+    );
+  }
+}
+
+async function savePayRate(
+  rateId
+) {
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return;
+
+  const input =
+    document.querySelector(
+      `[data-rate-value="${CSS.escape(
+        rateId
+      )}"]`
+    );
+
+  const amount =
+    number(
+      input?.value,
+      0
+    );
+
+  if (amount < 0) {
+    toast(
+      "Rate cannot be negative.",
+      "warning"
+    );
+
+    return;
+  }
+
+  try {
+    let {
+      error,
+    } = await client
+      .from(
+        TABLES.payRates
+      )
+      .update({
+        rate:
+          amount,
+        amount,
+          updated_at:
+            new Date().toISOString(),
+      })
+      .eq(
+        "id",
+        rateId
+      );
+
+    if (error) {
+      const retry =
+        await client
+          .from(
+            TABLES.payRates
+          )
+          .update({
+            rate:
+              amount,
+          })
+          .eq(
+            "id",
+            rateId
+          );
+
+      error =
+        retry.error;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    toast(
+      "Pay rate updated.",
+      "success"
+    );
+
+    await loadPayRates();
+  } catch (error) {
+    console.error(
+      "savePayRate:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to update pay rate.",
+      "error"
+    );
+  }
+}
+
+function bindRateActions() {
+  // Dynamic rate buttons are bound when rendered.
+}
+
+/* ============================================================
+   PAYMENTS
+   ============================================================ */
+
+async function loadPayments() {
+  if (!requireAdmin()) {
+    return [];
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return [];
+
+  try {
+    const {
+      data,
+      error,
+    } = await client
+      .from(
+        TABLES.payments
+      )
+      .select("*")
+      .order(
+        "created_at",
+        {
+          ascending:
+            false,
+        }
+      );
+
+    if (error) {
+      console.warn(
+        "Payments table:",
+        error.message
+      );
+
+      adminState.payments =
+        [];
+
+      renderPayments();
+
+      return [];
+    }
+
+    adminState.payments =
+      data || [];
+
+    calculateStats();
+    renderPayments();
+
+    return adminState.payments;
+  } catch (error) {
+    console.warn(
+      "loadPayments:",
+      error
+    );
+
+    adminState.payments =
+      [];
+
+    renderPayments();
+
+    return [];
+  }
+}
+
+function paymentUser(
+  payment
+) {
+  return adminState.users.find(
+    (user) =>
+      user.id ===
+        payment.user_id ||
+      user.id ===
+        payment.worker_id ||
+      user.id ===
+        payment.coworker_id
+  );
+}
+
+function renderPayments() {
+  const container =
+    $("paymentsList");
+
+  if (!container) return;
+
+  const payments =
+    adminState.payments || [];
+
+  if (!payments.length) {
+    container.innerHTML =
+      `
+        <div class="empty-state">
+          No payment records found.
+        </div>
+      `;
+
+    return;
+  }
+
+  container.innerHTML =
+    payments
+      .map(
+        (payment) => {
+          const user =
+            paymentUser(
+              payment
+            );
+
+          const paid =
+            payment.paid ===
+              true ||
+            payment.status ===
+              "paid";
+
+          const amount =
+            payment.amount ??
+            payment.pay ??
+            payment.total ??
+            0;
+
+          return `
+            <div
+              class="admin-payment-row"
+              data-payment-id="${escapeHTML(
+                payment.id
+              )}"
+            >
+              <div>
+                <strong>
+                  ${escapeHTML(
+                    user?.full_name ||
+                      user?.email ||
+                      payment.user_email ||
+                      "Unknown user"
+                  )}
+                </strong>
+
+                <span>
+                  ${escapeHTML(
+                    user?.email ||
+                      payment.user_email ||
+                      ""
+                  )}
+                </span>
+              </div>
+
+              <div>
+                <strong>
+                  ${formatMoney(
+                    amount
+                  )}
+                </strong>
+
+                <small>
+                  ${escapeHTML(
+                    payment.currency ||
+                      ""
+                  )}
+                </small>
+              </div>
+
+              <div>
+                <span
+                  class="status-badge ${
+                    paid
+                      ? "status-active"
+                      : "status-pending"
+                  }"
+                >
+                  ${
+                    paid
+                      ? "Paid"
+                      : "Not paid"
+                  }
+                </span>
+              </div>
+
+              <div>
+                ${
+                  paid
+                    ? `
+                      <button
+                        type="button"
+                        class="admin-action-btn payment-unpaid"
+                        data-payment-id="${escapeHTML(
+                          payment.id
+                        )}"
+                      >
+                        Mark unpaid
+                      </button>
+                    `
+                    : `
+                      <button
+                        type="button"
+                        class="admin-action-btn payment-paid"
+                        data-payment-id="${escapeHTML(
+                          payment.id
+                        )}"
+                      >
+                        Mark paid
+                      </button>
+                    `
+                }
+              </div>
+            </div>
+          `;
+        }
+      )
+      .join("");
+}
+
+function bindPaymentActions() {
+  $("paymentsList")
+    ?.addEventListener(
+      "click",
+      async (event) => {
+        const paid =
+          event.target.closest(
+            ".payment-paid"
+          );
+
+        if (paid) {
+          await setPaymentStatus(
+            paid.dataset.paymentId,
+            true
+          );
+
+          return;
+        }
+
+        const unpaid =
+          event.target.closest(
+            ".payment-unpaid"
+          );
+
+        if (unpaid) {
+          await setPaymentStatus(
+            unpaid.dataset.paymentId,
+            false
+          );
+        }
+      }
+    );
+}
+
+async function setPaymentStatus(
+  paymentId,
+  paid
+) {
+  if (!requireAdmin()) {
+    return false;
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return false;
+
+  try {
+    const payload = {
+      paid,
+      status:
+        paid
+          ? "paid"
+          : "unpaid",
+      paid_at:
+        paid
+          ? new Date().toISOString()
+          : null,
+      paid_by:
+        paid
+          ? adminState.user?.id ||
+            null
+          : null,
+    };
+
+    let {
+      error,
+    } = await client
+      .from(
+        TABLES.payments
+      )
+      .update(payload)
+      .eq(
+        "id",
+        paymentId
+      );
+
+    if (error) {
+      const retry =
+        await client
+          .from(
+            TABLES.payments
+          )
+          .update({
+            paid,
+            status:
+              paid
+                ? "paid"
+                : "unpaid",
+          })
+          .eq(
+            "id",
+            paymentId
+          );
+
+      error =
+        retry.error;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    await logAdminActivity(
+      paid
+        ? "payment_paid"
+        : "payment_unpaid",
+      null,
+      {
+        payment_id:
+          paymentId,
+      }
+    );
+
+    toast(
+      paid
+        ? "Payment marked as paid."
+        : "Payment marked as unpaid.",
+      "success"
+    );
+
+    await loadPayments();
+
+    return true;
+  } catch (error) {
+    console.error(
+      "setPaymentStatus:",
+      error
+    );
+
+    toast(
+      error.message ||
+        "Unable to update payment.",
+      "error"
+    );
+
+    return false;
+  }
+}
+
+/* ============================================================
+   ACTIVITY
+   ============================================================ */
+
+async function loadActivity() {
+  if (!requireAdmin()) {
+    return [];
+  }
+
+  const client =
+    getClient();
+
+  if (!client) return [];
+
+  try {
+    const {
+      data,
+      error,
+    } = await client
+      .from(
+        TABLES.activities
+      )
+      .select("*")
+      .order(
+        "created_at",
+        {
+          ascending:
+            false,
+        }
+      )
+      .limit(200);
+
+    if (error) {
+      console.warn(
+        "Activity table:",
+        error.message
+      );
+
+      adminState.activities =
+        [];
+
+      renderActivity();
+
+      return [];
+    }
+
+    adminState.activities =
+      data || [];
+
+    renderActivity();
+    renderRecentActivity();
+
+    return adminState.activities;
+  } catch (error) {
+    console.warn(
+      "loadActivity:",
+      error
+    );
+
+    adminState.activities =
+      [];
+
+    renderActivity();
+
+    return [];
+  }
+}
+
+function activityAction(
+  activity
+) {
+  return (
+    activity.action ||
+    activity.event ||
+    activity.event_type ||
+    "activity"
+  );
+}
+
+function activityUser(
+  activity
+) {
+  return adminState.users.find(
+    (user) =>
+      user.id ===
+        activity.user_id ||
+      user.id ===
+        activity.actor_id
+  );
+}
+
+function renderActivity() {
+  const container =
+    $("activityList");
+
+  if (!container) return;
+
+  const activities =
+    adminState.activities || [];
+
+  if (!activities.length) {
+    container.innerHTML =
+      `
+        <div class="empty-state">
+          No activity records found.
+        </div>
+      `;
+
+    return;
+  }
+
+  container.innerHTML =
+    activities
+      .map(
+        (activity) => {
+          const user =
+            activityUser(
+              activity
+            );
+
+          return `
+            <div class="admin-activity-row">
+              <div>
+                <strong>
+                  ${escapeHTML(
+                    activityAction(
+                      activity
+                    )
+                  )}
+                </strong>
+
+                <span>
+                  ${escapeHTML(
+                    user?.full_name ||
+                      user?.email ||
+                      activity.email ||
+                      "System"
+                  )}
+                </span>
+              </div>
+
+              <div>
+                ${escapeHTML(
+                  formatDate(
+                    activity.created_at ||
+                      activity.timestamp
+                  )
+                )}
+              </div>
+
+              <div>
+                <code>
+                  ${escapeHTML(
+                    JSON.stringify(
+                      activity.metadata ||
+                        activity.details ||
+                        {}
+                    )
+                  )}
+                </code>
+              </div>
+            </div>
+          `;
+        }
+      )
+      .join("");
+}
+
+function renderRecentActivity() {
+  const container =
+    $("adminRecentActivity");
+
+  if (!container) return;
+
+  const activities =
+    (
+      adminState.activities ||
+      []
+    ).slice(
+      0,
+      10
+    );
+
+  if (!activities.length) {
+    container.innerHTML =
+      `
+        <div class="empty-state">
+          No recent activity.
+        </div>
+      `;
+
+    return;
+  }
+
+  container.innerHTML =
+    activities
+      .map(
+        (activity) => {
+          const user =
+            activityUser(
+              activity
+            );
+
+          return `
+            <div class="admin-recent-item">
+              <strong>
+                ${escapeHTML(
+                  activityAction(
+                    activity
+                  )
+                )}
+              </strong>
+
+              <span>
+                ${escapeHTML(
+                  user?.full_name ||
+                    user?.email ||
+                    "System"
+                )}
+              </span>
+
+              <small>
+                ${escapeHTML(
+                  formatDate(
+                    activity.created_at ||
+                      activity.timestamp
+                  )
+                )}
+              </small>
+            </div>
+          `;
+        }
+      )
+      .join("");
+}
+
+/* ============================================================
+   ADMIN ACTIVITY WRAPPER
+   ============================================================ */
+
+async function logAdminActivity(
+  action,
+  targetUserId = null,
+  metadata = {}
+) {
+  const actor =
+    adminState.user?.id ||
+    null;
+
+  try {
+    await logActivity(
+      action,
+      {
+        actor_id:
+          actor,
+        user_id:
+          targetUserId,
+        metadata,
+      }
+    );
+  } catch {
+    /*
+     * Compatibility fallback for projects
+     * where logActivity has a different
+     * signature.
+     */
+    try {
+      const client =
+        getClient();
+
+      if (!client) return;
+
+      await client
+        .from(
+          TABLES.activities
+        )
+        .insert({
+          user_id:
+            targetUserId ||
+            actor,
+          actor_id:
+            actor,
+          action,
+          metadata,
+          created_at:
+            new Date().toISOString(),
+        });
+    } catch (error) {
+      console.warn(
+        "Unable to write admin activity:",
+        error
+      );
+    }
+  }
+}
+
+/* ============================================================
+   TASK PROGRESS DASHBOARD
+   ============================================================ */
+
+function renderTaskProgress() {
+  const container =
+    $("adminTaskProgress");
+
+  if (!container) return;
+
+  const tasks =
+    adminState.tasks || [];
+
+  if (!tasks.length) {
+    container.innerHTML =
+      `
+        <div class="empty-state">
+          No task progress available.
+        </div>
+      `;
+
+    return;
+  }
+
+  const counts = {
+    available: 0,
+    claimed: 0,
+    submitted: 0,
+    approved: 0,
+    skipped: 0,
+  };
+
+  tasks.forEach(
+    (task) => {
+      const status =
+        normalizeTaskStatus(
+          task.status
+        );
+
+      if (
+        status ===
+          "available" ||
+        status ===
+          "open"
+      ) {
+        counts.available++;
+      } else if (
+        status ===
+          "claimed" ||
+        status ===
+          "in_progress"
+      ) {
+        counts.claimed++;
+      } else if (
+        status ===
+          "submitted" ||
+        status ===
+          "review"
+      ) {
+        counts.submitted++;
+      } else if (
+        status ===
+        "approved"
+      ) {
+        counts.approved++;
+      } else if (
+        status ===
+        "skipped"
+      ) {
+        counts.skipped++;
+      }
+    }
+  );
+
+  const total =
+    tasks.length || 1;
+
+  container.innerHTML = `
+    <div class="admin-progress-summary">
+      ${progressBar(
+        "Available",
+        counts.available,
+        total
+      )}
+
+      ${progressBar(
+        "Claimed / In progress",
+        counts.claimed,
+        total
+      )}
+
+      ${progressBar(
+        "Submitted",
+        counts.submitted,
+        total
+      )}
+
+      ${progressBar(
+        "Approved",
+        counts.approved,
+        total
+      )}
+
+      ${progressBar(
+        "Skipped",
+        counts.skipped,
+        total
+      )}
+    </div>
+  `;
+}
+
+function progressBar(
+  label,
+  count,
+  total
+) {
+  const percent =
+    Math.round(
+      (count / total) *
+        100
+    );
+
+  return `
+    <div class="admin-progress-bar-row">
+      <div>
+        <span>
+          ${escapeHTML(
+            label
+          )}
+        </span>
+
+        <strong>
+          ${count}
+        </strong>
+      </div>
+
+      <div class="admin-progress-track">
+        <div
+          class="admin-progress-fill"
+          style="width:${percent}%"
+        ></div>
+      </div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   EXPORT
+   ============================================================ */
+
+function renderExportPage() {
+  const output =
+    $("adminExportOutput");
+
+  if (!output) return;
+
+  const rows =
+    buildExportRows();
+
+  adminState.exportRows =
+    rows;
+
+  if (!rows.length) {
+    output.textContent =
+      "No work data available for export.";
+
+    return;
+  }
+
+  output.textContent =
+    JSON.stringify(
+      rows,
+      null,
+      2
+    );
+}
+
+function buildExportRows() {
+  const users =
+    adminState.users || [];
+
+  const tasks =
+    adminState.tasks || [];
+
+  const payments =
+    adminState.payments || [];
+
+  const rows = [];
+
+  tasks.forEach(
+    (task) => {
+      const worker =
+        users.find(
+          (user) =>
+            user.id ===
+              task.assigned_to ||
+            user.id ===
+              task.claimed_by
+        );
+
+      const payment =
+        payments.find(
+          (item) =>
+            item.task_id ===
+            task.id
+        );
+
+      rows.push({
+        task_id:
+          task.id,
+
+        title:
+          taskTitle(task),
+
+        work_type:
+          taskWorkType(task),
+
+        work_role:
+          taskWorkRole(task),
+
+        annotation_type:
+          annotationTypeForRole(
+            taskWorkRole(
+              task
             )
-            .join("");
+          ) || "",
 
+        status:
+          normalizeTaskStatus(
+            task.status
+          ),
 
-    const paymentsHTML =
-        adminState.payments
-            .map(
-                payment => `
-                    <tr>
+        worker_id:
+          worker?.id ||
+          "",
 
-                        <td>
-                            ${escapeHTML(
-                                payment.email ||
-                                payment.user_email ||
-                                payment.user_id ||
-                                ""
-                            )}
-                        </td>
+        worker_name:
+          worker?.full_name ||
+          "",
 
-                        <td>
-                            ${escapeHTML(
-                                formatMoney(
-                                    payment.amount ??
-                                    payment.total ??
-                                    payment.pay ??
-                                    0
-                                )
-                            )}
-                        </td>
+        worker_email:
+          worker?.email ||
+          "",
 
-                        <td>
-                            ${escapeHTML(
-                                payment.status ||
-                                ""
-                            )}
-                        </td>
+        created_at:
+          task.created_at ||
+          "",
 
-                        <td>
-                            ${escapeHTML(
-                                formatDate(
-                                    payment.created_at
-                                )
-                            )}
-                        </td>
+        updated_at:
+          task.updated_at ||
+          "",
 
-                    </tr>
-                `
+        duration:
+          taskDuration(task),
+
+        pay:
+          taskPay(task),
+
+        payment_status:
+          payment?.status ||
+          (
+            payment?.paid
+              ? "paid"
+              : ""
+          ),
+
+        paid_at:
+          payment?.paid_at ||
+          "",
+      });
+    }
+  );
+
+  return rows;
+}
+
+function rowsToCSV(
+  rows
+) {
+  if (!rows.length) {
+    return "";
+  }
+
+  const columns =
+    [
+      ...new Set(
+        rows.flatMap(
+          (row) =>
+            Object.keys(
+              row
             )
-            .join("");
+        )
+      ),
+    ];
 
+  const escapeCSV =
+    (value) => {
+      const string =
+        String(
+          value ?? ""
+        );
 
-    const activityHTML =
-        adminState.activity
-            .map(
-                activity => `
-                    <tr>
+      return `"${string.replaceAll(
+        '"',
+        '""'
+      )}"`;
+    };
 
-                        <td>
-                            ${escapeHTML(
-                                activity.action ||
-                                activity.event ||
-                                activity.type ||
-                                ""
-                            )}
-                        </td>
+  return [
+    columns
+      .map(escapeCSV)
+      .join(","),
+    ...rows.map(
+      (row) =>
+        columns
+          .map(
+            (column) =>
+              escapeCSV(
+                row[
+                  column
+                ]
+              )
+          )
+          .join(",")
+    ),
+  ].join("\n");
+}
 
-                        <td>
-                            ${escapeHTML(
-                                activity.email ||
-                                activity.user_email ||
-                                activity.user_id ||
-                                ""
-                            )}
-                        </td>
+function exportCSV() {
+  if (!requireAdmin()) {
+    return;
+  }
 
-                        <td>
-                            ${escapeHTML(
-                                activity.description ||
-                                activity.message ||
-                                (
-                                    activity.details
-                                        ? JSON.stringify(
-                                            activity.details
-                                        )
-                                        : ""
-                                )
-                            )}
-                        </td>
+  const rows =
+    buildExportRows();
 
-                        <td>
-                            ${escapeHTML(
-                                formatDate(
-                                    activity.created_at ||
-                                    activity.timestamp
-                                )
-                            )}
-                        </td>
+  if (!rows.length) {
+    toast(
+      "There is no work to export.",
+      "warning"
+    );
 
-                    </tr>
-                `
+    return;
+  }
+
+  const csv =
+    rowsToCSV(rows);
+
+  const blob =
+    new Blob(
+      [csv],
+      {
+        type:
+          "text/csv;charset=utf-8;",
+      }
+    );
+
+  const url =
+    URL.createObjectURL(
+      blob
+    );
+
+  const link =
+    document.createElement(
+      "a"
+    );
+
+  link.href =
+    url;
+
+  link.download =
+    `work-export-${Date.now()}.csv`;
+
+  document.body.appendChild(
+    link
+  );
+
+  link.click();
+
+  link.remove();
+
+  URL.revokeObjectURL(
+    url
+  );
+
+  logAdminActivity(
+    "work_export_csv",
+    null,
+    {
+      rows:
+        rows.length,
+    }
+  );
+
+  toast(
+    "CSV export created.",
+    "success"
+  );
+}
+
+function exportHTML() {
+  if (!requireAdmin()) {
+    return;
+  }
+
+  const rows =
+    buildExportRows();
+
+  if (!rows.length) {
+    toast(
+      "There is no work to export.",
+      "warning"
+    );
+
+    return;
+  }
+
+  const columns =
+    [
+      ...new Set(
+        rows.flatMap(
+          (row) =>
+            Object.keys(
+              row
             )
-            .join("");
+        )
+      ),
+    ];
 
+  const htmlRows =
+    rows
+      .map(
+        (row) =>
+          `
+            <tr>
+              ${columns
+                .map(
+                  (column) =>
+                    `<td>${escapeHTML(
+                      row[
+                        column
+                      ]
+                    )}</td>`
+                )
+                .join("")}
+            </tr>
+          `
+      )
+      .join("");
 
-    const html =
-`
+  const html = `
 <!DOCTYPE html>
-
-<html lang="en">
-
+<html>
 <head>
-
 <meta charset="UTF-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
-
-<title>
-    Annotation AI - Admin Export
-</title>
-
+<title>Annotation Work Export</title>
 <style>
-
 body {
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
-    margin:
-        30px;
-
-    line-height:
-        1.5;
-
-    color:
-        #111;
+  font-family: Arial, sans-serif;
+  margin: 30px;
 }
-
-h1 {
-    margin-bottom:
-        5px;
-}
-
-h2 {
-    margin-top:
-        35px;
-}
-
 table {
-    width:
-        100%;
-
-    border-collapse:
-        collapse;
-
-    margin-top:
-        12px;
+  width: 100%;
+  border-collapse: collapse;
 }
-
-th,
-td {
-    border:
-        1px solid #ccc;
-
-    padding:
-        8px;
-
-    text-align:
-        left;
-
-    vertical-align:
-        top;
+th, td {
+  border: 1px solid #ccc;
+  padding: 8px;
+  text-align: left;
 }
-
 th {
-    font-weight:
-        700;
+  font-weight: 700;
 }
-
-.small {
-    color:
-        #666;
-
-    font-size:
-        13px;
-}
-
 </style>
-
 </head>
-
 <body>
-
-<h1>
-    Annotation AI Admin Export
-</h1>
-
-<div class="small">
-    Generated:
-    ${escapeHTML(now)}
-</div>
-
-
-<h2>
-    Users
-</h2>
-
+<h1>Annotation Work Export</h1>
+<p>
+Generated:
+${escapeHTML(
+  new Date().toLocaleString()
+)}
+</p>
 <table>
-
 <thead>
-
 <tr>
-
-<th>
-    Name
-</th>
-
-<th>
-    Email
-</th>
-
-<th>
-    Role
-</th>
-
-<th>
-    Status
-</th>
-
-<th>
-    Joined
-</th>
-
-<th>
-    Last Login
-</th>
-
+${columns
+  .map(
+    (column) =>
+      `<th>${escapeHTML(
+        column
+      )}</th>`
+  )
+  .join("")}
 </tr>
-
 </thead>
-
 <tbody>
-
-${usersHTML}
-
+${htmlRows}
 </tbody>
-
 </table>
-
-
-<h2>
-    Tasks
-</h2>
-
-<table>
-
-<thead>
-
-<tr>
-
-<th>
-    Title
-</th>
-
-<th>
-    Type
-</th>
-
-<th>
-    Work Role
-</th>
-
-<th>
-    Duration
-</th>
-
-<th>
-    Pay
-</th>
-
-<th>
-    Status
-</th>
-
-<th>
-    Assigned To
-</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-${tasksHTML}
-
-</tbody>
-
-</table>
-
-
-<h2>
-    Payments
-</h2>
-
-<table>
-
-<thead>
-
-<tr>
-
-<th>
-    User
-</th>
-
-<th>
-    Amount
-</th>
-
-<th>
-    Status
-</th>
-
-<th>
-    Date
-</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-${paymentsHTML}
-
-</tbody>
-
-</table>
-
-
-<h2>
-    Activity
-</h2>
-
-<table>
-
-<thead>
-
-<tr>
-
-<th>
-    Action
-</th>
-
-<th>
-    User
-</th>
-
-<th>
-    Details
-</th>
-
-<th>
-    Date
-</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-${activityHTML}
-
-</tbody>
-
-</table>
-
 </body>
-
 </html>
 `;
 
-
-    downloadTextFile(
-        "annotation-ai-admin.html",
-        html,
-        "text/html;charset=utf-8"
+  const blob =
+    new Blob(
+      [html],
+      {
+        type:
+          "text/html;charset=utf-8;",
+      }
     );
 
+  const url =
+    URL.createObjectURL(
+      blob
+    );
 
-    showAdminToast(
-        "Admin HTML export downloaded.",
-        "success"
+  const link =
+    document.createElement(
+      "a"
+    );
+
+  link.href =
+    url;
+
+  link.download =
+    `work-export-${Date.now()}.html`;
+
+  document.body.appendChild(
+    link
+  );
+
+  link.click();
+
+  link.remove();
+
+  URL.revokeObjectURL(
+    url
+  );
+
+  logAdminActivity(
+    "work_export_html",
+    null,
+    {
+      rows:
+        rows.length,
+    }
+  );
+
+  toast(
+    "HTML export created.",
+    "success"
+  );
+}
+
+function bindExportActions() {
+  $("copyAdminCSV")
+    ?.addEventListener(
+      "click",
+      async () => {
+        if (
+          !requireAdmin()
+        ) {
+          return;
+        }
+
+        const rows =
+          buildExportRows();
+
+        const csv =
+          rowsToCSV(rows);
+
+        try {
+          await navigator.clipboard.writeText(
+            csv
+          );
+
+          toast(
+            "CSV copied to clipboard.",
+            "success"
+          );
+        } catch {
+          const output =
+            $("adminExportOutput");
+
+          if (output) {
+            output.textContent =
+              csv;
+          }
+
+          toast(
+            "CSV generated below. Clipboard permission was unavailable.",
+            "info"
+          );
+        }
+      }
+    );
+
+  $("downloadAdminHTML")
+    ?.addEventListener(
+      "click",
+      exportHTML
     );
 }
 
+/* ============================================================
+   ADMIN BUTTONS
+   ============================================================ */
+
+function bindAdminButtons() {
+  /*
+   * Some HTML versions may contain
+   * explicit refresh buttons.
+   */
+
+  document.addEventListener(
+    "click",
+    async (event) => {
+      const refresh =
+        event.target.closest(
+          "[data-admin-refresh]"
+        );
+
+      if (!refresh) return;
+
+      const target =
+        refresh.dataset
+          .adminRefresh;
+
+      if (
+        target ===
+        "users"
+      ) {
+        await loadUsers();
+      }
+
+      if (
+        target ===
+        "tasks"
+      ) {
+        await loadTasks();
+      }
+
+      if (
+        target ===
+        "payments"
+      ) {
+        await loadPayments();
+      }
+
+      if (
+        target ===
+        "rates"
+      ) {
+        await loadPayRates();
+      }
+
+      if (
+        target ===
+        "activity"
+      ) {
+        await loadActivity();
+      }
+    }
+  );
+}
 
 /* ============================================================
-   PUBLIC API
-============================================================ */
+   USER SEARCH / FILTER
+   ============================================================ */
 
-export {
+function addUserSearchIfPresent() {
+  const input =
+    $("adminUserSearch");
 
-    ADMIN_CONFIG,
+  if (!input) return;
 
-    adminState,
+  input.addEventListener(
+    "input",
+    () => {
+      const query =
+        input.value
+          .trim()
+          .toLowerCase();
 
-    initializeAdmin,
+      qsa(
+        ".admin-user-row"
+      ).forEach(
+        (row) => {
+          const visible =
+            row.textContent
+              .toLowerCase()
+              .includes(
+                query
+              );
 
-    openAdminCenter,
-
-    closeAdminCenter,
-
-    refreshAdminCenter,
-
-    createAdminTask,
-
-    updateAdminTask,
-
-    deleteAdminTask,
-
-    approveUser,
-
-    kickUser,
-
-    disableUser,
-
-    enableUser,
-
-    updateUserRole,
-
-    createCoworker,
-
-    removeCoworker,
-
-    assignTask,
-
-    reassignTask,
-
-    unassignTask,
-
-    loadAdminTasks,
-
-    loadAdminUsers,
-
-    loadAdminCoworkers,
-
-    loadAdminPayments,
-
-    loadAdminPayRates,
-
-    loadAdminActivity,
-
-    renderAdminTasks,
-
-    renderAdminUsers,
-
-    renderAdminCoworkers,
-
-    renderAdminPayments,
-
-    renderAdminPayRates,
-
-    renderAdminActivity,
-
-    renderAdminOverview,
-
-    exportAdminCSV,
-
-    exportAdminHTML,
-
-    updatePaymentStatus,
-
-    isAdminUser,
-
-    activateAdminTab
-};
-
+          showElement(
+            row,
+            visible
+          );
+        }
+      );
+    }
+  );
+}
 
 /* ============================================================
-   GLOBAL COMPATIBILITY
-============================================================ */
+   TASK SEARCH
+   ============================================================ */
 
-window.ADMIN_CONFIG =
-    ADMIN_CONFIG;
+function addTaskSearchIfPresent() {
+  const input =
+    $("adminTaskSearch");
 
-window.adminState =
-    adminState;
+  if (!input) return;
 
-window.isAdminUser =
-    isAdminUser;
+  input.addEventListener(
+    "input",
+    () => {
+      const query =
+        input.value
+          .trim()
+          .toLowerCase();
 
-window.openAdminCenter =
-    openAdminCenter;
+      qsa(
+        ".admin-task-row"
+      ).forEach(
+        (row) => {
+          const visible =
+            row.textContent
+              .toLowerCase()
+              .includes(
+                query
+              );
 
-window.closeAdminCenter =
-    closeAdminCenter;
-
-window.refreshAdminCenter =
-    refreshAdminCenter;
-
-window.createAdminTask =
-    createAdminTask;
-
-window.updateAdminTask =
-    updateAdminTask;
-
-window.deleteAdminTask =
-    deleteAdminTask;
-
-window.approveUser =
-    approveUser;
-
-window.kickUser =
-    kickUser;
-
-window.disableUser =
-    disableUser;
-
-window.enableUser =
-    enableUser;
-
-window.updateUserRole =
-    updateUserRole;
-
-window.createCoworker =
-    createCoworker;
-
-window.removeCoworker =
-    removeCoworker;
-
-window.assignTask =
-    assignTask;
-
-window.reassignTask =
-    reassignTask;
-
-window.unassignTask =
-    unassignTask;
-
-window.exportAdminCSV =
-    exportAdminCSV;
-
-window.exportAdminHTML =
-    exportAdminHTML;
-
-window.updatePaymentStatus =
-    updatePaymentStatus;
-
-window.activateAdminTab =
-    activateAdminTab;
-
+          showElement(
+            row,
+            visible
+          );
+        }
+      );
+    }
+  );
+}
 
 /* ============================================================
-   STARTUP
-============================================================ */
+   ADMIN KEYBOARD SHORTCUTS
+   ============================================================ */
+
+function bindKeyboard() {
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      const modal =
+        $("adminModal");
+
+      if (
+        !modal ||
+        modal.hidden
+      ) {
+        return;
+      }
+
+      if (
+        event.key ===
+        "Escape"
+      ) {
+        closeAdminCenter();
+      }
+    }
+  );
+}
+
+/* ============================================================
+   ROLE / TASK ROUTING HELPERS
+   ============================================================ */
+
+export function getWorkerRoleForTask(
+  task
+) {
+  return taskWorkRole(
+    task
+  );
+}
+
+export function getAnnotationTypeForTask(
+  task
+) {
+  const role =
+    taskWorkRole(
+      task
+    );
+
+  return (
+    annotationTypeForRole(
+      role
+    ) || ""
+  );
+}
+
+export function getAvailableWorkers(
+  role = ""
+) {
+  const normalized =
+    normalizeRole(
+      role
+    );
+
+  return adminState.users.filter(
+    (user) => {
+      if (
+        user.active ===
+        false
+      ) {
+        return false;
+      }
+
+      const workerRole =
+        normalizeRole(
+          user.role
+        );
+
+      if (
+        isAdminRole(
+          workerRole
+        ) ||
+        isStaffRole(
+          workerRole
+        )
+      ) {
+        return true;
+      }
+
+      if (!normalized) {
+        return isCoworkerRole(
+          workerRole
+        );
+      }
+
+      return (
+        workerRole ===
+        normalized
+      );
+    }
+  );
+}
+
+/* ============================================================
+   REFRESH ALL
+   ============================================================ */
+
+export async function refreshAdminData() {
+  if (!requireAdmin()) {
+    return;
+  }
+
+  adminState.loading =
+    true;
+
+  try {
+    await Promise.all([
+      loadUsers(),
+      loadTasks(),
+      loadPayments(),
+      loadPayRates(),
+      loadActivity(),
+    ]);
+
+    calculateStats();
+
+    showAdminPage(
+      adminState.currentPage
+    );
+  } finally {
+    adminState.loading =
+      false;
+  }
+}
+
+/* ============================================================
+   AUTH EVENT HANDLING
+   ============================================================ */
+
+function bindAuthEvents() {
+  window.addEventListener(
+    "authStateChanged",
+    async () => {
+      adminState.user =
+        getCurrentUser?.() ||
+        null;
+
+      adminState.profile =
+        getCurrentProfile?.() ||
+        null;
+
+      adminState.role =
+        normalizeRole(
+          getRole?.() ||
+            adminState.profile
+              ?.role ||
+            ""
+        );
+
+      hideAdminFromNonAdmin();
+
+      if (
+        isCurrentUserAdmin()
+      ) {
+        if (
+          $("adminModal") &&
+          !$("adminModal").hidden
+        ) {
+          await refreshAdminData();
+        }
+      } else {
+        closeAdminCenter();
+      }
+    }
+  );
+}
+
+/* ============================================================
+   ADMIN PROFILE DATA
+   ============================================================ */
+
+function refreshAdminIdentity() {
+  adminState.user =
+    getCurrentUser?.() ||
+    getSupabaseUser?.() ||
+    adminState.user;
+
+  adminState.profile =
+    getCurrentProfile?.() ||
+    adminState.profile;
+
+  adminState.role =
+    normalizeRole(
+      getRole?.() ||
+        adminState.profile?.role ||
+        ""
+    );
+}
+
+/* ============================================================
+   STAFF RESTRICTIONS
+   ============================================================ */
+
+function applyStaffRestrictions() {
+  const role =
+    normalizeRole(
+      adminState.role
+    );
+
+  /*
+   * Staff receive broad operational
+   * access, but only administrators can
+   * manage administrators / create admin
+   * accounts / kick the default admin.
+   */
+
+  if (
+    isAdminRole(role)
+  ) {
+    return;
+  }
+
+  if (
+    isStaffRole(role)
+  ) {
+    qsa(
+      '[data-admin-only="true"]'
+    ).forEach(
+      (element) => {
+        element.disabled =
+          true;
+
+        element.title =
+          "Administrator permission required.";
+      }
+    );
+  }
+}
+
+/* ============================================================
+   INITIALIZE AFTER DOM
+   ============================================================ */
+
+async function boot() {
+  refreshAdminIdentity();
+
+  await initializeAdmin();
+
+  addUserSearchIfPresent();
+  addTaskSearchIfPresent();
+
+  bindKeyboard();
+  bindAuthEvents();
+
+  applyStaffRestrictions();
+}
 
 if (
-    document.readyState ===
-    "loading"
+  document.readyState ===
+  "loading"
 ) {
-
-    document.addEventListener(
-        "DOMContentLoaded",
-        () => {
-            initializeAdmin();
-        },
-        {
-            once:
-                true
-        }
-    );
-
+  document.addEventListener(
+    "DOMContentLoaded",
+    boot,
+    {
+      once: true,
+    }
+  );
 } else {
-
-    initializeAdmin();
+  boot();
 }
+
+/* ============================================================
+   WINDOW COMPATIBILITY
+   ============================================================ */
+
+window.admin = {
+  state:
+    adminState,
+
+  open:
+    openAdminCenter,
+
+  close:
+    closeAdminCenter,
+
+  showPage:
+    showAdminPage,
+
+  loadUsers,
+
+  loadTasks,
+
+  loadPayments,
+
+  loadPayRates,
+
+  loadActivity,
+
+  refresh:
+    refreshAdminData,
+
+  assignTask,
+
+  approveTask,
+
+  updateUserRole,
+
+  getWorkerRoleForTask,
+
+  getAnnotationTypeForTask,
+
+  getAvailableWorkers,
+
+  exportCSV,
+
+  exportHTML,
+};
+
+/* ============================================================
+   EXPORTS
+   ============================================================ */
+
+export {
+  loadCoworkers,
+  createCoworker,
+  createTask,
+  approveTask,
+  loadPayRates,
+  loadPayments,
+  loadActivity,
+  renderUsers,
+  renderTasks,
+  renderPayments,
+  renderActivity,
+  exportCSV,
+  exportHTML,
+};
+
+console.log(
+  "Admin module loaded."
+);
